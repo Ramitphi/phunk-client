@@ -115,7 +115,7 @@ function castCard(c) {
     c.author.username && c.author.display_name ? h("span", { class: "muted" }, handle(c.author)) : null,
     h("span", { class: "muted", title: new Date(c.ts * 1000).toLocaleString() }, ago(c.ts)),
     h("span", { class: "chip app", title: "app that signed this cast" }, c.app),
-    c.channel ? h("span", { class: "chip channel", title: c.channel_url }, c.channel) : null,
+    c.channel ? h("span", { class: "chip channel", title: c.channel_url }, c.channel.includes("://") ? c.channel : `/${c.channel}`) : null,
   );
   const replyTo = c.reply_to
     ? h("div", { class: "muted small" }, `replying to ${c.reply_to.username ? "@" + c.reply_to.username : "fid " + c.reply_to.fid}`)
@@ -282,7 +282,7 @@ function renderPeople() {
       h("div", { class: "meta" }, h("span", { class: "name" }, p.display_name || handle(p)),
         p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null),
       p.bio ? h("div", { class: "bio" }, p.bio.length > 140 ? p.bio.slice(0, 140) + "…" : p.bio) : null,
-      h("ul", {}, p.reasons.map((r) => h("li", {}, r))),
+      h("ul", {}, p.reasons.map((r) => h("li", { class: /^Followed by/.test(r) ? "graph" : /^Both active in/.test(r) ? "channel" : null }, r))),
       h("div", { class: "row" }, follow, nope)));
   }));
 }
