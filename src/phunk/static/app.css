@@ -116,13 +116,21 @@ textarea { width: 100%; resize: vertical; }
 }
 .banner code, .toast code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 
-.tabs { display: none; }
-.layout {
-  max-width: 1080px; margin: 0 auto; padding: 12px 16px;
-  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px;
-  align-items: start;
+.layout { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
+.lookup { margin: 4px 0 10px; }
+.tabs {
+  display: flex; position: sticky; top: 53px; z-index: 4;
+  background: var(--bg); border-bottom: 1px solid var(--line); margin-bottom: 12px;
 }
-#people-pane { position: sticky; top: 64px; max-height: calc(100vh - 76px); overflow-y: auto; border-radius: 12px; }
+.tabs button {
+  flex: 1; background: transparent; color: var(--muted);
+  border-radius: 0; border-bottom: 2px solid transparent; font-weight: 600;
+}
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.pane:not(.active) { display: none; }
+#casts-pane > .row.between { margin-bottom: 12px; }
+.summary p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.foot { margin-top: 4px; }
 
 .card {
   background: var(--card);
@@ -167,11 +175,29 @@ textarea { width: 100%; resize: vertical; }
 .reply-box { margin-top: 8px; }
 .reply-box .row { margin-top: 6px; }
 
-.person { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
-.person:first-child { border-top: 0; }
-.person .bio { font-size: 13px; margin: 2px 0; overflow-wrap: anywhere; }
-.person ul { margin: 4px 0 6px; padding-left: 18px; font-size: 13px; color: var(--muted); }
-.person .row { gap: 6px; }
+.person { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; }
+.person .avatar { width: 48px; height: 48px; }
+.person .bio { font-size: 13px; margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.why { margin: 10px 0 8px; font-size: 14px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.kind {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+}
+.kind.reconnect { background: #fde7d9; color: #8a3b0c; }
+.kind.circle { background: var(--chip); color: var(--chip-text); }
+.kind.bridge { background: #dcf3e4; color: #1d6b3a; }
+:root[data-theme="dark"] .kind.reconnect { background: #3a2416; color: #f7b98f; }
+:root[data-theme="dark"] .kind.bridge { background: #15301f; color: #8ee0aa; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .kind.reconnect { background: #3a2416; color: #f7b98f; }
+  :root:not([data-theme="light"]) .kind.bridge { background: #15301f; color: #8ee0aa; }
+}
+.previews { display: grid; gap: 6px; margin-bottom: 10px; }
+.preview { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; }
+.preview .text { margin: 2px 0 0; font-size: 14px; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.pactions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pactions button { min-height: 34px; }
 
 .empty { text-align: center; padding: 28px 12px; color: var(--muted); }
 .spinner {
@@ -192,17 +218,9 @@ textarea { width: 100%; resize: vertical; }
 }
 
 @media (max-width: 800px) {
-  .layout { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
-  .tabs {
-    display: flex; position: sticky; top: 53px; z-index: 4;
-    background: var(--card); border-bottom: 1px solid var(--line);
-  }
-  .tabs button {
-    flex: 1; background: transparent; color: var(--muted);
-    border-radius: 0; border-bottom: 2px solid transparent;
-  }
-  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .pane:not(.active) { display: none; }
-  #people-pane { position: static; max-height: none; overflow: visible; }
+  .layout { padding: 10px 12px 28px; }
   .banner { margin: 10px 12px 0; }
+  .person { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
+  .person .avatar { width: 40px; height: 40px; }
+  .lookup label { width: 100%; }
 }

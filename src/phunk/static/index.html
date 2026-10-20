@@ -17,21 +17,36 @@
 
 <div id="banner" class="banner" hidden></div>
 
-<nav class="tabs" role="tablist">
-  <button type="button" role="tab" data-tab="feed" aria-selected="true">Feed</button>
-  <button type="button" role="tab" data-tab="people" aria-selected="false">People to follow</button>
-</nav>
-
 <main class="layout">
-  <section id="feed-pane" class="pane" data-pane="feed">
-    <form id="browse" class="card row" hidden>
-      <label for="browse-name">Browse as</label>
-      <input id="browse-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
-      <button type="submit">Go</button>
-    </form>
+  <form id="lookup" class="lookup row">
+    <label for="lookup-name" class="muted small">See anyone's people</label>
+    <input id="lookup-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
+    <button type="submit" class="small">Look up</button>
+    <button type="button" id="lookup-me" class="ghost small" hidden>Back to me</button>
+  </form>
 
-    <form id="compose" class="card compose">
-      <textarea id="compose-text" rows="3" maxlength="1024" placeholder="What's happening?"></textarea>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="people" aria-selected="true">People</button>
+    <button type="button" role="tab" data-tab="casts" aria-selected="false">Casts</button>
+  </nav>
+
+  <section id="people-pane" class="pane" data-pane="people">
+    <div id="summary" class="summary"></div>
+    <div id="people" class="people" aria-live="polite"></div>
+    <div class="row between muted small foot">
+      <span id="people-status"></span>
+      <button id="people-refresh" type="button" class="ghost small">Refresh</button>
+    </div>
+  </section>
+
+  <section id="casts-pane" class="pane" data-pane="casts">
+    <div class="row between">
+      <button id="new-cast" type="button">New cast</button>
+      <span id="feed-status" class="muted small"></span>
+    </div>
+
+    <form id="compose" class="card compose" hidden>
+      <textarea id="compose-text" rows="3" maxlength="1024" placeholder="What's happening?" aria-label="New cast"></textarea>
       <div class="row">
         <input id="compose-channel" placeholder="channel (optional): name or URL" autocomplete="off" autocapitalize="off">
         <span id="compose-count" class="muted small">0/1024</span>
@@ -49,7 +64,6 @@
           <option value="168">7 days</option>
         </select>
         <button id="refresh" type="button" class="ghost">Refresh</button>
-        <span id="feed-status" class="muted small"></span>
       </div>
       <details id="apps-box">
         <summary>Apps <span id="apps-summary" class="muted small"></span></summary>
@@ -65,17 +79,6 @@
     <div id="feed" class="feed" aria-live="polite"></div>
     <button id="more" type="button" class="wide" hidden>Load more</button>
   </section>
-
-  <aside id="people-pane" class="pane" data-pane="people">
-    <div class="card">
-      <div class="row between">
-        <h2>People to follow</h2>
-        <button id="people-refresh" type="button" class="ghost small">Refresh</button>
-      </div>
-      <p class="muted small">From the node only: who the people you follow follow, and who posts in your channels.</p>
-      <div id="people"></div>
-    </div>
-  </aside>
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>

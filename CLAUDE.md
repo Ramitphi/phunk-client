@@ -15,6 +15,7 @@ licensed, public.
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
+| `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |
 | `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
