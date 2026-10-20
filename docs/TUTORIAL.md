@@ -1,4 +1,4 @@
-# Reading Farcaster from a node
+# Reading and writing Farcaster through a node
 
 Farcaster is a protocol, not an app. Every cast, like, follow and profile
 lives on a network of nodes (Snapchain, and Hypersnap, a compatible build),
@@ -6,7 +6,8 @@ and any node will hand you all of it over plain HTTP. You don't need an API
 key, an indexer or a paid plan.
 
 This tutorial goes from a single `curl` up to working out which app someone
-used to sign each cast. Each step shows the raw endpoint first, then the same
+used to sign each cast, and then to posting through a node with your own
+app key. Each step shows the raw endpoint first, then the same
 thing with `phunk-client`.
 
 **You'll need:** Python 3.10+ and a terminal. Allow about 30 minutes.
@@ -19,6 +20,7 @@ thing with `phunk-client`.
 6. [Channels, replies, reactions](#6-channels-replies-reactions)
 7. [Which app signed this?](#7-which-app-signed-this)
 8. [Being a good guest, and running your own node](#8-being-a-good-guest-and-running-your-own-node)
+9. [Writing: app keys, casts, follows](#9-writing-app-keys-casts-follows)
 
 ---
 
@@ -399,3 +401,157 @@ phunk apps dwr
 That's the whole stack: a node, an HTTP API, and a few traps to avoid.
 Everything else (feeds, search, recommendations, graph analysis) is
 something you can build on top.
+
+---
+
+## 9. Writing: app keys, casts, follows
+
+Reading needs nothing. Writing needs two keys and one rule.
+
+* The **custody key** owns the account. It is the Ethereum key behind the
+  seed phrase, and the IdRegistry contract maps its address to the fid.
+* An **app key** (also called a signer) is an Ed25519 key that signs every
+  cast, like and follow. Each app you sign in to holds its own app key. That
+  is how step 7 could tell apps apart.
+* The rule: a node only accepts a message signed by an app key the account
+  has added.
+
+Adding an app key used to cost a transaction on Optimism. Snapchain now
+accepts **gasless** app keys: you send a `KEY_ADD` message to a node,
+authorized by a signature from the custody key. No gas, no wallet balance,
+and it lands in about a second. A gasless key is:
+
+* **scoped**: it may only sign the message types listed when it was added.
+* **short-lived but sliding**: it expires after its TTL (at most 90 days),
+  and every message it signs pushes the expiry out again.
+* **unreplayable**: each `KEY_ADD` carries a nonce that must beat the fid's
+  `currentUserNonce`.
+
+The account also needs storage, which it rents on-chain. An account that
+already posts has it.
+
+> **Seed phrases are dangerous.** Whoever has one owns the account. Try
+> this with a **test account**, never your main one. Only paste a seed
+> phrase into software from developers you trust (this one is under 400
+> lines: `src/phunk/write.py`). Apps that can should ask a wallet to sign
+> the authorization instead, so the phrase never leaves it.
+
+Install the writing extras (Ed25519, BLAKE3 and Ethereum signing):
+
+```sh
+pip install 'phunk-client[write]'
+```
+
+### Add an app key
+
+From the command line. The phrase is read hidden, used once in memory, and
+dropped. Only the new app key is saved, readable by you alone:
+
+```sh
+phunk --node http://<your-node>:3381 key add
+```
+
+In Python:
+
+```python
+import asyncio, getpass
+from phunk import Hub
+from phunk.write import Custody, add_app_key
+
+async def main():
+    custody = Custody.from_mnemonic(getpass.getpass("seed phrase: "))
+    async with Hub("http://<your-node>:3381") as hub:
+        fid, key = await add_app_key(hub, custody)
+    print(fid, key.public_hex)
+    # key.private_hex signs from now on. Store it like a password.
+
+asyncio.run(main())
+```
+
+Under the hood, `add_app_key`:
+
+1. looks up the fid that the custody address owns
+   (`GET /v1/onChainIdRegistryEventByAddress?address=0x...`)
+2. reads `currentUserNonce` (`GET /v1/signersByFid?fid=...`)
+3. signs two EIP-712 messages with the custody key, both on the domain
+   `{name: "Farcaster KeyAdd", version: "1", chainId: 1}`:
+   a `SignedKeyRequest` (which app is asking for the key) and a `KeyAdd`
+   (the fid, key, scopes, TTL, nonce and deadline)
+4. wraps them in a `KEY_ADD` message signed by the **new** key, which proves
+   you hold it, and posts it to `/v1/submitMessage`
+
+Afterwards the key shows up in `GET /v1/signersByFid` with
+`"source": "SIGNER_SOURCE_OFFCHAIN"`.
+
+### Post, like, follow
+
+```sh
+phunk post "hello from my own node"
+phunk post "gm" --channel https://farcaster.xyz/~/channel/dev
+phunk like 3:0x<cast hash>
+phunk follow dwr
+```
+
+```python
+from phunk.write import AppKey, Writer
+
+async with Hub("http://<your-node>:3381") as hub:
+    me = Writer(hub, fid, AppKey.from_hex(private_hex))
+    h = await me.cast("hello @dwr")            # "@dwr" becomes a real mention
+    await me.cast("same here", reply_to=(3, "0x<cast hash>"))
+    await me.like(3, "0x<cast hash>")
+    await me.follow(3)
+```
+
+Each call builds one message, signs it and posts it to
+`/v1/submitMessage`. You can post to your own **read node**: read nodes
+accept writes and forward them to the validators, which put them in a block.
+
+### What a message is
+
+A message is protobuf. `MessageData` holds the type, fid, timestamp
+(Farcaster time), network and the body. Its hash is the first 20 bytes of
+BLAKE3 over those bytes, and the app key signs the hash:
+
+```python
+from phunk import proto
+from phunk.write import AppKey
+
+key = AppKey.generate()
+msg = key.sign(proto.CAST_ADD, 3, proto.CastAddBody(text="just testing").encode())
+```
+
+To check a message without posting it, ask the node to validate it. This
+checks the encoding, hash and signature only, so it works even for a key
+nobody added. Nothing is submitted:
+
+```python
+async with Hub() as hub:
+    print((await hub.validate(msg))["valid"])   # True
+```
+
+`phunk`'s messages match the official TypeScript library byte for byte; the
+tests check this (`tests/test_write.py`).
+
+### Your feed, from any app
+
+A node has no feed endpoint. A client builds one: read the latest casts of
+everyone you follow and merge them. Because every cast says which key signed
+it, you can include or hide casts by app:
+
+```sh
+phunk feed                         # who your key's fid follows, last 24h
+phunk feed dwr --hide warpcast     # anyone's, minus one app
+phunk feed --only fireflyapp,"own key"
+```
+
+```python
+casts = await hub.feed(fid)                    # newest first
+apps = [await hub.app_of(c) for c in casts]    # who signed each
+```
+
+### When you're done
+
+You don't have to revoke a key you stop using: its TTL runs out. To revoke
+it sooner, send a `KEY_REMOVE` signed by the custody key (or by the key
+itself); see the Snapchain guide on writing messages.

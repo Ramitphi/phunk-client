@@ -189,3 +189,31 @@ def test_which_app_signed():
     assert keys[1].self_requested
     assert apps == [9152, 1, 777, None]
     assert n_key_calls == 4  # keys() once, then key_apps() once; cached after that
+
+
+def test_feed_merges_followed_accounts_newest_first_and_skips_future():
+    from phunk.timeutil import from_datetime
+    import datetime as dt
+
+    now = from_datetime(dt.datetime.now(dt.timezone.utc))
+
+    def cast(h, fid, ts):
+        return msg(h, fid=fid, ts=ts, castAddBody={"text": h})
+
+    links = {"messages": [msg("l1", fid=9, linkBody={"targetFid": 1}), msg("l2", fid=9, linkBody={"targetFid": 2})]}
+    casts = {
+        "1": [cast("future", 1, now + 3600), cast("a-new", 1, now - 10), cast("a-old", 1, now - 5000)],
+        "2": [cast("b-mid", 2, now - 100), cast("b-ancient", 2, now - 10 * 86400)],
+    }
+
+    async def links_handler(request):
+        return web.json_response(links)
+
+    async def casts_handler(request):
+        return web.json_response({"messages": casts[request.query["fid"]]})
+
+    async def test(hub, calls):
+        return [c.hash for c in await hub.feed(9, limit=10)]
+
+    got = run({"/v1/linksByFid": links_handler, "/v1/castsByFid": casts_handler}, test)
+    assert got == ["a-new", "b-mid", "a-old"]

@@ -1,8 +1,8 @@
 # phunk-client
 
-Read Farcaster straight from a Snapchain / Hypersnap node. No API key, no
-Neynar, no indexer: just the node's HTTP API, with the paging quirks handled
-for you.
+Read and write Farcaster straight from a Snapchain / Hypersnap node. No API
+key, no Neynar, no indexer: just the node's HTTP API, with the paging quirks
+handled for you, and gasless app keys for posting.
 
 ```python
 import asyncio
@@ -27,7 +27,12 @@ New to reading from a node? **[Start with the tutorial](docs/TUTORIAL.md).**
 pip install git+https://github.com/Ramitphi/phunk-client
 ```
 
-Python 3.10+. The only dependency is `aiohttp`.
+Python 3.10+. Reading needs only `aiohttp`. Writing needs three more
+(Ed25519, BLAKE3 and Ethereum signing):
+
+```sh
+pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
+```
 
 ## What you get
 
@@ -45,6 +50,10 @@ Python 3.10+. The only dependency is `aiohttp`.
 | `reactions(fid, "like" \| "recast")` | `/v1/reactionsByFid` | `Reaction`s |
 | `keys(fid)` | `/v1/onChainEventsByFid`, `/v1/signersByFid` | `Key`s: every key add / remove, and the app that asked for each |
 | `app_of(message)`, `app_name(app_fid)` | | which app signed a cast, like or follow |
+| `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
+| `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
+| `signers(fid)` | `/v1/signersByFid` | active keys and `currentUserNonce` |
+| `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
 | `info()` | `/v1/info` | node stats |
 | `get(path, params)`, `pages(...)`, `collect(...)` | any | raw JSON, for endpoints not wrapped here |
 
@@ -55,6 +64,37 @@ node's original message in `.raw`.
 `decode_key_request(metadata)` decodes the ABI-encoded
 `SignedKeyRequestMetadata` from a key ADD event on its own, if you're reading
 on-chain events some other way.
+
+## Writing
+
+`phunk.write` adds an app key to an account and posts with it. The key is
+**gasless**: a `KEY_ADD` message authorized by the custody key's EIP-712
+signature. No transaction, no gas.
+
+```python
+from phunk.write import Custody, Writer, add_app_key
+
+custody = Custody.from_mnemonic(phrase)          # test account; never saved
+async with Hub("http://localhost:3381") as hub:
+    fid, key = await add_app_key(hub, custody)   # key.private_hex: keep it secret
+    me = Writer(hub, fid, key)
+    h = await me.cast("hello from my own node")
+    await me.like(3, "0x...")
+    await me.follow(3)
+```
+
+| `Writer` method | Message |
+|---|---|
+| `cast(text, reply_to=, channel=, embeds=)` | `CAST_ADD`, with `@name` turned into mentions |
+| `delete_cast(hash)` | `CAST_REMOVE` |
+| `like`, `unlike`, `recast`, `unrecast` `(fid, hash)` | `REACTION_ADD` / `REACTION_REMOVE` |
+| `follow(fid)`, `unfollow(fid)` | `LINK_ADD` / `LINK_REMOVE` |
+| `set_profile(display=, bio=, pfp=, url=)` | `USER_DATA_ADD` |
+
+Messages match the official TypeScript library byte for byte
+(`tests/test_write.py` checks against its output). Read the
+[tutorial's writing chapter](docs/TUTORIAL.md#9-writing-app-keys-casts-follows)
+first: it covers what a seed phrase can do and how to keep it safe.
 
 ## Node quirks it handles
 
@@ -81,6 +121,13 @@ phunk whois dwr
 phunk casts dwr -n 5
 phunk apps dwr          # which apps signed their last 200 casts
 phunk --node http://localhost:3381 info
+
+# writing (pip install 'phunk-client[write]')
+phunk key add                      # seed phrase in (hidden), app key saved to ~/.config/phunk
+phunk post "hello" --channel https://farcaster.xyz/~/channel/dev
+phunk like 3:0x<hash>
+phunk follow dwr
+phunk feed --hide warpcast         # who you follow, filtered by app
 ```
 
 ## Which node
@@ -98,7 +145,7 @@ for example your own Snapchain at `http://localhost:3381`.
 ## Tests
 
 ```sh
-pip install -e '.[test]'
+pip install -e '.[test,write]'
 pytest                    # offline, against a fake node
 PHUNK_LIVE=1 pytest       # also hits the real default node
 ```

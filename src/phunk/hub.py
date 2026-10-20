@@ -136,6 +136,46 @@ class Hub:
             await asyncio.sleep(min(30, 2**attempt) * (0.5 + random.random()))
         raise NodeError(f"{path}: out of retries")
 
+    async def post(self, path: str, body: bytes) -> dict:
+        """POST protobuf bytes to an endpoint and return its JSON.
+
+        Retries timeouts, 429 and 5xx (resubmitting a message is harmless:
+        it has the same hash). Any other error raises NodeError with the
+        node's explanation."""
+        if self.session is None:
+            raise RuntimeError("use `async with Hub(...) as hub:` or call `await hub.__aenter__()`")
+        url = f"{self.url}{path}"
+        headers = {"Content-Type": "application/octet-stream"}
+        for attempt in range(self.retries):
+            await self.limiter.acquire()
+            async with self.sem:
+                self.requests += 1
+                try:
+                    async with self.session.post(url, data=body, headers=headers) as r:
+                        if r.status in RETRY_STATUS:
+                            raise aiohttp.ClientResponseError(r.request_info, (), status=r.status)
+                        if r.status >= 400:
+                            text = await r.text()
+                            raise NodeError(f"{path}: HTTP {r.status}: {text[:500]}")
+                        return await r.json(content_type=None)
+                except NodeError:
+                    raise
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    self.errors += 1
+                    if attempt == self.retries - 1:
+                        raise NodeError(f"{path}: {e!r}") from e
+            await asyncio.sleep(min(30, 2**attempt) * (0.5 + random.random()))
+        raise NodeError(f"{path}: out of retries")
+
+    async def submit(self, message: bytes) -> dict:
+        """Submit a signed message (protobuf bytes). A read node forwards it
+        to the validators. Returns the message as the node sees it."""
+        return await self.post("/v1/submitMessage", message)
+
+    async def validate(self, message: bytes) -> dict:
+        """Ask the node whether a message is valid, without submitting it."""
+        return await self.post("/v1/validateMessage", message)
+
     async def pages(
         self,
         path: str,
@@ -223,6 +263,12 @@ class Hub:
     async def user_by_name(self, name: str) -> User:
         return await self.user(await self.fid_by_name(name))
 
+    async def fid_by_address(self, address: str) -> int:
+        """Custody address -> the fid it owns, from the IdRegistry events the
+        node has synced."""
+        event = await self.get("/v1/onChainIdRegistryEventByAddress", {"address": address})
+        return int(event["fid"])
+
     # -------------------------------------------------------------- graph
 
     async def following(self, fid: int, *, limit: int | None = None) -> AsyncIterator[Follow]:
@@ -249,6 +295,33 @@ class Hub:
         async for m in self.pages("/v1/castsByFid", {"fid": fid, "reverse": "true"},
                                   limit=limit, stop=self._newer_than(since)):
             yield Cast.from_message(m)
+
+    async def feed(self, fid: int, *, since: dt.datetime | int | None = None, per_account: int = 10,
+                   limit: int = 50) -> list[Cast]:
+        """Recent casts from everyone `fid` follows, newest first.
+
+        A node has no feed endpoint: a client builds the feed itself, by
+        reading each followed account's latest casts and merging them.
+        `since` defaults to 24 hours ago. Large follow lists take a while on
+        a shared node; your own node is much faster.
+        """
+        if since is None:
+            since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
+        follows = [f.target_fid async for f in self.following(fid)]
+
+        async def latest(target: int) -> list[Cast]:
+            try:
+                return [c async for c in self.casts(target, since=since, limit=per_account)]
+            except NodeError:
+                return []
+
+        batches = await asyncio.gather(*(latest(t) for t in follows))
+        # A few old messages carry timestamps in the future; they would sit on
+        # top forever. Nodes reject anything over 10 minutes ahead today.
+        cutoff = from_datetime(dt.datetime.now(dt.timezone.utc)) + 600
+        casts = sorted((c for b in batches for c in b if c.timestamp <= cutoff),
+                       key=lambda c: c.timestamp, reverse=True)
+        return casts[:limit]
 
     async def cast(self, fid: int, hash: str) -> Cast:
         """One cast by author fid and hash."""
@@ -315,6 +388,11 @@ class Hub:
                                timestamp=s.get("addedAt") or 0, onchain=False, raw=s))
         out.sort(key=lambda k: k.timestamp)
         return out
+
+    async def signers(self, fid: int) -> dict:
+        """Raw /v1/signersByFid for one page: the account's active keys, plus
+        `currentUserNonce`, which a new KEY_ADD must exceed."""
+        return await self.get("/v1/signersByFid", {"fid": fid})
 
     async def key_apps(self, fid: int) -> dict[str, int | None]:
         """{key: app fid} for every key `fid` has added. Cached per fid."""
