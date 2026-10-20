@@ -330,7 +330,7 @@ def collect_pages() -> list[Page]:
     pages = [read_page(CONTENT / "index.md", "index.html")]
 
     # docs/TUTORIAL.md is one file on GitHub. On the site, its writing chapter
-    # (the "## 9. Writing..." section) gets a page of its own.
+    # (the "## 10. Writing..." section) gets a page of its own.
     src = ROOT / "docs" / "TUTORIAL.md"
     text = src.read_text(encoding="utf-8")
     m = re.search(rf"(?m)^## {re.escape(WRITING_HEADING)}.*\n", text)
@@ -406,7 +406,7 @@ def prepare_tutorial(md: str) -> str:
     return md
 
 
-WRITING_HEADING = "9. Writing"
+WRITING_HEADING = "10. Writing"
 
 # Background links at the top of the writing page.
 WRITING_ASIDES = ["app-keys", "nodes", "seed-phrases"]

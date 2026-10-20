@@ -39,7 +39,7 @@ tells you if one goes missing.
   `scripts/node.sh` once those land on `main`.
 
 The writing page is cut from `docs/TUTORIAL.md` at the heading that starts
-with `WRITING_HEADING` in `build.py` ("9. Writing"). If that chapter is
+with `WRITING_HEADING` in `build.py` ("10. Writing"). If that chapter is
 renumbered, update the constant; the build stops if it can't find it.
 
 ## Deploying
