@@ -14,6 +14,7 @@ Hypersnap node over HTTP, plus a tutorial. MIT licensed, public.
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
+| `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py` and `test_keys.py` run offline (fake node); `test_live.py` hits the real node |
 
 ## Commands

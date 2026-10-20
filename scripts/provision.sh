@@ -5,7 +5,7 @@
 # What to rent (any provider works):
 #   - 4 or more CPU cores
 #   - 16 GB of RAM or more
-#   - 2 TB of SSD or NVMe storage (the database is about 800 GB and grows)
+#   - 2 TB of SSD or NVMe storage (the database is 500-800 GB and grows)
 #   - a public IPv4 address
 #   - Ubuntu 22.04 (24.04 also works)
 #
@@ -117,20 +117,31 @@ create_user() {
     fi
 
     home="$(getent passwd "$NODE_USER" | cut -d: -f6)"
-    if [ -s /root/.ssh/authorized_keys ]; then
-        install -d -m 0700 -o "$NODE_USER" -g "$NODE_USER" "$home/.ssh"
-        keys="$home/.ssh/authorized_keys"
-        touch "$keys"
-        # Add root's keys that the user does not have yet.
-        while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            grep -qxF -- "$key" "$keys" || printf '%s\n' "$key" >> "$keys"
-        done < /root/.ssh/authorized_keys
-        chown "$NODE_USER:$NODE_USER" "$keys"
-        chmod 0600 "$keys"
-    else
-        warn "root has no SSH keys to copy; add one to $home/.ssh/authorized_keys"
+    copy_ssh_keys "$home"
+}
+
+# Give the new user the SSH keys of root and of whoever ran sudo. Only the key
+# itself is copied: some images (AWS, for one) prefix root's keys with
+# command="echo Please login as ubuntu", which would lock the new user out.
+copy_ssh_keys() {
+    local home="$1" keys="$1/.ssh/authorized_keys" sources=() src key found=0
+    sources+=(/root/.ssh/authorized_keys)
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] && [ "$SUDO_USER" != "$NODE_USER" ]; then
+        sources+=("$(getent passwd "$SUDO_USER" | cut -d: -f6)/.ssh/authorized_keys")
     fi
+
+    install -d -m 0700 -o "$NODE_USER" -g "$NODE_USER" "$home/.ssh"
+    touch "$keys"
+    for src in "${sources[@]}"; do
+        [ -s "$src" ] || continue
+        while IFS= read -r key; do
+            found=1
+            grep -qxF -- "$key" "$keys" || printf '%s\n' "$key" >> "$keys"
+        done < <(grep -oE '(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( [^"]*)?$' "$src" || true)
+    done
+    chown "$NODE_USER:$NODE_USER" "$keys"
+    chmod 0600 "$keys"
+    [ "$found" -eq 1 ] || warn "found no SSH keys to copy; add one to $keys"
 }
 
 setup_firewall() {
