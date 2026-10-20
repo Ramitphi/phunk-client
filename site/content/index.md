@@ -13,17 +13,13 @@ Every cast, follow and profile on Farcaster lives on a network of nodes called S
 
 Three commands: get a server, start a node on it, read from the node.
 
-<!-- QUICKSTART SLOT: steps 0 and 1 come from scripts/provision.sh and
-     scripts/node.sh (branch node-scripts). Replace each PLACEHOLDER line with
-     the real command once that merges. The build warns about every
-     PLACEHOLDER still on the site. -->
-
 ::: quickstart
 ::: step
 ### Get a server
 
 ```sh
-PLACEHOLDER: provision-compute command
+# on a fresh Ubuntu server, as root
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/provision.sh | sudo bash
 ```
 
 A Linux machine with 16 GB of RAM, 4 CPU cores, 2 TB of disk and ports 3381 to 3383 open. Those are Snapchain's stated minimums.
@@ -32,7 +28,8 @@ A Linux machine with 16 GB of RAM, 4 CPU cores, 2 TB of disk and ports 3381 to 3
 ### Start a read node
 
 ```sh
-PLACEHOLDER: start-read-node command
+ssh snapchain@<server-ip>
+./node.sh start      # then ./node.sh status to watch it sync
 ```
 
 This installs Snapchain under Docker, downloads a snapshot of the network (several hundred GB, a few hours), then syncs the blocks made since. A read node follows the chain and serves the API. It does not vote on blocks. [Read nodes and validators](concepts/nodes.md) explains the difference.
