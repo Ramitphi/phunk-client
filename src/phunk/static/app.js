@@ -118,12 +118,52 @@ function handle(user) {
 }
 
 // The hosted site can't post for anyone: acting on a person or a cast opens
-// it in Farcaster instead.
+// it in Farcaster instead. Inside a Farcaster client (as a mini app) the
+// host's own screens do it: profile, cast, and the composer.
 const FARCASTER = "https://farcaster.xyz";
+const MINIAPP_SDK = "https://esm.sh/@farcaster/miniapp-sdk@0.3.0";
 const isPublic = () => !!(state.me && state.me.public);
+let miniapp = null; // the mini app SDK, when running inside a Farcaster client
 
 function openFarcaster(path) {
+  if (miniapp) { miniapp.actions.openUrl(FARCASTER + path); return; }
   window.open(FARCASTER + path, "_blank", "noopener,noreferrer");
+}
+
+function viewProfile(user) {
+  if (miniapp) return miniapp.actions.viewProfile({ fid: Number(user.fid) });
+  openFarcaster(profilePath(user));
+}
+
+function viewCast(c) {
+  if (miniapp) return miniapp.actions.viewCast({ hash: c.hash, authorUsername: c.author && c.author.username || undefined });
+  openFarcaster(castPath(c));
+}
+
+// Reply in the host's composer when we can; on the web, open the cast.
+function replyTo(c, text) {
+  if (miniapp) return miniapp.actions.composeCast({ text: text || "", parent: { type: "cast", hash: c.hash } });
+  openFarcaster(castPath(c));
+}
+
+function compose(text, channel) {
+  if (miniapp) {
+    const opts = {};
+    if (text) opts.text = text;
+    if (channel && !channel.includes("://")) opts.channelKey = channel.replace(/^\//, "");
+    return miniapp.actions.composeCast(opts);
+  }
+  openFarcaster(composePath(text, channel));
+}
+
+// Load the SDK only where a Farcaster client could be the host: in a frame
+// or a phone app's web view. Same check the SDK itself starts with.
+async function startMiniApp() {
+  if (!(window.ReactNativeWebView || window.parent !== window)) return null;
+  try {
+    const { sdk } = await import(MINIAPP_SDK);
+    return (await sdk.isInMiniApp()) ? sdk : null;
+  } catch { return null; }
 }
 
 function profilePath(user) {
@@ -180,7 +220,7 @@ function castCard(c) {
   const toggle = (kind) => {
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (isPublic()) return openFarcaster(castPath(c));
+      if (isPublic()) return viewCast(c);
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
@@ -197,7 +237,7 @@ function castCard(c) {
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
   const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
-    if (isPublic()) return openFarcaster(castPath(c));
+    if (isPublic()) return replyTo(c);
     if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -250,6 +290,11 @@ function setAllApps(show) {
 function lookupPrompt() {
   return isPublic() ? "Type your Farcaster username above to see your people."
     : "Look someone up first, for example dwr.";
+}
+
+// In the mini app, the viewer's own account, as the API's `who`.
+function selfName() {
+  return state.me.user.username || String(state.me.user.fid);
 }
 
 function canBrowse() {
@@ -330,7 +375,7 @@ function personCard(p) {
   if (p.following) follow.disabled = true;
   if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
-    if (isPublic()) return openFarcaster(profilePath(p));
+    if (isPublic()) return viewProfile(p);
     if (!canAct) return needKey();
     follow.disabled = true;
     try {
@@ -348,10 +393,7 @@ function personCard(p) {
   const body = h("div", { class: "pbody" });
 
   hi.addEventListener("click", () => {
-    if (isPublic()) {
-      return openFarcaster(latest ? castPath(latest)
-        : composePath(p.username ? `@${p.username} ` : ""));
-    }
+    if (isPublic()) return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
     if (!canAct) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -479,7 +521,7 @@ function setHours(v) {
 const narrow = () => matchMedia("(max-width: 800px)").matches;
 
 function setTab(name) {
-  if (name === "compose" && isPublic()) { openFarcaster(composePath()); return; }
+  if (name === "compose" && isPublic()) { compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
   state.tab = name;
@@ -541,7 +583,7 @@ function renderWho() {
 }
 
 function lookUp(name) {
-  state.who = (name || "").trim().replace(/^@/, "");
+  state.who = (name || "").trim().replace(/^@/, "") || (isPublic() && state.me.user ? selfName() : "");
   const url = new URL(location.href);
   if (state.who) url.searchParams.set("as", state.who); else url.searchParams.delete("as");
   history.replaceState(null, "", url);
@@ -568,12 +610,25 @@ async function init() {
     state.me = await api("/api/me");
   } catch (e) {
     $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the server: ${e.message}`));
+    startMiniApp().then((sdk) => sdk && sdk.actions.ready()); // never leave a host on its splash
     return;
   }
   if (isPublic()) {
-    if (!state.whoFromUrl) state.who = store.get("who", "");
-    $('label[for="lookup-name"]').textContent = "Your Farcaster username";
-    $("#lookup button[type=submit]").textContent = "See my people";
+    miniapp = await startMiniApp();
+    const user = miniapp ? ((await miniapp.context) || {}).user : null;
+    if (user && user.fid) {
+      // The viewer is signed in to the host: their people, no typing.
+      state.me.fid = user.fid;
+      state.me.user = { fid: user.fid, username: user.username || null, display_name: user.displayName || null,
+        pfp: user.pfpUrl || null, bio: null };
+      document.documentElement.classList.add("miniapp");
+      if (!state.whoFromUrl) state.who = selfName();
+      $('label[for="lookup-name"]').textContent = "See anyone's people";
+    } else {
+      if (!state.whoFromUrl) state.who = store.get("who", "");
+      $('label[for="lookup-name"]').textContent = "Your Farcaster username";
+      $("#lookup button[type=submit]").textContent = "See my people";
+    }
   } else if (!state.me.can_write) {
     const banner = $("#banner");
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
@@ -622,8 +677,15 @@ async function init() {
   $("#apps-none").addEventListener("click", () => setAllApps(false));
   $("#people-refresh").addEventListener("click", () => loadPeople(true));
 
+  // Inside a host, links leave through it (frames can't always open tabs).
+  document.addEventListener("click", (ev) => {
+    const a = miniapp && ev.target.closest && ev.target.closest('a[target="_blank"]');
+    if (a) { ev.preventDefault(); miniapp.actions.openUrl(a.href); }
+  });
+
   setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
+  if (miniapp) miniapp.actions.ready(); // hide the host's splash screen
 }
 
 init();

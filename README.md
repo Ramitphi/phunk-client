@@ -164,8 +164,9 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow, Say hi and Reply open Farcaster. `phunk ui --public`
-runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+a username, and Follow, Say hi and Reply open Farcaster. Inside a Farcaster
+client it is a mini app that shows your own people right away and replies
+in the client's composer. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node

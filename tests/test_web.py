@@ -109,10 +109,49 @@ def test_site_handler_over_http(site):
         server.shutdown()
 
 
-def test_static_build_copies_the_page(tmp_path):
-    subprocess.run(["sh", str(ROOT / "web" / "build.sh")], check=True, capture_output=True)
+def _png_info(path):
+    """(width, height, colour type) from a PNG's IHDR. Colour type 2 is RGB, no alpha."""
+    raw = path.read_bytes()[:26]
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+    return int.from_bytes(raw[16:20], "big"), int.from_bytes(raw[20:24], "big"), raw[25]
+
+
+def test_static_build_page_and_mini_app(monkeypatch):
+    env = {"FARCASTER_HEADER": "eyJmaWQiOjF9", "FARCASTER_PAYLOAD": "eyJkb21haW4iOiJwaHVuay5zb2NpYWwifQ",
+           "FARCASTER_SIGNATURE": "MHgxMjM0"}
+    import os
+    subprocess.run(["sh", str(ROOT / "web" / "build.sh")], check=True, capture_output=True,
+                   env={**os.environ, **env})
     out = ROOT / "web" / "_site"
-    assert (out / "index.html").read_text() == (ROOT / "src/phunk/static/index.html").read_text()
-    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js"}
     config = json.loads((ROOT / "vercel.json").read_text())
     assert config["outputDirectory"] == "web/_site"
+    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js"}
+
+    # The page, plus the mini app embed and link previews in <head>.
+    html = (out / "index.html").read_text()
+    assert html.replace("\n", "").count("</head>") == 1
+    embeds = {}
+    for name in ("fc:miniapp", "fc:frame"):
+        start = html.index(f'<meta name="{name}" content=\'') + len(f'<meta name="{name}" content=\'')
+        embeds[name] = json.loads(html[start:html.index("'>", start)])
+    embed = embeds["fc:miniapp"]
+    assert embed["version"] == "1" and len(embed["button"]["title"]) <= 32
+    assert embed["button"]["action"]["type"] == "launch_miniapp"
+    assert embeds["fc:frame"]["button"]["action"]["type"] == "launch_frame"
+    assert embed["imageUrl"] == "https://phunk.social/img/embed.png"
+
+    # The manifest: filled from the environment, every image there and the right size.
+    manifest = json.loads((out / ".well-known" / "farcaster.json").read_text())
+    assert manifest["accountAssociation"] == {"header": env["FARCASTER_HEADER"],
+                                              "payload": env["FARCASTER_PAYLOAD"],
+                                              "signature": env["FARCASTER_SIGNATURE"]}
+    app = manifest["miniapp"]
+    assert app["version"] == "1" and len(app["name"]) <= 32 and app["homeUrl"] == "https://phunk.social/"
+    assert len(app["subtitle"]) <= 30 and len(app["description"]) <= 170 and len(app["tagline"]) <= 30
+    assert len(app["ogDescription"]) <= 100 and app["canonicalDomain"] == "phunk.social"
+    assert all(t == t.lower() and " " not in t and len(t) <= 20 for t in app["tags"]) and len(app["tags"]) <= 5
+    sizes = {"icon.png": (1024, 1024), "splash.png": (200, 200), "embed.png": (1200, 800), "og.png": (1200, 630)}
+    for name, size in sizes.items():
+        assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
+    for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
+        assert (out / url.removeprefix("https://phunk.social/")).is_file(), url
