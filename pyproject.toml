@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phunk-client"
+version = "0.1.0"
+description = "Read Farcaster straight from a Snapchain / Hypersnap node. No API key, no Neynar."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.9"]
+keywords = ["farcaster", "snapchain", "hypersnap", "hub", "social graph"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: AsyncIO",
+    "Topic :: Internet",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/Ramitphi/phunk-client"
+Tutorial = "https://github.com/Ramitphi/phunk-client/blob/main/docs/TUTORIAL.md"
+
+[project.scripts]
+phunk = "phunk.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phunk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: talks to a real node (set PHUNK_LIVE=1)"]
