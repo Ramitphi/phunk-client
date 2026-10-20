@@ -23,9 +23,12 @@ const state = {
   offset: 0,
   hidden: new Set(store.get("hiddenApps", [])),
   apps: [],
-  people: [],
-  dismissed: new Set(store.sget("dismissed", [])),
+  cards: [],
+  summary: null,
+  dismissed: new Set(store.get("dismissed", [])),
   feedSeq: 0,
+  peopleSeq: 0,
+  feedLoaded: false,
 };
 
 // --------------------------------------------------------------- helpers
@@ -99,6 +102,10 @@ function handle(user) {
 }
 
 function needKey() {
+  if (state.me && state.me.can_write && !viewingSelf()) {
+    toast("You're viewing someone else's people, read-only. Press \"Back to me\" to act.", 6000);
+    return;
+  }
   toast(state.me && state.me.help ? state.me.help : "Read-only. Run `phunk key add`, then restart `phunk ui`.", 7000);
 }
 
@@ -131,7 +138,7 @@ function castCard(c) {
   const toggle = (kind) => {
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (!state.me.can_write) return needKey();
+      if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
       try {
@@ -147,7 +154,7 @@ function castCard(c) {
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
   const replyBtn = h("button", { type: "button", class: "ghost" }, "Reply");
   replyBtn.addEventListener("click", () => {
-    if (!state.me.can_write) return needKey();
+    if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
     const ta = h("textarea", { rows: "2", maxlength: "1024", placeholder: `Reply to ${handle(c.author)}`, "aria-label": "Reply" });
@@ -205,7 +212,7 @@ async function loadFeed(reset, refresh = false) {
   const more = $("#more");
   const seq = ++state.feedSeq;
   if (!canBrowse()) {
-    feed.replaceChildren(h("div", { class: "card empty" }, "Pick an account to browse as, for example dwr."));
+    feed.replaceChildren(h("div", { class: "card empty" }, "Look someone up above, for example dwr."));
     more.hidden = true;
     return;
   }
@@ -251,53 +258,146 @@ async function loadFeed(reset, refresh = false) {
 
 // ---------------------------------------------------------------- people
 
+const KIND = {
+  reconnect: ["Reconnect", "Someone you talked to"],
+  circle: ["Your circle", "Many people you follow follow them"],
+  bridge: ["Bridge", "A few mutuals, somewhere new"],
+};
+
+function viewingSelf() {
+  const me = state.me;
+  if (!state.who) return true;
+  const w = state.who.replace(/^@/, "");
+  return !!(me && me.user && (w === me.user.username || w === String(me.fid)));
+}
+
+function personCard(p) {
+  const [label, hint] = KIND[p.kind] || [p.kind, ""];
+  const canAct = state.me.can_write && viewingSelf();
+
+  const follow = h("button", { type: "button" }, p.following ? "Following" : "Follow");
+  if (p.following) follow.disabled = true;
+  follow.addEventListener("click", async () => {
+    if (!canAct) return needKey();
+    follow.disabled = true;
+    try {
+      await api("/api/follow", { fid: p.fid, action: "follow" });
+      p.following = true;
+      follow.textContent = "Following";
+      toast(`Following ${handle(p)}.`);
+    } catch (e) { toast(e.message); follow.disabled = false; }
+  });
+
+  const latest = p.latest && p.latest[0];
+  const hi = h("button", { type: "button", class: p.following ? "" : "ghost" }, "Say hi");
+  const nope = h("button", { type: "button", class: "ghost" }, "Not now");
+  const body = h("div", { class: "pbody" });
+
+  hi.addEventListener("click", () => {
+    if (!canAct) return needKey();
+    const open = body.querySelector(".reply-box");
+    if (open) { open.remove(); return; }
+    const ta = h("textarea", { rows: "2", maxlength: "1024", "aria-label": `Say hi to ${handle(p)}`,
+      placeholder: latest ? `Reply to ${handle(p)}'s latest cast` : `Mention ${handle(p)} in a new cast` });
+    if (!latest && p.username) ta.value = `@${p.username} `;
+    const send = h("button", { type: "submit" }, "Send");
+    const form = h("form", { class: "reply-box" }, ta, h("div", { class: "row" }, send));
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      if (!ta.value.trim()) return;
+      send.disabled = true;
+      try {
+        await api("/api/cast", latest ? { text: ta.value, reply_to: { fid: latest.fid, hash: latest.hash } } : { text: ta.value });
+        form.remove();
+        toast(`Sent to ${handle(p)}.`);
+      } catch (e) { toast(e.message); send.disabled = false; }
+    });
+    body.querySelector(".pactions").after(form);
+    ta.focus();
+  });
+
+  nope.addEventListener("click", () => {
+    state.dismissed.add(p.fid);
+    store.set("dismissed", [...state.dismissed]);
+    renderPeople();
+  });
+
+  const app = p.app_now
+    ? h("span", { class: "chip", title: "app that signed their latest cast" },
+      p.app_before && p.app_before !== p.app_now ? `${p.app_before} → ${p.app_now}` : p.app_now)
+    : null;
+  const head = h("div", { class: "meta" },
+    h("span", { class: "name" }, p.display_name || handle(p)),
+    p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null,
+    app);
+  const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
+    h("span", {}, p.why.join(" ")));
+  const previews = (p.latest || []).map((c) => h("div", { class: "preview" },
+    h("span", { class: "muted small" }, `${ago(c.ts)}${c.channel ? " · " + c.channel : ""}${c.app ? " · " + c.app : ""}`),
+    h("div", { class: "text clamp" }, c.text || (c.embeds && c.embeds.length ? "(a link or image)" : "(empty cast)"))));
+
+  body.append(head,
+    p.bio ? h("div", { class: "bio" }, p.bio.length > 160 ? p.bio.slice(0, 160) + "…" : p.bio) : null,
+    why,
+    previews.length ? h("div", { class: "previews" }, previews) : h("div", { class: "muted small" }, "No recent casts."),
+    h("div", { class: "pactions" }, follow, hi, nope));
+  return h("article", { class: `card person ${p.kind}` }, avatar(p), body);
+}
+
+function renderSummary() {
+  const s = state.summary;
+  const box = $("#summary");
+  if (!s) { box.replaceChildren(); return; }
+  const you = viewingSelf() ? "You" : (state.who.match(/^\d+$/) ? `fid ${state.who}` : `@${state.who.replace(/^@/, "")}`);
+  const parts = [`${you} follow${you === "You" ? "" : "s"} ${s.following} people`];
+  if (s.talked_to) parts.push(`talked with ${s.talked_to} in the last ${s.days} days`);
+  let line = parts.join(" and ") + ".";
+  const extra = [];
+  if (s.moved) extra.push(`${s.moved} of them now post from a different app`);
+  if (s.not_following) extra.push(`${s.not_following} ${you === "You" ? "you don't follow" : "they don't follow"}`);
+  if (extra.length) line += " Of those, " + extra.join("; ") + ".";
+  if (s.my_app) line += ` Posting from ${s.my_app === "own key" ? "their own key" : s.my_app}.`.replace("their own", you === "You" ? "your own" : "their own");
+  box.replaceChildren(h("p", {}, line));
+}
+
 function renderPeople() {
   const box = $("#people");
-  const shown = state.people.filter((p) => !state.dismissed.has(p.fid)).slice(0, 10);
+  const shown = state.cards.filter((c) => !state.dismissed.has(c.fid)).slice(0, 15);
+  const counts = { reconnect: 0, circle: 0, bridge: 0 };
+  for (const c of shown) counts[c.kind] = (counts[c.kind] || 0) + 1;
+  $("#people-status").textContent = shown.length
+    ? `${shown.length} people · ${counts.reconnect} reconnect, ${counts.circle} circle, ${counts.bridge} bridge` : "";
   if (!shown.length) {
-    box.replaceChildren(h("p", { class: "empty" }, state.people.length ? "No more suggestions this session." : "No suggestions yet."));
+    box.replaceChildren(h("div", { class: "card empty" },
+      state.cards.length ? "You've seen everyone for now. Refresh later." : "No one to suggest yet. Follow a few people first."));
     return;
   }
-  box.replaceChildren(...shown.map((p) => {
-    const follow = h("button", { type: "button", class: "small" }, "Follow");
-    follow.addEventListener("click", async () => {
-      if (!state.me.can_write) return needKey();
-      follow.disabled = true;
-      try {
-        await api("/api/follow", { fid: p.fid, action: "follow" });
-        state.people = state.people.filter((x) => x.fid !== p.fid);
-        renderPeople();
-        toast(`Following ${handle(p)}.`);
-      } catch (e) { toast(e.message); follow.disabled = false; }
-    });
-    const nope = h("button", { type: "button", class: "ghost small" }, "Not interested");
-    nope.addEventListener("click", () => {
-      state.dismissed.add(p.fid);
-      store.sset("dismissed", [...state.dismissed]);
-      renderPeople();
-    });
-    return h("div", { class: "person" }, avatar(p), h("div", {},
-      h("div", { class: "meta" }, h("span", { class: "name" }, p.display_name || handle(p)),
-        p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null),
-      p.bio ? h("div", { class: "bio" }, p.bio.length > 140 ? p.bio.slice(0, 140) + "…" : p.bio) : null,
-      h("ul", {}, p.reasons.map((r) => h("li", {}, r))),
-      h("div", { class: "row" }, follow, nope)));
-  }));
+  box.replaceChildren(...shown.map(personCard));
 }
 
 async function loadPeople(refresh = false) {
   const box = $("#people");
-  if (!canBrowse()) { box.replaceChildren(h("p", { class: "empty" }, "Pick an account first.")); return; }
-  box.replaceChildren(h("p", { class: "empty" }, h("span", { class: "spinner" }), "Looking at who your follows follow…"));
+  const seq = ++state.peopleSeq;
+  if (!canBrowse()) {
+    box.replaceChildren(h("div", { class: "card empty" }, "Look someone up above, for example dwr."));
+    $("#summary").replaceChildren();
+    return;
+  }
+  box.replaceChildren(h("div", { class: "card empty" }, h("span", { class: "spinner" }),
+    "Reading who you talk to, who your follows follow, and which app each person posts from. About ten seconds."));
   const q = new URLSearchParams();
   if (state.who) q.set("who", state.who);
   if (refresh) q.set("refresh", "1");
   try {
-    const d = await api(`/api/suggestions?${q}`);
-    state.people = d.people;
+    const d = await api(`/api/people?${q}`);
+    if (seq !== state.peopleSeq) return;
+    state.cards = d.cards;
+    state.summary = d.summary;
+    renderSummary();
     renderPeople();
   } catch (e) {
-    box.replaceChildren(h("p", { class: "empty" }, `Could not load suggestions: ${e.message}`));
+    if (seq !== state.peopleSeq) return;
+    box.replaceChildren(h("div", { class: "card empty" }, `Could not load people: ${e.message}`));
   }
 }
 
@@ -312,16 +412,33 @@ function applyTheme(t) {
 function setTab(name) {
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
+  if (name === "casts" && !state.feedLoaded) { state.feedLoaded = true; loadFeed(true); }
 }
 
 function renderWho() {
   const me = state.me;
   const who = $("#who");
-  if (state.who && (!me.user || state.who.replace(/^@/, "") !== me.user.username)) {
-    who.textContent = `browsing as ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")} · read-only`;
+  const self = viewingSelf();
+  if (!self) {
+    who.textContent = `viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")} · read-only`;
   } else if (me.user) {
     who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
   } else who.textContent = "read-only";
+  $("#lookup-me").hidden = self || !me.user;
+  $("#new-cast").hidden = !(me.can_write && self);
+  if (!(me.can_write && self)) $("#compose").hidden = true;
+}
+
+function lookUp(name) {
+  state.who = (name || "").trim().replace(/^@/, "");
+  const url = new URL(location.href);
+  if (state.who) url.searchParams.set("as", state.who); else url.searchParams.delete("as");
+  history.replaceState(null, "", url);
+  $("#lookup-name").value = state.who;
+  renderWho();
+  state.feedLoaded = false;
+  loadPeople();
+  if ($('.tabs button[data-tab="casts"]').getAttribute("aria-selected") === "true") { state.feedLoaded = true; loadFeed(true); }
 }
 
 async function init() {
@@ -333,46 +450,36 @@ async function init() {
     applyTheme(theme);
   });
   for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => setTab(b.dataset.tab));
-  setTab("feed");
 
   try {
     state.me = await api("/api/me");
   } catch (e) {
-    $("#feed").replaceChildren(h("div", { class: "card empty" }, `Could not reach the local server: ${e.message}`));
+    $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the local server: ${e.message}`));
     return;
   }
-  // Someone else's feed is read-only, even with a key.
-  if (state.who && state.me.can_write && state.me.user && state.who.replace(/^@/, "") !== state.me.user.username
-      && state.who !== String(state.me.fid)) state.me.can_write = false;
-
   if (!state.me.can_write) {
     const banner = $("#banner");
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
     banner.hidden = false;
-    $("#compose").hidden = true;
-    $("#browse").hidden = false;
-    $("#browse-name").value = state.who || (state.me.user && state.me.user.username) || "";
   }
+  $("#lookup-name").value = state.who;
   renderWho();
 
-  $("#browse").addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    state.who = $("#browse-name").value.trim().replace(/^@/, "");
-    const url = new URL(location.href);
-    if (state.who) url.searchParams.set("as", state.who); else url.searchParams.delete("as");
-    history.replaceState(null, "", url);
-    renderWho();
-    loadFeed(true);
-    loadPeople();
-  });
+  $("#lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("#lookup-name").value); });
+  $("#lookup-me").addEventListener("click", () => lookUp(""));
 
+  $("#new-cast").addEventListener("click", () => {
+    const c = $("#compose");
+    c.hidden = !c.hidden;
+    if (!c.hidden) $("#compose-text").focus();
+  });
   const text = $("#compose-text");
   text.addEventListener("input", () => {
     $("#compose-count").textContent = `${new TextEncoder().encode(text.value).length}/1024`;
   });
   $("#compose").addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    if (!state.me.can_write) return needKey();
+    if (!state.me.can_write || !viewingSelf()) return needKey();
     if (!text.value.trim()) return;
     const btn = $("#compose button[type=submit]");
     btn.disabled = true;
@@ -380,6 +487,7 @@ async function init() {
       await api("/api/cast", { text: text.value, channel: $("#compose-channel").value });
       text.value = "";
       $("#compose-count").textContent = "0/1024";
+      $("#compose").hidden = true;
       toast("Cast sent.");
     } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   });
@@ -399,7 +507,7 @@ async function init() {
   $("#apps-none").addEventListener("click", () => setAllApps(false));
   $("#people-refresh").addEventListener("click", () => loadPeople(true));
 
-  loadFeed(true);
+  setTab("people");
   loadPeople();
 }
 
