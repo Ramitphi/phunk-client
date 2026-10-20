@@ -10,7 +10,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">phunk</div>
+  <div class="brand"><span class="logo" aria-hidden="true">φ</span>phunk</div>
   <div id="who" class="who"></div>
   <button id="theme" class="ghost small" type="button">Theme: auto</button>
 </header>
@@ -27,7 +27,7 @@
     <form id="browse" class="card row" hidden>
       <label for="browse-name">Browse as</label>
       <input id="browse-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
-      <button type="submit">Go</button>
+      <button type="submit" class="cta">Go</button>
     </form>
 
     <form id="compose" class="card compose">
@@ -35,19 +35,19 @@
       <div class="row">
         <input id="compose-channel" placeholder="channel (optional): name or URL" autocomplete="off" autocapitalize="off">
         <span id="compose-count" class="muted small">0/1024</span>
-        <button type="submit">Cast</button>
+        <button type="submit" class="cta">Cast</button>
       </div>
     </form>
 
     <div class="card controls">
       <div class="row">
-        <label for="hours">Window</label>
-        <select id="hours">
-          <option value="6">6 hours</option>
-          <option value="24" selected>24 hours</option>
-          <option value="72">3 days</option>
-          <option value="168">7 days</option>
-        </select>
+        <fieldset id="hours" class="pills">
+          <legend>Window</legend>
+          <label><input type="radio" name="hours" value="6">6h</label>
+          <label><input type="radio" name="hours" value="24" checked>24h</label>
+          <label><input type="radio" name="hours" value="72">3d</label>
+          <label><input type="radio" name="hours" value="168">7d</label>
+        </fieldset>
         <button id="refresh" type="button" class="ghost">Refresh</button>
         <span id="feed-status" class="muted small"></span>
       </div>
@@ -63,7 +63,7 @@
     </div>
 
     <div id="feed" class="feed" aria-live="polite"></div>
-    <button id="more" type="button" class="wide" hidden>Load more</button>
+    <button id="more" type="button" class="ghost wide" hidden>Load more</button>
   </section>
 
   <aside id="people-pane" class="pane" data-pane="people">

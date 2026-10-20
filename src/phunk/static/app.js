@@ -4,6 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const PAGE = 30;
 const WINDOWS = [6, 24, 72, 168];
+const WINDOW_NAMES = { 6: "6 hours", 24: "24 hours", 72: "3 days", 168: "7 days" };
 
 const store = {
   get(k, fallback) {
@@ -86,12 +87,13 @@ function ago(ts) {
 
 function avatar(user) {
   const letter = (user.display_name || user.username || "?").trim().charAt(0).toUpperCase() || "?";
+  const tone = `avatar tone${(Number(user.fid) || 0) % 5}`;
   if (user.pfp && /^https:\/\//.test(user.pfp)) {
     const img = h("img", { class: "avatar", src: user.pfp, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
-    img.addEventListener("error", () => img.replaceWith(h("div", { class: "avatar", "aria-hidden": "true" }, letter)));
+    img.addEventListener("error", () => img.replaceWith(h("div", { class: tone, "aria-hidden": "true" }, letter)));
     return img;
   }
-  return h("div", { class: "avatar", "aria-hidden": "true" }, letter);
+  return h("div", { class: tone, "aria-hidden": "true" }, letter);
 }
 
 function handle(user) {
@@ -112,8 +114,8 @@ function castCard(c) {
     h("span", { class: "name" }, c.author.display_name || handle(c.author)),
     c.author.username && c.author.display_name ? h("span", { class: "muted" }, handle(c.author)) : null,
     h("span", { class: "muted", title: new Date(c.ts * 1000).toLocaleString() }, ago(c.ts)),
-    h("span", { class: "chip", title: "app that signed this cast" }, c.app),
-    c.channel ? h("span", { class: "chip", title: c.channel_url }, c.channel) : null,
+    h("span", { class: "chip app", title: "app that signed this cast" }, c.app),
+    c.channel ? h("span", { class: "chip channel", title: c.channel_url }, c.channel) : null,
   );
   const replyTo = c.reply_to
     ? h("div", { class: "muted small" }, `replying to ${c.reply_to.username ? "@" + c.reply_to.username : "fid " + c.reply_to.fid}`)
@@ -145,7 +147,7 @@ function castCard(c) {
   };
 
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
-  const replyBtn = h("button", { type: "button", class: "ghost" }, "Reply");
+  const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
     if (!state.me.can_write) return needKey();
     const open = body.querySelector(".reply-box");
@@ -228,7 +230,7 @@ async function loadFeed(reset, refresh = false) {
     renderApps();
     feed.append(...d.casts.map(castCard));
     state.offset = d.offset + d.casts.length;
-    const label = $("#hours").selectedOptions[0].textContent;
+    const label = WINDOW_NAMES[state.hours];
     $("#feed-status").textContent = `${d.total} of ${d.all} casts, last ${label}`;
     if (!d.total) {
       feed.replaceChildren(h("div", { class: "card empty" },
@@ -237,7 +239,7 @@ async function loadFeed(reset, refresh = false) {
     const wider = WINDOWS.find((w) => w > state.hours);
     if (d.more) { more.textContent = "Load more"; more.hidden = false; more.dataset.mode = "more"; }
     else if (wider && d.all) {
-      more.textContent = `Load older (widen to ${$(`#hours option[value="${wider}"]`).textContent})`;
+      more.textContent = `Load older (widen to ${WINDOW_NAMES[wider]})`;
       more.hidden = false; more.dataset.mode = "wider";
     } else more.hidden = true;
   } catch (e) {
@@ -302,6 +304,11 @@ async function loadPeople(refresh = false) {
 }
 
 // ------------------------------------------------------------------ setup
+
+function setHours(v) {
+  state.hours = v;
+  for (const r of document.querySelectorAll("#hours input")) r.checked = Number(r.value) === v;
+}
 
 function applyTheme(t) {
   if (t === "auto") document.documentElement.removeAttribute("data-theme");
@@ -384,14 +391,13 @@ async function init() {
     } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   });
 
-  $("#hours").value = String(state.hours);
-  $("#hours").addEventListener("change", () => { state.hours = Number($("#hours").value); loadFeed(true); });
+  setHours(state.hours);
+  $("#hours").addEventListener("change", (ev) => { setHours(Number(ev.target.value)); loadFeed(true); });
   $("#refresh").addEventListener("click", () => loadFeed(true, true));
   $("#more").addEventListener("click", () => {
     if ($("#more").dataset.mode === "wider") {
       const wider = WINDOWS.find((w) => w > state.hours);
-      state.hours = wider;
-      $("#hours").value = String(wider);
+      setHours(wider);
       loadFeed(true);
     } else loadFeed(false);
   });
