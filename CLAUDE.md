@@ -48,6 +48,12 @@ deploys it to GitHub Pages from `main`.
   `phunk.write`. Don't add more without a strong reason.
 - Never store, log or print a seed phrase or custody key. Never submit a
   message from tests; use `validate()` for live checks.
+- **Hard safety rule:** never ask the maintainer (or anyone) for the seed
+  phrase or custody key of a main or personal account, and never suggest
+  testing with one or putting one in a server's environment. Only use
+  throwaway test accounts, or an account created only for that job (for
+  example a dedicated app account for `signer/`). If a step would need a
+  main account's key, stop and propose a dedicated account instead.
 - Any change to message encoding must keep `tests/test_write.py` passing
   against `tests/vectors/write.json`.
 - Support Python 3.10+.
