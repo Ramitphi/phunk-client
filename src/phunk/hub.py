@@ -263,6 +263,16 @@ class Hub:
     async def user_by_name(self, name: str) -> User:
         return await self.user(await self.fid_by_name(name))
 
+    async def custody_address(self, fid: int) -> str:
+        """The address that owns `fid` now: the `to` of its latest register or
+        transfer event. Lowercase, 0x-prefixed."""
+        events = await self.collect("/v1/onChainEventsByFid", {"fid": fid, "event_type": "EVENT_TYPE_ID_REGISTER"},
+                                    key="events")
+        if not events:
+            raise NotFound(f"no IdRegistry events for fid {fid}")
+        latest = max(events, key=lambda e: (e.get("blockNumber") or 0, e.get("logIndex") or 0))
+        return latest["idRegisterEventBody"]["to"].lower()
+
     async def fid_by_address(self, address: str) -> int:
         """Custody address -> the fid it owns, from the IdRegistry events the
         node has synced."""

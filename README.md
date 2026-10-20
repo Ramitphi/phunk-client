@@ -92,7 +92,11 @@ async with Hub("http://localhost:3381") as hub:
 | `delete_cast(hash)` | `CAST_REMOVE` |
 | `like`, `unlike`, `recast`, `unrecast` `(fid, hash)` | `REACTION_ADD` / `REACTION_REMOVE` |
 | `follow(fid)`, `unfollow(fid)` | `LINK_ADD` / `LINK_REMOVE` |
-| `set_profile(display=, bio=, pfp=, url=)` | `USER_DATA_ADD` |
+| `set_profile(display=, bio=, pfp=, url=, username=)` | `USER_DATA_ADD` |
+
+`add_app_key(..., app_signer=URL)` registers the key under an app account
+through that app's signing service, so other clients show "Sent from
+<app>". `signer/` is a ready-to-deploy service; see `signer/README.md`.
 
 Messages match the official TypeScript library byte for byte
 (`tests/test_write.py` checks against its output). Read the

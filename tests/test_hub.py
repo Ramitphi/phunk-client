@@ -217,3 +217,18 @@ def test_feed_merges_followed_accounts_newest_first_and_skips_future():
 
     got = run({"/v1/linksByFid": links_handler, "/v1/castsByFid": casts_handler}, test)
     assert got == ["a-new", "b-mid", "a-old"]
+
+
+def test_custody_address_is_the_latest_register_or_transfer():
+    events = {"events": [
+        {"blockNumber": 5, "logIndex": 1, "idRegisterEventBody": {"to": "0xAAA", "eventType": "Register"}},
+        {"blockNumber": 9, "logIndex": 0, "idRegisterEventBody": {"to": "0xBBB", "eventType": "Transfer"}},
+    ]}
+
+    async def handler(request):
+        return web.json_response(events)
+
+    async def test(hub, calls):
+        return await hub.custody_address(3)
+
+    assert run({"/v1/onChainEventsByFid": handler}, test) == "0xbbb"

@@ -35,7 +35,8 @@ except ImportError as e:  # pragma: no cover
     raise ImportError("writing needs extra packages: pip install 'phunk-client[write]'") from e
 
 from . import proto
-from .hub import Hub
+from .hub import Hub, NodeError
+from .keys import KeyRequest, decode_key_request
 from .timeutil import from_unix
 
 # EIP-712 domain for KEY_ADD, KEY_REMOVE and the SignedKeyRequest metadata.
@@ -201,19 +202,21 @@ def encode_key_request(request_fid: int, request_signer: str, signature: bytes, 
 def build_key_add(custody: Custody, fid: int, key: AppKey, *, nonce: int, deadline: int,
                   scopes: list[int] = DEFAULT_SCOPES, ttl: int = DEFAULT_TTL,
                   app_fid: int | None = None, app_custody: Custody | None = None,
-                  timestamp: int | None = None) -> bytes:
+                  metadata: bytes | None = None, timestamp: int | None = None) -> bytes:
     """A signed KEY_ADD message, ready to submit.
 
     `deadline` is Farcaster time. By default the account is its own app
-    (`app_fid = fid`); pass `app_fid` and `app_custody` to register the key
-    under a separate app account.
+    (`app_fid = fid`). To register the key under a separate app account,
+    either pass `app_fid` and `app_custody`, or pass `metadata`: a
+    SignedKeyRequest the app already signed (see `request_app_approval`).
     """
     if not 0 < ttl <= MAX_TTL:
         raise ValueError("ttl must be between 1 second and 90 days")
     if proto.KEY_ADD in scopes:
         raise ValueError("KEY_ADD can't be a scope")
-    app_fid = fid if app_fid is None else app_fid
-    metadata = (app_custody or custody).sign_key_request(app_fid, key.public_key, deadline)
+    if metadata is None:
+        app_fid = fid if app_fid is None else app_fid
+        metadata = (app_custody or custody).sign_key_request(app_fid, key.public_key, deadline)
     custody_sig = custody.sign_key_add(fid, key.public_key, scopes, ttl, nonce, deadline)
     body = proto.KeyAddBody(key=key.public_key, custody_signature=custody_sig, deadline=deadline,
                             nonce=nonce, metadata=metadata, scopes=list(scopes), ttl=ttl)
@@ -221,10 +224,69 @@ def build_key_add(custody: Custody, fid: int, key: AppKey, *, nonce: int, deadli
     return key.sign(proto.KEY_ADD, fid, body.encode(), timestamp)
 
 
+def recover_key_request(req: KeyRequest, key: bytes) -> str:
+    """The address that signed a SignedKeyRequest for `key`."""
+    typed = {
+        "types": {"EIP712Domain": _DOMAIN_TYPE, "SignedKeyRequest": _SIGNED_KEY_REQUEST_TYPE},
+        "primaryType": "SignedKeyRequest",
+        "domain": KEY_DOMAIN,
+        "message": {"requestFid": req.request_fid, "key": key, "deadline": req.deadline},
+    }
+    return Account.recover_message(encode_typed_data(full_message=typed), signature=req.signature)
+
+
+def check_key_request(metadata: bytes, key: bytes, *, app_fid: int | None = None,
+                      app_custody: str | None = None, at: int | None = None) -> KeyRequest:
+    """Check an app's SignedKeyRequest before using it. Raises ValueError.
+
+    It must name `app_fid` (if given), not be expired, carry a valid
+    signature over this exact key, and be signed by `app_custody` (if
+    given): the app account's current custody address.
+    """
+    req = decode_key_request(metadata)
+    if app_fid is not None and req.request_fid != app_fid:
+        raise ValueError(f"approval is for app fid {req.request_fid}, expected {app_fid}")
+    if req.deadline <= (now() if at is None else at):
+        raise ValueError("approval has expired")
+    signer = recover_key_request(req, key)
+    if signer.lower() != req.request_signer.lower():
+        raise ValueError("approval signature does not match its signer")
+    if app_custody is not None and signer.lower() != app_custody.lower():
+        raise ValueError(f"approval signed by {signer}, but the app's custody address is {app_custody}")
+    return req
+
+
+async def request_app_approval(hub: Hub, url: str, key: AppKey) -> bytes:
+    """Ask an app's signing service to approve `key`; return the checked metadata.
+
+    The service holds the app account's custody key and answers
+    `POST {"key": "0x..."}` with `{"metadata": "0x...", "request_fid": n}`.
+    Only the public key is sent. The answer is checked against the app
+    account's custody address on the node before it is used.
+    """
+    if hub.session is None:
+        raise RuntimeError("use `async with Hub(...) as hub:`")
+    try:
+        async with hub.session.post(url, json={"key": key.public_hex}) as r:
+            data = await r.json(content_type=None)
+            if r.status >= 400:
+                raise NodeError(f"app signer {url}: HTTP {r.status}: {str(data)[:300]}")
+    except (OSError, ValueError) as e:
+        raise NodeError(f"app signer {url}: {e!r}") from e
+    metadata = bytes.fromhex(str(data.get("metadata", "")).removeprefix("0x"))
+    app_fid = int(data.get("request_fid") or decode_key_request(metadata).request_fid)
+    check_key_request(metadata, key.public_key, app_fid=app_fid, app_custody=await hub.custody_address(app_fid))
+    return metadata
+
+
 async def add_app_key(hub: Hub, custody: Custody, *, fid: int | None = None,
                       scopes: list[int] = DEFAULT_SCOPES, ttl: int = DEFAULT_TTL,
-                      key: AppKey | None = None) -> tuple[int, AppKey]:
+                      key: AppKey | None = None, app_signer: str | None = None) -> tuple[int, AppKey]:
     """Create a gasless app key for the account behind `custody` and submit it.
+
+    With `app_signer` (the URL of an app's signing service), the key is
+    registered under that app, so other clients show "Sent from <app>".
+    Without it, the account is its own app.
 
     Returns (fid, key). Save `key.private_hex` somewhere safe if you want to
     keep posting with it; the custody key is not needed again.
@@ -232,8 +294,10 @@ async def add_app_key(hub: Hub, custody: Custody, *, fid: int | None = None,
     if fid is None:
         fid = await hub.fid_by_address(custody.address)
     key = key or AppKey.generate()
+    metadata = await request_app_approval(hub, app_signer, key) if app_signer else None
     nonce = (await hub.signers(fid)).get("currentUserNonce", 0) + 1
-    msg = build_key_add(custody, fid, key, nonce=nonce, deadline=now() + 3600, scopes=scopes, ttl=ttl)
+    msg = build_key_add(custody, fid, key, nonce=nonce, deadline=now() + 3600, scopes=scopes, ttl=ttl,
+                        metadata=metadata)
     await hub.submit(msg)
     return fid, key
 
@@ -337,10 +401,15 @@ class Writer:
         return await self._send(proto.LINK_REMOVE, proto.LinkBody(fid))
 
     async def set_profile(self, *, display: str | None = None, bio: str | None = None,
-                          pfp: str | None = None, url: str | None = None) -> list[str]:
-        """Update profile fields. Each field is its own message."""
+                          pfp: str | None = None, url: str | None = None,
+                          username: str | None = None) -> list[str]:
+        """Update profile fields. Each field is its own message.
+
+        `username` must be a name this fid already owns (an fname from
+        fnames.farcaster.xyz, or an ENS name it verified); the node checks."""
         fields = [(proto.USER_DATA_DISPLAY, display), (proto.USER_DATA_BIO, bio),
-                  (proto.USER_DATA_PFP, pfp), (proto.USER_DATA_URL, url)]
+                  (proto.USER_DATA_PFP, pfp), (proto.USER_DATA_URL, url),
+                  (proto.USER_DATA_USERNAME, username)]
         return [await self._send(proto.USER_DATA_ADD, proto.UserDataBody(t, v)) for t, v in fields if v is not None]
 
 
