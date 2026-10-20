@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>phunk</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">phunk</div>
+  <div id="who" class="who"></div>
+  <button id="theme" class="ghost small" type="button">Theme: auto</button>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<nav class="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="feed" aria-selected="true">Feed</button>
+  <button type="button" role="tab" data-tab="people" aria-selected="false">People to follow</button>
+</nav>
+
+<main class="layout">
+  <section id="feed-pane" class="pane" data-pane="feed">
+    <form id="browse" class="card row" hidden>
+      <label for="browse-name">Browse as</label>
+      <input id="browse-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
+      <button type="submit">Go</button>
+    </form>
+
+    <form id="compose" class="card compose">
+      <textarea id="compose-text" rows="3" maxlength="1024" placeholder="What's happening?"></textarea>
+      <div class="row">
+        <input id="compose-channel" placeholder="channel (optional): name or URL" autocomplete="off" autocapitalize="off">
+        <span id="compose-count" class="muted small">0/1024</span>
+        <button type="submit">Cast</button>
+      </div>
+    </form>
+
+    <div class="card controls">
+      <div class="row">
+        <label for="hours">Window</label>
+        <select id="hours">
+          <option value="6">6 hours</option>
+          <option value="24" selected>24 hours</option>
+          <option value="72">3 days</option>
+          <option value="168">7 days</option>
+        </select>
+        <button id="refresh" type="button" class="ghost">Refresh</button>
+        <span id="feed-status" class="muted small"></span>
+      </div>
+      <details id="apps-box">
+        <summary>Apps <span id="apps-summary" class="muted small"></span></summary>
+        <p class="muted small">Show casts signed by these apps. Unticked apps are hidden.</p>
+        <div class="row small">
+          <button type="button" class="ghost small" id="apps-all">All</button>
+          <button type="button" class="ghost small" id="apps-none">None</button>
+        </div>
+        <div id="apps" class="apps"></div>
+      </details>
+    </div>
+
+    <div id="feed" class="feed" aria-live="polite"></div>
+    <button id="more" type="button" class="wide" hidden>Load more</button>
+  </section>
+
+  <aside id="people-pane" class="pane" data-pane="people">
+    <div class="card">
+      <div class="row between">
+        <h2>People to follow</h2>
+        <button id="people-refresh" type="button" class="ghost small">Refresh</button>
+      </div>
+      <p class="muted small">From the node only: who the people you follow follow, and who posts in your channels.</p>
+      <div id="people"></div>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

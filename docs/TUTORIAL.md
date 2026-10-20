@@ -21,6 +21,7 @@ thing with `phunk-client`.
 7. [Which app signed this?](#7-which-app-signed-this)
 8. [Being a good guest, and running your own node](#8-being-a-good-guest-and-running-your-own-node)
 9. [Writing: app keys, casts, follows](#9-writing-app-keys-casts-follows)
+10. [A web client: `phunk ui`](#10-a-web-client-phunk-ui)
 
 ---
 
@@ -233,7 +234,7 @@ print(nx.pagerank(G))
 **Channels** aren't a separate object on the protocol. A channel cast is a
 top-level cast whose `parentUrl` is the channel's URL. Older channels use a
 `chain://` URL (from the NFT they started with). Newer ones use
-`https://farcaster.xyz/~/channel/<id>`. To turn a channel name into its URL,
+`https://warpcast.com/~/channel/<id>`. To turn a channel name into its URL,
 look it up in the main app's channel registry (that service is run by the
 main app, not by a node):
 
@@ -487,7 +488,7 @@ Afterwards the key shows up in `GET /v1/signersByFid` with
 
 ```sh
 phunk post "hello from my own node"
-phunk post "gm" --channel https://farcaster.xyz/~/channel/dev
+phunk post "gm" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<cast hash>
 phunk follow dwr
 ```
@@ -555,3 +556,78 @@ apps = [await hub.app_of(c) for c in casts]    # who signed each
 You don't have to revoke a key you stop using: its TTL runs out. To revoke
 it sooner, send a `KEY_REMOVE` signed by the custody key (or by the key
 itself); see the Snapchain guide on writing messages.
+
+---
+
+## 10. A web client: `phunk ui`
+
+Everything above, in a browser. `phunk ui` serves a small web client on
+your own machine:
+
+```sh
+phunk ui --as dwr          # browse anyone's feed, read-only
+phunk ui                   # as your app key's fid: post, reply, like, recast, follow
+phunk ui --open            # and open it in your browser
+```
+
+Then visit `http://127.0.0.1:8008`. It shows:
+
+* **Your feed**: recent casts from everyone you follow, newest first, each
+  with the app that signed it. Pick a window (6 hours to 7 days) and load
+  more.
+* **An app filter**: a checkbox for every app seen in the feed, plus
+  "own key" and "unknown". Untick one to hide its casts.
+* **People to follow**: worked out from the node alone (below).
+
+Without an app key it is read-only: everything browses, and the write
+buttons tell you to run `phunk key add`. The page never asks for a seed
+phrase. The server binds to 127.0.0.1, answers only to a local Host, and
+refuses POSTs from other sites. The app key stays in the server process.
+
+It is plain HTML, CSS and JS served by `aiohttp`, with a small JSON API
+(`/api/feed`, `/api/suggestions`, `/api/cast`, `/api/react`, `/api/follow`).
+Read `src/phunk/ui.py` and `src/phunk/static/` to see how it works.
+
+### People to follow
+
+A node has no "who to follow" endpoint either. Two signals are easy to read
+from it:
+
+1. **Friends of friends.** Take the people you followed most recently, read
+   whom each of them follows (newest first), and count. Someone followed by
+   several people you follow is a good bet.
+2. **Shared channels.** Find the channels you post in (the `parentUrl` on
+   your latest top-level casts), then who else posted there lately.
+
+```sh
+# whom fid 3 follows, newest first (repeat for a sample of them)
+curl "https://haatz.quilibrium.com/v1/linksByFid?fid=3&link_type=follow&reverse=true&pageSize=300"
+# fid 3's latest casts: their parentUrl values are channels
+curl "https://haatz.quilibrium.com/v1/castsByFid?fid=3&reverse=true&pageSize=100"
+# who posts in /politics lately
+curl "https://haatz.quilibrium.com/v1/castsByParent?url=https://warpcast.com/~/channel/politics&reverse=true&pageSize=100"
+```
+
+`phunk.recommend.suggest` does both and scores plainly: one point per
+person you follow who follows them, plus two per shared channel. People you
+already follow, and you, are left out. A friend of a friend needs at least
+two people you follow behind them, unless you also share a channel.
+
+```python
+import asyncio
+from phunk import Hub
+from phunk.recommend import suggest
+
+async def main():
+    async with Hub() as hub:
+        fid = await hub.fid_by_name("dwr")
+        for s in await suggest(hub, fid, limit=5):
+            name = (await hub.user(s.fid)).username
+            print(f"{s.score:3}  @{name}  followed by {len(s.followed_by)} you follow, channels {s.channels}")
+
+asyncio.run(main())
+```
+
+It reads only 40 follow lists (`sample=`), 300 follows each
+(`per_account=`), and your top 3 channels (`channels=`): about 50 requests,
+whatever the size of your graph. That keeps it polite on a shared node.

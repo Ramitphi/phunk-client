@@ -51,6 +51,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `keys(fid)` | `/v1/onChainEventsByFid`, `/v1/signersByFid` | `Key`s: every key add / remove, and the app that asked for each |
 | `app_of(message)`, `app_name(app_fid)` | | which app signed a cast, like or follow |
 | `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
+| `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
 | `signers(fid)` | `/v1/signersByFid` | active keys and `currentUserNonce` |
 | `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
@@ -124,11 +125,28 @@ phunk --node http://localhost:3381 info
 
 # writing (pip install 'phunk-client[write]')
 phunk key add                      # seed phrase in (hidden), app key saved to ~/.config/phunk
-phunk post "hello" --channel https://farcaster.xyz/~/channel/dev
+phunk post "hello" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<hash>
 phunk follow dwr
 phunk feed --hide warpcast         # who you follow, filtered by app
+phunk ui                           # local web client: feed, app filter, people to follow
 ```
+
+## Web client
+
+`phunk ui` serves a small web client on `http://127.0.0.1:8008`: your feed
+with the app that signed each cast, a checkbox filter by app, people to
+follow (from the node only, with the reason for each), and posting,
+replies, likes, recasts and follows with your app key.
+
+```sh
+phunk ui --as dwr      # read-only: browse anyone's feed
+phunk ui               # with the key from `phunk key add`: can post
+```
+
+Without a key it is read-only and never asks for a seed phrase. It binds
+to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
+build step. See [the tutorial](docs/TUTORIAL.md#10-a-web-client-phunk-ui).
 
 ## Which node
 

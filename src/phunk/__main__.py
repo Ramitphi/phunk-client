@@ -9,6 +9,7 @@
     phunk post "hello from my own node"
     phunk feed --hide warpcast   # who you follow, minus one app
     phunk follow dwr
+    phunk ui                     # local web client on http://127.0.0.1:8008
 """
 from __future__ import annotations
 
@@ -42,16 +43,29 @@ Your seed phrase controls your whole account. Read this first:
 """
 
 
-def _load_key():
-    """(fid, AppKey) from PHUNK_FID / PHUNK_APP_KEY, or the key file."""
-    from .write import AppKey
-
+def find_key():
+    """(fid, AppKey) from PHUNK_FID / PHUNK_APP_KEY, or the key file. None if
+    there is no key (or the [write] extra is not installed)."""
+    if not (os.environ.get("PHUNK_APP_KEY") and os.environ.get("PHUNK_FID")) and not KEY_FILE.exists():
+        return None
+    try:
+        from .write import AppKey
+    except ImportError:
+        return None
     if os.environ.get("PHUNK_APP_KEY") and os.environ.get("PHUNK_FID"):
         return int(os.environ["PHUNK_FID"]), AppKey.from_hex(os.environ["PHUNK_APP_KEY"])
-    if not KEY_FILE.exists():
-        sys.exit(f"no app key yet: run `phunk key add` (or set PHUNK_FID and PHUNK_APP_KEY)")
     d = json.loads(KEY_FILE.read_text())
     return int(d["fid"]), AppKey.from_hex(d["app_key"])
+
+
+def _load_key():
+    """Like find_key, but exits with a hint when there is no key."""
+    found = find_key()
+    if found is None:
+        from .write import AppKey  # noqa: F401  (a clear error if [write] is missing)
+
+        sys.exit("no app key yet: run `phunk key add` (or set PHUNK_FID and PHUNK_APP_KEY)")
+    return found
 
 
 def _save_key(fid: int, key) -> None:
@@ -142,9 +156,26 @@ async def run_feed(hub: Hub, args) -> None:
             break
 
 
+async def run_ui(hub: Hub, args) -> None:
+    from .ui import serve
+
+    found = None if args.read_only else find_key()
+    fid, key = found if found else (None, None)
+    if args.who:
+        browse = await _fid(hub, args.who)
+        if fid is not None and browse != fid:
+            key = None  # someone else's feed: read-only
+        fid = browse
+    elif fid is None and os.environ.get("PHUNK_FID", "").isdigit():
+        fid = int(os.environ["PHUNK_FID"])
+    await serve(hub, host=args.host, port=args.port, fid=fid, key=key, open_browser=args.open)
+
+
 async def run(args) -> None:
     async with Hub(args.node) as hub:
-        if args.cmd == "key":
+        if args.cmd == "ui":
+            await run_ui(hub, args)
+        elif args.cmd == "key":
             await run_key(hub, args)
         elif args.cmd in WRITE_CMDS:
             await run_write(hub, args)
@@ -199,7 +230,7 @@ def main(argv=None) -> None:
 
     s = sub.add_parser("post", help="post a cast")
     s.add_argument("text")
-    s.add_argument("--channel", help="channel URL, e.g. https://farcaster.xyz/~/channel/dev")
+    s.add_argument("--channel", help="channel URL, e.g. https://warpcast.com/~/channel/politics")
     s.add_argument("--reply-to", type=_cast_ref, metavar="FID:HASH")
     s.add_argument("--embed", action="append", metavar="URL", help="up to 2")
     for name in ("like", "unlike", "recast", "unrecast"):
@@ -214,6 +245,17 @@ def main(argv=None) -> None:
     f.add_argument("--hours", type=int, default=24)
     f.add_argument("--only", help="only these apps, comma-separated (e.g. warpcast,fireflyapp)")
     f.add_argument("--hide", help="hide these apps, comma-separated")
+
+    u = sub.add_parser("ui", help="local web client: feed, app filter, posting, people to follow",
+                       description="Serve a small web client on this machine. With an app key "
+                                   "(`phunk key add`) it can post, react and follow; without one "
+                                   "it is read-only. It never asks for a seed phrase.")
+    u.add_argument("--as", dest="who", metavar="WHO",
+                   help="browse as this username or fid (read-only unless it is your key's fid)")
+    u.add_argument("--host", default="127.0.0.1", help="address to bind (default 127.0.0.1, this machine only)")
+    u.add_argument("--port", type=int, default=8008, help="port (default 8008)")
+    u.add_argument("--open", action="store_true", help="open it in your browser")
+    u.add_argument("--read-only", action="store_true", help="ignore any saved app key")
     try:
         asyncio.run(run(p.parse_args(argv)))
     except KeyboardInterrupt:

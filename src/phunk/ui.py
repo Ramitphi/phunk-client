@@ -1,0 +1,441 @@
+"""`phunk ui`: a small local web client.
+
+    phunk ui                 # http://127.0.0.1:8008, as your saved app key's fid
+    phunk ui --as dwr        # browse someone's feed, read-only
+
+The page is plain HTML, CSS and JS from `phunk/static`. It talks to this
+server's JSON API, which talks to the node through one `Hub`. With an app key
+(`phunk key add`) it can also post, react and follow, through `Writer`.
+
+Safety: it binds to 127.0.0.1, refuses requests whose Host is not local
+(DNS rebinding), and refuses POSTs from other origins or without a JSON body.
+The app key never leaves this process: no endpoint returns it and nothing
+logs it. The page never asks for a seed phrase.
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import ipaddress
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+from aiohttp import web
+
+from .hub import Hub, NodeError, NotFound
+from .models import Cast, User
+from .recommend import Suggestion, suggest
+from .timeutil import to_unix
+
+STATIC = Path(__file__).parent / "static"
+CHANNEL_PREFIX = "https://warpcast.com/~/channel/"
+# Older channels use the URL of the NFT they started with. A few well-known ones, for display.
+KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e08d8b0": "/dev"}
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+READ_ONLY_HELP = ("Read-only: no app key. To post, like and follow, run `phunk key add` in a terminal "
+                  "(use a test account), then restart `phunk ui`.")
+FEED_TTL = 300  # seconds a feed window stays cached
+SUGGEST_TTL = 600
+PAGE = 30
+
+
+# ------------------------------------------------------------------ helpers
+
+
+def channel_url(value: str | None) -> str | None:
+    """"politics", "/politics" or a full URL -> a channel URL. Empty -> None.
+
+    A bare name maps to the newer https://warpcast.com/~/channel/<name> form.
+    Older channels (like /dev) use a chain:// URL, so pass the URL for those.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    if ":" in value:
+        return value
+    name = value.lstrip("/").lower()
+    for url, known in KNOWN_CHANNELS.items():
+        if known == "/" + name:
+            return url
+    return CHANNEL_PREFIX + name
+
+
+def channel_name(url: str | None) -> str | None:
+    """A channel URL -> "/politics". Unknown chain:// channels keep their URL."""
+    if not url:
+        return None
+    if url in KNOWN_CHANNELS:
+        return KNOWN_CHANNELS[url]
+    for prefix in (CHANNEL_PREFIX, "https://farcaster.xyz/~/channel/"):
+        if url.startswith(prefix):
+            return "/" + url[len(prefix):].strip("/")
+    return url
+
+
+def cast_ref(value: Any) -> tuple[int, str]:
+    """"fid:0xhash" or {"fid":..,"hash":..} -> (fid, hash)."""
+    if isinstance(value, dict):
+        fid, h = value.get("fid"), value.get("hash")
+    else:
+        fid, _, h = str(value or "").partition(":")
+    if not str(fid).isdigit() or not isinstance(h, str) or not h.startswith("0x"):
+        raise ValueError("expected a cast as fid:0xhash")
+    return int(fid), h
+
+
+def with_mentions(cast: Cast, names: dict[int, str | None]) -> str:
+    """Put "@name" back where the node cut mentions out of the text."""
+    body = cast.raw.get("data", {}).get("castAddBody") or {}
+    positions = body.get("mentionsPositions") or []
+    if not cast.mentions or len(positions) != len(cast.mentions):
+        return cast.text
+    raw = cast.text.encode()
+    for fid, pos in sorted(zip(cast.mentions, positions), key=lambda p: p[1], reverse=True):
+        name = names.get(fid) or f"fid:{fid}"
+        raw = raw[:pos] + f"@{name}".encode() + raw[pos:]
+    return raw.decode(errors="replace")
+
+
+def filter_by_app(items: list[dict], *, only: set[str] | None = None, hide: set[str] = frozenset()) -> list[dict]:
+    """Keep items whose "app" is in `only` (if given) and not in `hide`. Case-insensitive."""
+    only = {a.lower() for a in only} if only else None
+    hide = {a.lower() for a in hide}
+    return [i for i in items if (only is None or i["app"].lower() in only) and i["app"].lower() not in hide]
+
+
+def app_counts(items: list[dict]) -> list[dict]:
+    counts: dict[str, int] = {}
+    for i in items:
+        counts[i["app"]] = counts.get(i["app"], 0) + 1
+    return [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def reasons(s: Suggestion, names: dict[int, str | None]) -> list[str]:
+    """Why someone is suggested, in words."""
+    out = []
+    who = [f"@{names[f]}" if names.get(f) else f"fid {f}" for f in s.followed_by]
+    if len(who) == 1:
+        out.append(f"Followed by {who[0]}, whom you follow")
+    elif who:
+        shown = ", ".join(who[:3]) + (f" and {len(who) - 3} more" if len(who) > 3 else "")
+        out.append(f"Followed by {len(who)} people you follow: {shown}")
+    if s.channels:
+        out.append("Both active in " + ", ".join(channel_name(c) or c for c in s.channels))
+    return out
+
+
+def _split(value: str | None) -> set[str]:
+    return {v.strip() for v in (value or "").split(",") if v.strip()}
+
+
+# --------------------------------------------------------------------- state
+
+
+class UI:
+    """Caches and node calls behind the JSON API."""
+
+    def __init__(self, hub: Hub, *, fid: int | None = None, key=None):
+        self.hub = hub
+        self.fid = fid
+        self.writer = None
+        if key is not None and fid is not None:
+            from .write import Writer
+
+            self.writer = Writer(hub, fid, key)
+        self._users: dict[int, asyncio.Future] = {}
+        self._feeds: dict[tuple[int, int], tuple[float, asyncio.Future]] = {}
+        self._suggest: dict[int, tuple[float, asyncio.Future]] = {}
+        self.followed_here: set[int] = set()  # keep them out of suggestions
+
+    # ------------------------------------------------------------ cached reads
+
+    async def user(self, fid: int) -> User:
+        if fid not in self._users:
+            async def load():
+                try:
+                    return await self.hub.user(fid)
+                except NodeError:
+                    return User(fid=fid)
+            self._users[fid] = asyncio.ensure_future(load())
+        return await self._users[fid]
+
+    async def names(self, fids) -> dict[int, str | None]:
+        fids = list(dict.fromkeys(fids))
+        users = await asyncio.gather(*(self.user(f) for f in fids))
+        return {u.fid: u.username for u in users}
+
+    async def app_label(self, cast: Cast) -> str:
+        try:
+            app = await self.hub.app_of(cast)
+        except NodeError:
+            app = None
+        if app is None:
+            return "unknown"
+        if app == cast.fid:
+            return "own key"
+        try:
+            return await self.hub.app_name(app) or f"fid {app}"
+        except NodeError:
+            return f"fid {app}"
+
+    def user_json(self, u: User) -> dict:
+        return {"fid": u.fid, "username": u.username, "display_name": u.display_name, "pfp": u.pfp,
+                "bio": u.bio}
+
+    async def cast_json(self, c: Cast) -> dict:
+        author, app, names = await asyncio.gather(
+            self.user(c.fid), self.app_label(c),
+            self.names(list(c.mentions) + ([c.parent_fid] if c.parent_fid else [])))
+        return {
+            "fid": c.fid, "hash": c.hash, "ts": int(to_unix(c.timestamp)),
+            "text": with_mentions(c, names), "embeds": c.embeds[:4],
+            "channel": channel_name(c.parent_url) if not c.is_reply else None,
+            "channel_url": c.parent_url if not c.is_reply else None,
+            "reply_to": {"fid": c.parent_fid, "hash": c.parent_hash,
+                         "username": names.get(c.parent_fid)} if c.is_reply else None,
+            "author": self.user_json(author), "app": app,
+        }
+
+    async def feed_window(self, fid: int, hours: int, refresh: bool = False) -> list[dict]:
+        """Every cast in the window, newest first, with author and app. Cached."""
+        key = (fid, hours)
+        hit = self._feeds.get(key)
+        if hit and not refresh and time.monotonic() - hit[0] < FEED_TTL and not (
+                hit[1].done() and hit[1].exception()):
+            return await hit[1]
+
+        async def load():
+            since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
+            casts = await self.hub.feed(fid, since=since, per_account=10 if hours <= 24 else 25, limit=500)
+            return list(await asyncio.gather(*(self.cast_json(c) for c in casts)))
+
+        fut = asyncio.ensure_future(load())
+        self._feeds[key] = (time.monotonic(), fut)
+        return await fut
+
+    async def suggestions(self, fid: int, refresh: bool = False) -> list[dict]:
+        hit = self._suggest.get(fid)
+        if not (hit and not refresh and time.monotonic() - hit[0] < SUGGEST_TTL and not (
+                hit[1].done() and hit[1].exception())):
+            async def load():
+                found = await suggest(self.hub, fid, limit=25)
+                names = await self.names(f for s in found for f in s.followed_by[:3])
+                users = await asyncio.gather(*(self.user(s.fid) for s in found))
+                return [dict(self.user_json(u), score=s.score, reasons=reasons(s, names),
+                             followed_by=len(s.followed_by),
+                             channels=[channel_name(c) for c in s.channels])
+                        for s, u in zip(found, users)]
+            hit = (time.monotonic(), asyncio.ensure_future(load()))
+            self._suggest[fid] = hit
+        return [s for s in await hit[1] if s["fid"] not in self.followed_here]
+
+    async def who(self, value: str | None) -> int:
+        """A username or fid from the query, or the key's fid."""
+        value = (value or "").strip().lstrip("@")
+        if value:
+            return int(value) if value.isdigit() else await self.hub.fid_by_name(value)
+        if self.fid is None:
+            raise LookupError("pick an account to browse as")
+        return self.fid
+
+
+# ---------------------------------------------------------------------- web
+
+
+def _json_error(status: int, message: str, **extra) -> web.Response:
+    return web.json_response({"error": message, **extra}, status=status)
+
+
+def _host_of(request: web.Request) -> str:
+    host = request.host or ""
+    if host.startswith("["):
+        return host[1:].split("]")[0]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def make_guard(check_host: bool):
+    @web.middleware
+    async def guard(request: web.Request, handler):
+        if check_host and _host_of(request).lower() not in LOCAL_HOSTS:
+            return _json_error(403, "this server only answers on localhost")
+        if request.method not in ("GET", "HEAD"):
+            origin = request.headers.get("Origin")
+            if origin is not None and origin != f"{request.scheme}://{request.host}":
+                return _json_error(403, "cross-origin request refused")
+            if request.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+                return _json_error(403, "cross-site request refused")
+            if request.content_type != "application/json":
+                return _json_error(415, "send JSON")
+        resp = await handler(request)
+        resp.headers.setdefault("Content-Security-Policy",
+                                "default-src 'self'; img-src 'self' https: data:; "
+                                "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        return resp
+    return guard
+
+
+def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
+    app = web.Application(middlewares=[make_guard(check_host)], client_max_size=64 * 1024)
+    r = web.RouteTableDef()
+
+    def need_writer():
+        if ui.writer is None:
+            raise web.HTTPForbidden(text=_dumps({"error": READ_ONLY_HELP, "read_only": True}),
+                                    content_type="application/json")
+        return ui.writer
+
+    async def body(request) -> dict:
+        try:
+            data = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest(text=_dumps({"error": "bad JSON"}), content_type="application/json")
+        if not isinstance(data, dict):
+            raise web.HTTPBadRequest(text=_dumps({"error": "expected a JSON object"}),
+                                     content_type="application/json")
+        return data
+
+    async def run(coro):
+        try:
+            return web.json_response(await coro)
+        except web.HTTPException:
+            raise
+        except LookupError as e:  # NotFound is not a LookupError; KeyError is
+            return _json_error(400, str(e).strip("'"))
+        except NotFound as e:
+            return _json_error(404, f"not found: {e}")
+        except ValueError as e:
+            return _json_error(400, str(e))
+        except NodeError as e:
+            return _json_error(502, f"node error: {e}")
+
+    @r.get("/")
+    async def index(request):
+        return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @r.get("/api/me")
+    async def me(request):
+        async def go():
+            out = {"fid": ui.fid, "can_write": ui.writer is not None, "node": ui.hub.url,
+                   "help": None if ui.writer else READ_ONLY_HELP}
+            if ui.fid is not None:
+                out["user"] = ui.user_json(await ui.user(ui.fid))
+            return out
+        return await run(go())
+
+    @r.get("/api/feed")
+    async def feed(request):
+        q = request.query
+
+        async def go():
+            fid = await ui.who(q.get("who"))
+            hours = max(1, min(168, int(q.get("hours", 24))))
+            offset = max(0, int(q.get("offset", 0)))
+            limit = max(1, min(100, int(q.get("limit", PAGE))))
+            items = await ui.feed_window(fid, hours, refresh=q.get("refresh") == "1")
+            kept = filter_by_app(items, only=_split(q.get("only")) or None, hide=_split(q.get("hide")))
+            return {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
+                    "apps": app_counts(items), "casts": kept[offset:offset + limit],
+                    "more": offset + limit < len(kept)}
+        return await run(go())
+
+    @r.get("/api/suggestions")
+    async def suggestions(request):
+        async def go():
+            fid = await ui.who(request.query.get("who"))
+            return {"fid": fid, "people": await ui.suggestions(fid, refresh=request.query.get("refresh") == "1")}
+        return await run(go())
+
+    @r.post("/api/cast")
+    async def cast(request):
+        w = need_writer()
+        d = await body(request)
+
+        async def go():
+            text = str(d.get("text") or "").strip()
+            if not text:
+                raise ValueError("write something first")
+            reply_to = cast_ref(d["reply_to"]) if d.get("reply_to") else None
+            channel = None if reply_to else channel_url(d.get("channel"))
+            h = await w.cast(text, reply_to=reply_to, channel=channel)
+            return {"hash": h}
+        return await run(go())
+
+    @r.post("/api/react")
+    async def react(request):
+        w = need_writer()
+        d = await body(request)
+
+        async def go():
+            action = d.get("action")
+            if action not in ("like", "unlike", "recast", "unrecast"):
+                raise ValueError("action is like, unlike, recast or unrecast")
+            fid, h = cast_ref(d.get("cast"))
+            return {"hash": await getattr(w, action)(fid, h)}
+        return await run(go())
+
+    @r.post("/api/follow")
+    async def follow(request):
+        w = need_writer()
+        d = await body(request)
+
+        async def go():
+            action = d.get("action", "follow")
+            if action not in ("follow", "unfollow"):
+                raise ValueError("action is follow or unfollow")
+            target = d.get("fid")
+            if not str(target).isdigit():
+                raise ValueError("fid must be a number")
+            h = await getattr(w, action)(int(target))
+            if action == "follow":
+                ui.followed_here.add(int(target))
+            else:
+                ui.followed_here.discard(int(target))
+            return {"hash": h}
+        return await run(go())
+
+    app.add_routes(r)
+    app.router.add_static("/static/", STATIC, show_index=False)
+    return app
+
+
+def _dumps(obj) -> str:
+    return json.dumps(obj)
+
+
+def is_loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
+                key=None, open_browser: bool = False) -> None:
+    """Run the UI until interrupted."""
+    ui = UI(hub, fid=fid, key=key)
+    app = make_app(ui, check_host=is_loopback(host))
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    shown = f"[{host}]" if ":" in host else host
+    url = f"http://{shown}:{port}/"
+    mode = f"as fid {fid}, can post" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
+    print(f"phunk ui on {url} ({mode}, node {hub.url})")
+    if not is_loopback(host):
+        print("warning: not bound to localhost. Anyone who can reach this port can use it"
+              + (", and post as you." if ui.writer else "."))
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()

@@ -337,7 +337,7 @@ class Hub:
         """Casts in a channel, newest first per shard.
 
         A channel is just a `parentUrl` on top-level casts, for example
-        "https://farcaster.xyz/~/channel/dev" or a chain:// URL for older
+        "https://warpcast.com/~/channel/politics" or a chain:// URL for older
         channels. Spans shards, so the order is only roughly newest first.
         """
         async for m in self.pages("/v1/castsByParent", {"url": url, "reverse": "true"},
