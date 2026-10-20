@@ -5,8 +5,7 @@
 
 Standard library only. Sources:
 
-- docs/TUTORIAL.md          -> tutorial.html
-- docs/WRITING.md if it exists, else site/content/writing.md -> writing.html
+- docs/TUTORIAL.md          -> tutorial.html (steps 1-8) and writing.html (step 9)
 - site/content/*.md and site/content/concepts/*.md -> one page each
 
 The Markdown dialect is the small subset the docs use: headings, paragraphs,
@@ -330,21 +329,32 @@ def read_page(src: Path, out: str) -> Page:
 def collect_pages() -> list[Page]:
     pages = [read_page(CONTENT / "index.md", "index.html")]
 
-    tut = read_page(ROOT / "docs" / "TUTORIAL.md", "tutorial.html")
-    tut.meta.setdefault("toc", "yes")
-    tut.meta.setdefault("edit", "docs/TUTORIAL.md")
-    tut.meta.setdefault("lede", "no")             # its first paragraph already says it
-    tut.summary = "From one curl to working out which app signed each cast. Eight short steps."
-    pages.append(tut)
+    # docs/TUTORIAL.md is one file on GitHub. On the site, its writing chapter
+    # (the "## 9. Writing..." section) gets a page of its own.
+    src = ROOT / "docs" / "TUTORIAL.md"
+    text = src.read_text(encoding="utf-8")
+    m = re.search(rf"(?m)^## {re.escape(WRITING_HEADING)}.*\n", text)
+    if not m:
+        raise SystemExit(f"build: no '## {WRITING_HEADING}' chapter in docs/TUTORIAL.md")
+    nxt = re.search(r"(?m)^## ", text[m.end():])
+    end = m.end() + nxt.start() if nxt else len(text)
+    reading_md = text[:m.start()] + text[end:]
+    writing_md = re.sub(r"(?m)^###(?= )", "##", text[m.end():end])   # its h3s become sections
 
-    # The main session owns the writing chapter. docs/WRITING.md wins if it exists.
-    w_src = ROOT / "docs" / "WRITING.md"
-    writing = read_page(w_src if w_src.exists() else CONTENT / "writing.md", "writing.html")
-    writing.meta.setdefault("toc", "yes")
-    if w_src.exists():
-        writing.meta.setdefault("edit", "docs/WRITING.md")
-        writing.summary = writing.summary or "Sign a message with an app key and submit it to your node."
-    pages.append(writing)
+    common = {"toc": "yes", "edit": "docs/TUTORIAL.md"}
+    pages.append(Page(
+        # Steps 1-8 only, so the site title drops "and writing".
+        out="tutorial.html", source=src, meta={**common, "lede": "no"}, body_md=reading_md,
+        title="Reading Farcaster through a node",
+        summary="From one curl to working out which app signed each cast. Eight short steps.",
+    ))
+    pages.append(Page(
+        # A made-up source path keeps the two pages apart in the link map.
+        out="writing.html", source=src.with_name("TUTORIAL.md#writing"), meta=dict(common),
+        body_md=writing_md, title="Writing to the network",
+        summary="Add a gasless app key, then post, like and follow through your own node. "
+                "Step 9 of the tutorial.",
+    ))
 
     pages.append(read_page(CONTENT / "concepts" / "index.md", "concepts/index.html"))
     concepts = [read_page(p, f"concepts/{p.stem}.html")
@@ -396,14 +406,24 @@ def prepare_tutorial(md: str) -> str:
     return md
 
 
+WRITING_HEADING = "9. Writing"
+
+# Background links at the top of the writing page.
+WRITING_ASIDES = ["app-keys", "nodes", "seed-phrases"]
+
+
+def aside_html(slugs: list[str], concepts: dict[str, Page], page: Page) -> str:
+    links = "".join(
+        f'<a href="{rel(page.out, concepts[s].out)}"><strong>{html.escape(concepts[s].title)}</strong>'
+        f'<span>{html.escape(concepts[s].summary)}</span></a>'
+        for s in slugs
+    )
+    return f'<aside class="aside"><p class="aside-label">Background</p>{links}</aside>'
+
+
 def add_asides(body: str, concepts: dict[str, Page], page: Page) -> str:
     for hid, slugs in TUTORIAL_ASIDES.items():
-        links = " ".join(
-            f'<a href="{rel(page.out, concepts[s].out)}"><strong>{html.escape(concepts[s].title)}</strong>'
-            f'<span>{html.escape(concepts[s].summary)}</span></a>'
-            for s in slugs if s in concepts
-        )
-        aside = f'<aside class="aside"><p class="aside-label">Background</p>{links}</aside>'
+        aside = aside_html(slugs, concepts, page)
         body, n = re.subn(rf'(<h2 id="{hid}">.*?</h2>)', lambda m: m.group(1) + aside, body, count=1)
         if not n:
             raise SystemExit(f"build: tutorial heading #{hid} not found; update TUTORIAL_ASIDES")
@@ -585,7 +605,7 @@ def build() -> None:
             md = prepare_tutorial(md)
         else:
             m = re.search(r"(?m)^# (.*)\n", md)
-            if m and page.out != "index.html":          # the home page keeps its h1
+            if m and page.out not in ("index.html", "writing.html"):   # these set their own titles
                 page.title = page.title or strip_inline(m.group(1))
                 md = md.replace(m.group(0), "", 1)
         r = Renderer(make_linker(page, by_source))
@@ -593,6 +613,8 @@ def build() -> None:
         page.headings = r.headings
         if page.out == "tutorial.html":
             body = add_asides(body, by_slug, page)
+        elif page.out == "writing.html":
+            body = aside_html(WRITING_ASIDES, by_slug, page) + body
         body = body.replace("<!-- concepts -->", concept_list(concepts, page))
         page.html = body
 

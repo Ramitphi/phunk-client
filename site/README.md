@@ -16,8 +16,7 @@ for every `PLACEHOLDER` still on the site.
 | Path | Page |
 |---|---|
 | `site/content/index.md` | Home page and the three-command quickstart |
-| `docs/TUTORIAL.md` | `tutorial.html` (same file GitHub shows) |
-| `docs/WRITING.md`, else `site/content/writing.md` | `writing.html` |
+| `docs/TUTORIAL.md` | `tutorial.html` (steps 1 to 8) and `writing.html` (step 9, "Writing"). One file on GitHub, two pages on the site. |
 | `site/content/concepts/*.md` | One page per concept; `order:` in the front matter sets the order |
 | `site/static/` | CSS, JS (copy buttons, theme toggle, TOC) and the icon |
 
@@ -35,11 +34,13 @@ tells you if one goes missing.
 
 ## Open slots
 
-- **Quickstart commands**: the three `PLACEHOLDER` lines in
-  `site/content/index.md`.
-- **Writing to the network**: add `docs/WRITING.md` (with `title:` and
-  `summary:` front matter) and the build uses it in place of the stub in
-  `site/content/writing.md`.
+- **Quickstart commands 0 and 1**: the two `PLACEHOLDER` lines in
+  `site/content/index.md`. They come from `scripts/provision.sh` and
+  `scripts/node.sh` once those land on `main`.
+
+The writing page is cut from `docs/TUTORIAL.md` at the heading that starts
+with `WRITING_HEADING` in `build.py` ("9. Writing"). If that chapter is
+renumbered, update the constant; the build stops if it can't find it.
 
 ## Deploying
 
