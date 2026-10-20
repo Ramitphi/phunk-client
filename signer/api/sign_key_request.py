@@ -7,9 +7,9 @@ key and signs requests for any public key it is sent. The user's own custody
 key still has to authorize the KEY_ADD, so an approval alone can't add a key
 to anyone's account.
 
-    POST /api/sign_key_request   {"key": "0x<32-byte Ed25519 public key>"}
+    POST /api/sign-key-request   {"key": "0x<32-byte Ed25519 public key>"}
       -> {"metadata": "0x...", "request_fid": 123, "request_signer": "0x...", "deadline": 190000000}
-    GET  /api/sign_key_request
+    GET  /api/sign-key-request
       -> {"request_fid": 123, "request_signer": "0x..."}
 
 Settings (environment variables, never in code):
@@ -17,8 +17,9 @@ Settings (environment variables, never in code):
     PHUNK_APP_CUSTODY_KEY    its custody private key (0x...), or
     PHUNK_APP_MNEMONIC       its seed phrase (custody key on m/44'/60'/0'/0/0)
 
-Deploys as a Vercel Python function (see signer/README.md). Needs only
-eth-account.
+Deploys as the `signer` service of the phunk.social Vercel project (the
+ASGI `app`, see vercel.json), or on its own as a Vercel function (the
+`handler` class, see signer/README.md). Needs only eth-account.
 """
 from __future__ import annotations
 
@@ -47,6 +48,8 @@ TYPES = {
     ],
 }
 KEY_HEX = re.compile(r"^0x[0-9a-fA-F]{64}$")
+PATHS = {"/api/sign-key-request", "/api/sign_key_request"}
+MAX_BODY = 1024
 
 
 def load_account():
@@ -86,15 +89,77 @@ def encode_metadata(request_fid: int, request_signer: str, signature: bytes, dea
     return word(0x20) + word(request_fid) + b"\x00" * 12 + addr + word(0x80) + word(deadline) + word(len(signature)) + padded
 
 
-class handler(BaseHTTPRequestHandler):  # Vercel's Python runtime looks for this name
+def info() -> tuple[int, dict]:
+    """GET: which app this signer approves keys for."""
+    try:
+        return 200, {"request_fid": int(os.environ["PHUNK_APP_FID"]), "request_signer": load_account().address}
+    except (KeyError, RuntimeError, ValueError):
+        return 500, {"error": "signer is not configured"}
+
+
+def sign(raw: bytes) -> tuple[int, dict]:
+    """POST: approve the public key in the JSON body."""
+    if len(raw) > MAX_BODY:
+        return 413, {"error": "body too large"}
+    try:
+        data = json.loads(raw or b"{}")
+        app_fid = int(os.environ["PHUNK_APP_FID"])
+        account = load_account()
+    except (KeyError, RuntimeError):
+        return 500, {"error": "signer is not configured"}
+    except ValueError:
+        return 400, {"error": "send JSON: {\"key\": \"0x...\"}"}
+    try:
+        return 200, approve(data.get("key") if isinstance(data, dict) else None, app_fid, account)
+    except ValueError as e:
+        return 400, {"error": str(e)}
+
+
+HEADERS = [(b"content-type", b"application/json"), (b"access-control-allow-origin", b"*"),
+           (b"access-control-allow-headers", b"Content-Type"), (b"cache-control", b"no-store")]
+
+
+async def app(scope, receive, send):
+    """ASGI entrypoint (the `signer` service)."""
+    if scope["type"] == "lifespan":
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+    if scope["type"] != "http":
+        return
+    method, path = scope["method"], scope["path"].rstrip("/")
+    if path not in PATHS:
+        status, body = 404, {"error": "not found"}
+    elif method == "OPTIONS":
+        status, body = 204, None
+    elif method == "GET":
+        status, body = info()
+    elif method == "POST":
+        raw, more = b"", True
+        while more and len(raw) <= MAX_BODY:
+            message = await receive()
+            raw += message.get("body", b"")
+            more = message.get("more_body", False)
+        status, body = sign(raw)
+    else:
+        status, body = 405, {"error": "use GET or POST"}
+    out = b"" if body is None else json.dumps(body).encode()
+    await send({"type": "http.response.start", "status": status,
+                "headers": HEADERS + [(b"content-length", str(len(out)).encode())]})
+    await send({"type": "http.response.body", "body": out})
+
+
+class handler(BaseHTTPRequestHandler):  # a standalone Vercel function looks for this name
     def _send(self, status: int, body: dict) -> None:
         raw = json.dumps(body).encode()
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        for k, v in HEADERS:
+            self.send_header(k.decode(), v.decode())
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -102,25 +167,13 @@ class handler(BaseHTTPRequestHandler):  # Vercel's Python runtime looks for this
         self._send(204, {})
 
     def do_GET(self):  # noqa: N802
-        try:
-            self._send(200, {"request_fid": int(os.environ["PHUNK_APP_FID"]),
-                             "request_signer": load_account().address})
-        except (KeyError, RuntimeError, ValueError):
-            self._send(500, {"error": "signer is not configured"})
+        self._send(*info())
 
     def do_POST(self):  # noqa: N802
         try:
             length = int(self.headers.get("Content-Length") or 0)
-            if length > 1024:
-                return self._send(413, {"error": "body too large"})
-            data = json.loads(self.rfile.read(length) or b"{}")
-            app_fid = int(os.environ["PHUNK_APP_FID"])
-            account = load_account()
-        except (KeyError, RuntimeError):
-            return self._send(500, {"error": "signer is not configured"})
         except ValueError:
-            return self._send(400, {"error": "send JSON: {\"key\": \"0x...\"}"})
-        try:
-            return self._send(200, approve(data.get("key") if isinstance(data, dict) else None, app_fid, account))
-        except ValueError as e:
-            return self._send(400, {"error": str(e)})
+            length = 0
+        if length > MAX_BODY:
+            return self._send(413, {"error": "body too large"})
+        self._send(*sign(self.rfile.read(length)))

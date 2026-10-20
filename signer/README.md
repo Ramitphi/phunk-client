@@ -29,6 +29,12 @@ An approval is valid for one hour.
 
 ## Deploy on Vercel
 
+It deploys as the `signer` service of the phunk.social project (repo root
+`vercel.json`, see `web/README.md`), at `/api/sign-key-request` on the same
+domain. Set the variables below in that project.
+
+Or on its own, as before:
+
 1. New project from this repo, **Root Directory: `signer`**. No build step.
 2. Environment variables (Settings → Environment Variables), marked sensitive:
    - `PHUNK_APP_FID`: the app account's fid
