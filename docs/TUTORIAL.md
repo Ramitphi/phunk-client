@@ -20,8 +20,9 @@ thing with `phunk-client`.
 6. [Channels, replies, reactions](#6-channels-replies-reactions)
 7. [Which app signed this?](#7-which-app-signed-this)
 8. [Being a good guest, and running your own node](#8-being-a-good-guest-and-running-your-own-node)
-9. [Writing: app keys, casts, follows](#9-writing-app-keys-casts-follows)
-10. [A web client: `phunk ui`](#10-a-web-client-phunk-ui)
+9. [Run your own node](#9-run-your-own-node)
+10. [Writing: app keys, casts, follows](#10-writing-app-keys-casts-follows)
+11. [A web client: `phunk ui`](#11-a-web-client-phunk-ui)
 
 ---
 
@@ -383,8 +384,8 @@ print(hub.requests, hub.errors)   # what it cost
 ```
 
 When you want the whole network (every fid, every follow), run your own
-node. A Snapchain node syncs the full history, and the same code works
-unchanged:
+node ([step 9](#9-run-your-own-node)). A Snapchain node syncs the full
+history, and the same code works unchanged:
 
 ```python
 async with Hub("http://localhost:3381", rate=500, concurrency=64) as hub:
@@ -399,13 +400,165 @@ phunk whois dwr
 phunk apps dwr
 ```
 
+## 9. Run your own node
+
+A public node is fine for learning. For real work, run your own. It is a
+read node: it follows the chain, keeps a full copy of the data, and serves
+the same HTTP API. It needs no API key and no account with anyone.
+
+### What to rent
+
+| | Minimum |
+|---|---|
+| CPU | 4 cores |
+| RAM | 16 GB |
+| Disk | 2 TB SSD or NVMe |
+| Network | a public IP, ports 3381–3383 open |
+
+The database is 500–800 GB today and grows, so don't skimp on disk. Any
+provider works. Rough monthly prices (check before you rent):
+
+- **Dedicated server** (Hetzner, OVH, Latitude and similar): about $60–150.
+- **Cloud VM plus a 2 TB volume** (AWS, GCP, DigitalOcean and similar):
+  about $200–400. Most of that is the disk.
+
+Pick Ubuntu 22.04 and add your SSH key when you create the server.
+
+### Three commands
+
+Log in to the new server (as root, or a user with sudo) and prepare it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/provision.sh | sudo bash
+```
+
+This updates the system, installs Docker, creates a `snapchain` user with
+your SSH key, and turns on the firewall. If it says a reboot is needed,
+reboot. Then log in as that user and start the node:
+
+```sh
+ssh snapchain@<ip>
+./node.sh start
+```
+
+`node.sh` runs Farcaster's official
+[`snapchain.sh`](https://snapchain.farcaster.xyz/guides/managing-a-node),
+the same one the
+[bootstrap one-liner](https://snapchain.farcaster.xyz/guides/running-a-node)
+installs. Everything lives in `~/snapchain`. On the first start it asks two
+things:
+
+- To agree that you get no rewards for running a node. Type `Yes`.
+- Your FID or username. It only picks the weekday for weekly auto-upgrades.
+  Press Enter to skip; auto-upgrade is then off.
+
+To run it without questions, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` and
+`SNAPCHAIN_OPERATOR_FID=<fid>` first.
+
+The other commands:
+
+```sh
+./node.sh status    # sync progress, per shard
+./node.sh logs      # follow the logs; Ctrl-C stops following, not the node
+./node.sh stop
+./node.sh upgrade   # latest release, then restart
+```
+
+### The snapshot, then sync
+
+A new node doesn't replay history from the start. It downloads a snapshot
+of several hundred GB, which takes a few hours. The API is down until that
+finishes:
+
+```
+$ ./node.sh status
+The node's API at http://localhost:3381 is not answering.
+Downloading the snapshot: shard 1, chunk 42 of 2672.
+This takes a few hours. The API comes up when it is done.
+```
+
+Then it syncs the blocks made since the snapshot. `status` reads
+`/v1/info`:
+
+```sh
+curl -s localhost:3381/v1/info | jq '.shardInfos'
+```
+
+and says how far each shard is behind:
+
+```
+$ ./node.sh status
+Snapchain 0.14.2 at http://localhost:3381
+  914092103 messages, 3354008 fids, 549 GB on disk
+
+  shard 0  height 47583086   1s behind      in sync
+  shard 1  height 48256318   45s behind     nearly in sync
+  shard 2  height 48091473   3h 7m behind   catching up
+
+Still catching up. Reads work, but recent messages may be missing.
+```
+
+Shard 0 is the block shard; it orders the other two. Shards 1 and 2 hold
+user messages, split by fid. "Behind" is `blockDelay`: how many seconds the
+shard's newest block is behind the clock. Under 10 seconds on every shard
+means in sync.
+
+### Ports
+
+| Port | | What |
+|---|---|---|
+| 3381 | TCP | HTTP API (what `Hub` talks to) |
+| 3382 | UDP | gossip with other nodes |
+| 3383 | TCP | gRPC API |
+
+All three must be reachable from the internet. That also means anyone can
+read from your node, like any public node.
+
+Docker publishes ports around `ufw`, so a firewall rule alone won't hide a
+container. `node.sh` binds Grafana (3000) and statsd (8125, 8126) to
+`127.0.0.1` for that reason. To see the Grafana dashboard, tunnel to it:
+
+```sh
+ssh -L 3000:localhost:3000 snapchain@<ip>   # then open http://localhost:3000
+```
+
+### Point the client at it
+
+```python
+async with Hub("http://<ip>:3381", rate=500, concurrency=64) as hub:
+    print(await hub.info())
+```
+
+```sh
+phunk --node http://<ip>:3381 info
+```
+
+On the server itself, use `http://localhost:3381`.
+
+### Read nodes and validators
+
+Both run the same binary. A
+[validator](https://snapchain.farcaster.xyz/node-types) proposes and votes
+on blocks. Only nodes whose keys are in the validator set can do that. A
+read node never votes. It follows the chain and serves the API, and anyone
+can run one. Both end up with the same data. A read node is a moment
+behind, because it fetches each block after validators decide it.
+
+A read node still accepts writes. Send a signed message to
+`/v1/submitMessage` and it checks the message, then
+[gossips it to the validators](https://snapchain.farcaster.xyz/node-types#message-submission-and-the-mempool).
+It keeps no copy. The message lands in a block once a validator picks it
+up. If the gossip is lost, the message is gone, so check that it arrived
+and resubmit if not. `phunk` only reads, so this matters only when you
+start writing.
+
 That's the whole stack: a node, an HTTP API, and a few traps to avoid.
 Everything else (feeds, search, recommendations, graph analysis) is
 something you can build on top.
 
 ---
 
-## 9. Writing: app keys, casts, follows
+## 10. Writing: app keys, casts, follows
 
 Reading needs nothing. Writing needs two keys and one rule.
 
@@ -559,7 +712,7 @@ itself); see the Snapchain guide on writing messages.
 
 ---
 
-## 10. A web client: `phunk ui`
+## 11. A web client: `phunk ui`
 
 Everything above, in a browser. `phunk ui` serves a small web client on
 your own machine:

@@ -18,7 +18,9 @@ licensed, public.
 | `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
+| `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
+| `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |
 | `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
@@ -31,6 +33,8 @@ PHUNK_LIVE=1 pytest     # also against https://haatz.quilibrium.com
 ```
 
 CI (`.github/workflows/ci.yml`) runs the offline tests on Python 3.10 and 3.13.
+`.github/workflows/pages.yml` builds the site (`python site/build.py`) and
+deploys it to GitHub Pages from `main`.
 
 ## Rules
 

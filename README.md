@@ -19,7 +19,9 @@ async def main():
 asyncio.run(main())
 ```
 
-New to reading from a node? **[Start with the tutorial](docs/TUTORIAL.md).**
+New to reading from a node? **[Start with the tutorial](docs/TUTORIAL.md)**,
+or read it on the [microsite](https://ramitphi.github.io/phunk-client/) with
+the quickstart and short concept pages.
 
 ## Install
 
@@ -94,7 +96,7 @@ async with Hub("http://localhost:3381") as hub:
 
 Messages match the official TypeScript library byte for byte
 (`tests/test_write.py` checks against its output). Read the
-[tutorial's writing chapter](docs/TUTORIAL.md#9-writing-app-keys-casts-follows)
+[tutorial's writing chapter](docs/TUTORIAL.md#10-writing-app-keys-casts-follows)
 first: it covers what a seed phrase can do and how to keep it safe.
 
 ## Node quirks it handles
@@ -146,13 +148,18 @@ phunk ui               # with the key from `phunk key add`: can post
 
 Without a key it is read-only and never asks for a seed phrase. It binds
 to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
-build step. See [the tutorial](docs/TUTORIAL.md#10-a-web-client-phunk-ui).
+build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 ## Which node
 
 The default is `https://haatz.quilibrium.com`, a public Hypersnap node on
 port 443 that sends CORS headers. Pass any other node's URL to `Hub(...)`,
 for example your own Snapchain at `http://localhost:3381`.
+
+To run your own read node on a fresh Ubuntu 22.04 server, use
+[`scripts/provision.sh`](scripts/provision.sh) and
+[`scripts/node.sh`](scripts/node.sh). See
+[step 9 of the tutorial](docs/TUTORIAL.md#9-run-your-own-node).
 
 ## Examples
 
