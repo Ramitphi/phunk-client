@@ -90,7 +90,7 @@ async def node(request):
     return web.Response(status=404)
 
 
-async def with_ui(test, *, fid=9, key=None):
+async def with_ui(test, *, fid=9, key=None, public=False):
     """Start the fake node and the UI against it; run `test(client, base, calls, submitted)`."""
     calls, submitted = [], []
     nodeapp = web.Application()
@@ -118,7 +118,7 @@ async def with_ui(test, *, fid=9, key=None):
     try:
         node_port = await start(nodeapp)
         async with Hub(f"http://127.0.0.1:{node_port}", rate=1000, retries=2) as hub:
-            ui = UI(hub, fid=fid, key=key)
+            ui = UI(hub, fid=fid, key=key, public=public)
             port = await start(make_app(ui))
             async with aiohttp.ClientSession() as client:
                 return await test(client, f"http://127.0.0.1:{port}", calls, submitted)

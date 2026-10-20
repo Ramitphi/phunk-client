@@ -753,6 +753,7 @@ your own machine:
 phunk ui --as dwr          # look at anyone's people, read-only
 phunk ui                   # as your app key's fid: follow, say hi, post
 phunk ui --open            # and open it in your browser
+phunk ui --public          # what phunk.social runs: read-only, actions open Farcaster
 ```
 
 Then visit `http://127.0.0.1:8008`.

@@ -40,9 +40,13 @@ KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e0
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 READ_ONLY_HELP = ("Read-only: no app key. To post, like and follow, run `phunk key add` in a terminal "
                   "(use a test account), then restart `phunk ui`.")
+PUBLIC_HELP = "Read-only. Follow, reply and like open in Farcaster."
 FEED_TTL = 300  # seconds a feed window stays cached
 SUGGEST_TTL = 600
 PAGE = 30
+# Cache sizes, so a long-running public server doesn't grow without end.
+MAX_USERS = 5000
+MAX_WINDOWS = 64
 
 
 # ------------------------------------------------------------------ helpers
@@ -134,17 +138,28 @@ def _split(value: str | None) -> set[str]:
     return {v.strip() for v in (value or "").split(",") if v.strip()}
 
 
+def _trim(cache: dict, cap: int) -> None:
+    """Drop the oldest entries until `cache` holds at most `cap`."""
+    while len(cache) > cap:
+        cache.pop(next(iter(cache)))
+
+
 # --------------------------------------------------------------------- state
 
 
 class UI:
-    """Caches and node calls behind the JSON API."""
+    """Caches and node calls behind the JSON API.
 
-    def __init__(self, hub: Hub, *, fid: int | None = None, key=None):
+    `public=True` is the hosted, read-only mode (phunk.social): no account of
+    its own, and the page sends follows, replies and likes to Farcaster.
+    """
+
+    def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False):
         self.hub = hub
         self.fid = fid
+        self.public = public
         self.writer = None
-        if key is not None and fid is not None:
+        if key is not None and fid is not None and not public:
             from .write import Writer
 
             self.writer = Writer(hub, fid, key)
@@ -163,7 +178,9 @@ class UI:
                     return await self.hub.user(fid)
                 except NodeError:
                     return User(fid=fid)
-            self._users[fid] = asyncio.ensure_future(load())
+            self._users[fid] = fut = asyncio.ensure_future(load())
+            _trim(self._users, MAX_USERS)
+            return await fut
         return await self._users[fid]
 
     async def names(self, fids) -> dict[int, str | None]:
@@ -218,6 +235,7 @@ class UI:
 
         fut = asyncio.ensure_future(load())
         self._feeds[key] = (time.monotonic(), fut)
+        _trim(self._feeds, MAX_WINDOWS)
         return await fut
 
     async def suggestions(self, fid: int, refresh: bool = False) -> list[dict]:
@@ -234,6 +252,7 @@ class UI:
                         for s, u in zip(found, users)]
             hit = (time.monotonic(), asyncio.ensure_future(load()))
             self._suggest[fid] = hit
+            _trim(self._suggest, MAX_WINDOWS)
         return [s for s in await hit[1] if s["fid"] not in self.followed_here]
 
     async def people(self, fid: int, refresh: bool = False) -> dict:
@@ -257,6 +276,7 @@ class UI:
                 return {"summary": feed["summary"], "cards": list(cards)}
             hit = (time.monotonic(), asyncio.ensure_future(load()))
             self._people[fid] = hit
+            _trim(self._people, MAX_WINDOWS)
         out = await hit[1]
         cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here) for c in out["cards"]]
         return {"summary": out["summary"], "cards": cards}
@@ -269,6 +289,63 @@ class UI:
         if self.fid is None:
             raise LookupError("pick an account to browse as")
         return self.fid
+
+    # ---------------------------------------------------- the read endpoints
+    # Each takes the query string as a dict and returns JSON. Shared by
+    # `phunk ui` (make_app) and the hosted site (api/index.py, via get_json).
+
+    async def me_json(self, q) -> dict:
+        hint = PUBLIC_HELP if self.public else (None if self.writer else READ_ONLY_HELP)
+        out = {"fid": self.fid, "can_write": self.writer is not None, "node": self.hub.url,
+               "public": self.public, "help": hint}
+        if self.fid is not None:
+            out["user"] = self.user_json(await self.user(self.fid))
+        return out
+
+    async def feed_json(self, q) -> dict:
+        fid = await self.who(q.get("who"))
+        hours = max(1, min(168, int(q.get("hours", 24))))
+        offset = max(0, int(q.get("offset", 0)))
+        limit = max(1, min(100, int(q.get("limit", PAGE))))
+        items = await self.feed_window(fid, hours, refresh=q.get("refresh") == "1")
+        kept = filter_by_app(items, only=_split(q.get("only")) or None, hide=_split(q.get("hide")))
+        return {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
+                "apps": app_counts(items), "casts": kept[offset:offset + limit],
+                "more": offset + limit < len(kept)}
+
+    async def suggestions_json(self, q) -> dict:
+        fid = await self.who(q.get("who"))
+        return {"fid": fid, "people": await self.suggestions(fid, refresh=q.get("refresh") == "1")}
+
+    async def people_json(self, q) -> dict:
+        fid = await self.who(q.get("who"))
+        return dict(await self.people(fid, refresh=q.get("refresh") == "1"), fid=fid)
+
+
+GET_ROUTES = {"/api/me": UI.me_json, "/api/feed": UI.feed_json,
+              "/api/suggestions": UI.suggestions_json, "/api/people": UI.people_json}
+
+
+async def answer(coro) -> tuple[int, dict]:
+    """Await an endpoint; turn the errors it can raise into (status, JSON)."""
+    try:
+        return 200, await coro
+    except LookupError as e:  # NotFound is not a LookupError; KeyError is
+        return 400, {"error": str(e).strip("'")}
+    except NotFound as e:
+        return 404, {"error": f"not found: {e}"}
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    except NodeError as e:
+        return 502, {"error": f"node error: {e}"}
+
+
+async def get_json(ui: UI, path: str, query) -> tuple[int, dict]:
+    """One GET of the read API: (status, JSON body)."""
+    route = GET_ROUTES.get(path)
+    if route is None:
+        return 404, {"error": "no such endpoint"}
+    return await answer(route(ui, query))
 
 
 # ---------------------------------------------------------------------- web
@@ -314,7 +391,8 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     def need_writer():
         if ui.writer is None:
-            raise web.HTTPForbidden(text=_dumps({"error": READ_ONLY_HELP, "read_only": True}),
+            raise web.HTTPForbidden(text=_dumps({"error": ui.public and PUBLIC_HELP or READ_ONLY_HELP,
+                                                 "read_only": True}),
                                     content_type="application/json")
         return ui.writer
 
@@ -329,62 +407,19 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         return data
 
     async def run(coro):
-        try:
-            return web.json_response(await coro)
-        except web.HTTPException:
-            raise
-        except LookupError as e:  # NotFound is not a LookupError; KeyError is
-            return _json_error(400, str(e).strip("'"))
-        except NotFound as e:
-            return _json_error(404, f"not found: {e}")
-        except ValueError as e:
-            return _json_error(400, str(e))
-        except NodeError as e:
-            return _json_error(502, f"node error: {e}")
+        status, data = await answer(coro)
+        return web.json_response(data, status=status)
 
     @r.get("/")
     async def index(request):
         return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
-    @r.get("/api/me")
-    async def me(request):
-        async def go():
-            out = {"fid": ui.fid, "can_write": ui.writer is not None, "node": ui.hub.url,
-                   "help": None if ui.writer else READ_ONLY_HELP}
-            if ui.fid is not None:
-                out["user"] = ui.user_json(await ui.user(ui.fid))
-            return out
-        return await run(go())
+    async def read(request):
+        status, data = await get_json(ui, request.path, request.query)
+        return web.json_response(data, status=status)
 
-    @r.get("/api/feed")
-    async def feed(request):
-        q = request.query
-
-        async def go():
-            fid = await ui.who(q.get("who"))
-            hours = max(1, min(168, int(q.get("hours", 24))))
-            offset = max(0, int(q.get("offset", 0)))
-            limit = max(1, min(100, int(q.get("limit", PAGE))))
-            items = await ui.feed_window(fid, hours, refresh=q.get("refresh") == "1")
-            kept = filter_by_app(items, only=_split(q.get("only")) or None, hide=_split(q.get("hide")))
-            return {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
-                    "apps": app_counts(items), "casts": kept[offset:offset + limit],
-                    "more": offset + limit < len(kept)}
-        return await run(go())
-
-    @r.get("/api/suggestions")
-    async def suggestions(request):
-        async def go():
-            fid = await ui.who(request.query.get("who"))
-            return {"fid": fid, "people": await ui.suggestions(fid, refresh=request.query.get("refresh") == "1")}
-        return await run(go())
-
-    @r.get("/api/people")
-    async def people(request):
-        async def go():
-            fid = await ui.who(request.query.get("who"))
-            return dict(await ui.people(fid, refresh=request.query.get("refresh") == "1"), fid=fid)
-        return await run(go())
+    for path in GET_ROUTES:
+        r.get(path)(read)
 
     @r.post("/api/cast")
     async def cast(request):
@@ -453,9 +488,9 @@ def is_loopback(host: str) -> bool:
 
 
 async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
-                key=None, open_browser: bool = False) -> None:
-    """Run the UI until interrupted."""
-    ui = UI(hub, fid=fid, key=key)
+                key=None, open_browser: bool = False, public: bool = False) -> None:
+    """Run the UI until interrupted. `public=True` previews the hosted, read-only site."""
+    ui = UI(hub, fid=fid, key=key, public=public)
     app = make_app(ui, check_host=is_loopback(host))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -464,6 +499,8 @@ async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int
     shown = f"[{host}]" if ":" in host else host
     url = f"http://{shown}:{port}/"
     mode = f"as fid {fid}, can post" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
+    if public:
+        mode = "public preview, read-only"
     print(f"phunk ui on {url} ({mode}, node {hub.url})")
     if not is_loopback(host):
         print("warning: not bound to localhost. Anyone who can reach this port can use it"

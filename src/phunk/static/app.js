@@ -1,4 +1,5 @@
-// phunk ui: plain JS, no build step. Talks to the local server's /api/*.
+// phunk ui: plain JS, no build step. Talks to the server's /api/*: the local
+// `phunk ui`, or the hosted, read-only site (phunk.social) when /api/me says public.
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
@@ -20,6 +21,7 @@ const store = {
 const state = {
   me: null,
   who: new URLSearchParams(location.search).get("as") || "",
+  whoFromUrl: new URLSearchParams(location.search).has("as"),
   hours: 24,
   offset: 0,
   hidden: new Set(store.get("hiddenApps", [])),
@@ -115,6 +117,32 @@ function handle(user) {
   return user.username ? `@${user.username}` : `fid ${user.fid}`;
 }
 
+// The hosted site can't post for anyone: acting on a person or a cast opens
+// it in Farcaster instead.
+const FARCASTER = "https://farcaster.xyz";
+const isPublic = () => !!(state.me && state.me.public);
+
+function openFarcaster(path) {
+  window.open(FARCASTER + path, "_blank", "noopener,noreferrer");
+}
+
+function profilePath(user) {
+  return user.username ? `/${encodeURIComponent(user.username)}` : `/~/profiles/${user.fid}`;
+}
+
+function castPath(c) {
+  return c.author && c.author.username
+    ? `/${encodeURIComponent(c.author.username)}/${c.hash.slice(0, 10)}` : `/~/conversations/${c.hash}`;
+}
+
+function composePath(text, channel) {
+  const q = new URLSearchParams();
+  if (text) q.set("text", text);
+  if (channel && !channel.includes("://")) q.set("channelKey", channel.replace(/^\//, ""));
+  const qs = q.toString();
+  return `/~/compose${qs ? "?" + qs : ""}`;
+}
+
 function needKey() {
   if (state.me && state.me.can_write && !viewingSelf()) {
     toast("You're viewing someone else's people, read-only. Press \"Back to me\" to act.", 6000);
@@ -152,6 +180,7 @@ function castCard(c) {
   const toggle = (kind) => {
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
+      if (isPublic()) return openFarcaster(castPath(c));
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
@@ -168,6 +197,7 @@ function castCard(c) {
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
   const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
+    if (isPublic()) return openFarcaster(castPath(c));
     if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -217,6 +247,11 @@ function setAllApps(show) {
   loadFeed(true);
 }
 
+function lookupPrompt() {
+  return isPublic() ? "Type your Farcaster username above to see your people."
+    : "Look someone up first, for example dwr.";
+}
+
 function canBrowse() {
   return state.who || (state.me && state.me.fid !== null);
 }
@@ -226,7 +261,7 @@ async function loadFeed(reset, refresh = false) {
   const more = $("#more");
   const seq = ++state.feedSeq;
   if (!canBrowse()) {
-    feed.replaceChildren(h("div", { class: "card empty" }, "Look someone up first, for example dwr."));
+    feed.replaceChildren(h("div", { class: "card empty" }, lookupPrompt()));
     more.hidden = true;
     return;
   }
@@ -293,7 +328,9 @@ function personCard(p) {
 
   const follow = h("button", { type: "button", class: p.following ? "following" : null }, p.following ? "Following" : "Follow");
   if (p.following) follow.disabled = true;
+  if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
+    if (isPublic()) return openFarcaster(profilePath(p));
     if (!canAct) return needKey();
     follow.disabled = true;
     try {
@@ -311,6 +348,10 @@ function personCard(p) {
   const body = h("div", { class: "pbody" });
 
   hi.addEventListener("click", () => {
+    if (isPublic()) {
+      return openFarcaster(latest ? castPath(latest)
+        : composePath(p.username ? `@${p.username} ` : ""));
+    }
     if (!canAct) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -396,7 +437,7 @@ async function loadPeople(refresh = false) {
   const box = $("#people");
   const seq = ++state.peopleSeq;
   if (!canBrowse()) {
-    box.replaceChildren(h("div", { class: "card empty" }, "Look someone up first, for example dwr."));
+    box.replaceChildren(h("div", { class: "card empty" }, lookupPrompt()));
     $("#summary").replaceChildren();
     return;
   }
@@ -438,6 +479,7 @@ function setHours(v) {
 const narrow = () => matchMedia("(max-width: 800px)").matches;
 
 function setTab(name) {
+  if (name === "compose" && isPublic()) { openFarcaster(composePath()); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
   state.tab = name;
@@ -486,7 +528,9 @@ function renderWho() {
   const me = state.me;
   const who = $("#who");
   const self = viewingSelf();
-  if (!self) {
+  if (isPublic()) {
+    who.textContent = state.who ? (/^\d+$/.test(state.who) ? `fid ${state.who}` : `@${state.who.replace(/^@/, "")}`) : "";
+  } else if (!self) {
     who.textContent = `viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")} · read-only`;
   } else if (me.user) {
     who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
@@ -501,6 +545,7 @@ function lookUp(name) {
   const url = new URL(location.href);
   if (state.who) url.searchParams.set("as", state.who); else url.searchParams.delete("as");
   history.replaceState(null, "", url);
+  if (isPublic()) store.set("who", state.who);
   $("#lookup-name").value = state.who;
   renderWho();
   state.feedLoaded = false;
@@ -522,10 +567,14 @@ async function init() {
   try {
     state.me = await api("/api/me");
   } catch (e) {
-    $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the local server: ${e.message}`));
+    $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the server: ${e.message}`));
     return;
   }
-  if (!state.me.can_write) {
+  if (isPublic()) {
+    if (!state.whoFromUrl) state.who = store.get("who", "");
+    $('label[for="lookup-name"]').textContent = "Your Farcaster username";
+    $("#lookup button[type=submit]").textContent = "See my people";
+  } else if (!state.me.can_write) {
     const banner = $("#banner");
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
     banner.hidden = false;

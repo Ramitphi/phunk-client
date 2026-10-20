@@ -171,6 +171,8 @@ async def run_feed(hub: Hub, args) -> None:
 async def run_ui(hub: Hub, args) -> None:
     from .ui import serve
 
+    if args.public:  # what phunk.social serves: no account, no key
+        return await serve(hub, host=args.host, port=args.port, open_browser=args.open, public=True)
     found = None if args.read_only else find_key()
     fid, key = found if found else (None, None)
     if args.who:
@@ -277,6 +279,8 @@ def main(argv=None) -> None:
     u.add_argument("--port", type=int, default=8008, help="port (default 8008)")
     u.add_argument("--open", action="store_true", help="open it in your browser")
     u.add_argument("--read-only", action="store_true", help="ignore any saved app key")
+    u.add_argument("--public", action="store_true",
+                   help="preview the hosted site: read-only, follows and replies open Farcaster")
     try:
         asyncio.run(run(p.parse_args(argv)))
     except KeyboardInterrupt:
