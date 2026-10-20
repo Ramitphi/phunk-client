@@ -4,6 +4,7 @@
 const $ = (sel) => document.querySelector(sel);
 const PAGE = 30;
 const WINDOWS = [6, 24, 72, 168];
+const WINDOW_NAMES = { 6: "6 hours", 24: "24 hours", 72: "3 days", 168: "7 days" };
 
 const store = {
   get(k, fallback) {
@@ -29,6 +30,9 @@ const state = {
   feedSeq: 0,
   peopleSeq: 0,
   feedLoaded: false,
+  channels: new Set(),
+  tab: "people",
+  lastTab: "people",
 };
 
 // --------------------------------------------------------------- helpers
@@ -89,12 +93,22 @@ function ago(ts) {
 
 function avatar(user) {
   const letter = (user.display_name || user.username || "?").trim().charAt(0).toUpperCase() || "?";
+  const tone = `avatar tone${(Number(user.fid) || 0) % 5}`;
   if (user.pfp && /^https:\/\//.test(user.pfp)) {
     const img = h("img", { class: "avatar", src: user.pfp, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
-    img.addEventListener("error", () => img.replaceWith(h("div", { class: "avatar", "aria-hidden": "true" }, letter)));
+    img.addEventListener("error", () => img.replaceWith(h("div", { class: tone, "aria-hidden": "true" }, letter)));
     return img;
   }
-  return h("div", { class: "avatar", "aria-hidden": "true" }, letter);
+  return h("div", { class: tone, "aria-hidden": "true" }, letter);
+}
+
+// "dev" -> "/dev"; a channel URL stays as it is.
+function chan(name) {
+  return name.includes("://") ? name : `/${name}`;
+}
+
+function noteChannel(name) {
+  if (name && !name.includes("://")) state.channels.add(name);
 }
 
 function handle(user) {
@@ -119,8 +133,8 @@ function castCard(c) {
     h("span", { class: "name" }, c.author.display_name || handle(c.author)),
     c.author.username && c.author.display_name ? h("span", { class: "muted" }, handle(c.author)) : null,
     h("span", { class: "muted", title: new Date(c.ts * 1000).toLocaleString() }, ago(c.ts)),
-    h("span", { class: "chip", title: "app that signed this cast" }, c.app),
-    c.channel ? h("span", { class: "chip", title: c.channel_url }, c.channel) : null,
+    h("span", { class: "chip app", title: "app that signed this cast" }, c.app),
+    c.channel ? h("span", { class: "chip channel", title: c.channel_url }, chan(c.channel)) : null,
   );
   const replyTo = c.reply_to
     ? h("div", { class: "muted small" }, `replying to ${c.reply_to.username ? "@" + c.reply_to.username : "fid " + c.reply_to.fid}`)
@@ -152,7 +166,7 @@ function castCard(c) {
   };
 
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
-  const replyBtn = h("button", { type: "button", class: "ghost" }, "Reply");
+  const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
     if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
@@ -212,7 +226,7 @@ async function loadFeed(reset, refresh = false) {
   const more = $("#more");
   const seq = ++state.feedSeq;
   if (!canBrowse()) {
-    feed.replaceChildren(h("div", { class: "card empty" }, "Look someone up above, for example dwr."));
+    feed.replaceChildren(h("div", { class: "card empty" }, "Look someone up first, for example dwr."));
     more.hidden = true;
     return;
   }
@@ -234,8 +248,10 @@ async function loadFeed(reset, refresh = false) {
     state.apps = d.apps;
     renderApps();
     feed.append(...d.casts.map(castCard));
+    for (const c of d.casts) noteChannel(c.channel);
+    renderChannelPicks();
     state.offset = d.offset + d.casts.length;
-    const label = $("#hours").selectedOptions[0].textContent;
+    const label = WINDOW_NAMES[state.hours];
     $("#feed-status").textContent = `${d.total} of ${d.all} casts, last ${label}`;
     if (!d.total) {
       feed.replaceChildren(h("div", { class: "card empty" },
@@ -244,7 +260,7 @@ async function loadFeed(reset, refresh = false) {
     const wider = WINDOWS.find((w) => w > state.hours);
     if (d.more) { more.textContent = "Load more"; more.hidden = false; more.dataset.mode = "more"; }
     else if (wider && d.all) {
-      more.textContent = `Load older (widen to ${$(`#hours option[value="${wider}"]`).textContent})`;
+      more.textContent = `Load older (widen to ${WINDOW_NAMES[wider]})`;
       more.hidden = false; more.dataset.mode = "wider";
     } else more.hidden = true;
   } catch (e) {
@@ -275,7 +291,7 @@ function personCard(p) {
   const [label, hint] = KIND[p.kind] || [p.kind, ""];
   const canAct = state.me.can_write && viewingSelf();
 
-  const follow = h("button", { type: "button" }, p.following ? "Following" : "Follow");
+  const follow = h("button", { type: "button", class: p.following ? "following" : null }, p.following ? "Following" : "Follow");
   if (p.following) follow.disabled = true;
   follow.addEventListener("click", async () => {
     if (!canAct) return needKey();
@@ -284,6 +300,7 @@ function personCard(p) {
       await api("/api/follow", { fid: p.fid, action: "follow" });
       p.following = true;
       follow.textContent = "Following";
+      follow.classList.add("following");
       toast(`Following ${handle(p)}.`);
     } catch (e) { toast(e.message); follow.disabled = false; }
   });
@@ -333,7 +350,7 @@ function personCard(p) {
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
     h("span", {}, p.why.join(" ")));
   const previews = (p.latest || []).map((c) => h("div", { class: "preview" },
-    h("span", { class: "muted small" }, `${ago(c.ts)}${c.channel ? " · " + c.channel : ""}${c.app ? " · " + c.app : ""}`),
+    h("span", { class: "muted small" }, `${ago(c.ts)}${c.channel ? " · " + chan(c.channel) : ""}${c.app ? " · " + c.app : ""}`),
     h("div", { class: "text clamp" }, c.text || (c.embeds && c.embeds.length ? "(a link or image)" : "(empty cast)"))));
 
   body.append(head,
@@ -379,7 +396,7 @@ async function loadPeople(refresh = false) {
   const box = $("#people");
   const seq = ++state.peopleSeq;
   if (!canBrowse()) {
-    box.replaceChildren(h("div", { class: "card empty" }, "Look someone up above, for example dwr."));
+    box.replaceChildren(h("div", { class: "card empty" }, "Look someone up first, for example dwr."));
     $("#summary").replaceChildren();
     return;
   }
@@ -393,6 +410,8 @@ async function loadPeople(refresh = false) {
     if (seq !== state.peopleSeq) return;
     state.cards = d.cards;
     state.summary = d.summary;
+    for (const c of d.cards) for (const l of c.latest || []) noteChannel(l.channel);
+    renderChannelPicks();
     renderSummary();
     renderPeople();
   } catch (e) {
@@ -409,10 +428,58 @@ function applyTheme(t) {
   $("#theme").textContent = `Theme: ${t}`;
 }
 
+function setHours(v) {
+  state.hours = v;
+  for (const r of document.querySelectorAll("#hours input")) r.checked = Number(r.value) === v;
+}
+
+// Phones show one pane at a time from the bottom bar; wide screens keep the
+// lookup on top and switch People / Casts / New cast with the top tabs.
+const narrow = () => matchMedia("(max-width: 800px)").matches;
+
 function setTab(name) {
+  if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
+  if (name !== "compose") state.lastTab = name;
+  state.tab = name;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
   if (name === "casts" && !state.feedLoaded) { state.feedLoaded = true; loadFeed(true); }
+  if (name === "compose") $("#compose-text").focus();
+}
+
+// Channels seen in casts and people's previews, as one-tap picks in Compose.
+function renderChannelPicks() {
+  const box = $("#compose-channels");
+  const input = $("#compose-channel");
+  const names = [...state.channels].slice(0, 8);
+  box.hidden = !names.length;
+  box.replaceChildren(...names.map((n) => {
+    const b = h("button", { type: "button", class: "pick", "aria-pressed": String(input.value === n) }, chan(n));
+    b.addEventListener("click", () => {
+      input.value = input.value === n ? "" : n;
+      renderChannelPicks();
+    });
+    return b;
+  }));
+}
+
+// The You screen: who this client acts as, and whose people are shown.
+function renderAccount() {
+  const me = state.me;
+  const box = $("#account");
+  const rows = [];
+  if (me.user) {
+    rows.push(h("div", { class: "person-row" }, avatar(me.user), h("div", {},
+      h("div", { class: "name" }, me.user.display_name || handle(me.user)),
+      h("div", { class: "muted mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
+      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, me.can_write ? "can post" : "read-only")));
+  }
+  if (!viewingSelf()) {
+    rows.push(h("p", { class: "muted small" },
+      `Viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")}'s people, read-only.`));
+  }
+  box.replaceChildren(...rows);
+  box.hidden = !rows.length;
 }
 
 function renderWho() {
@@ -425,8 +492,8 @@ function renderWho() {
     who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
   } else who.textContent = "read-only";
   $("#lookup-me").hidden = self || !me.user;
-  $("#new-cast").hidden = !(me.can_write && self);
-  if (!(me.can_write && self)) $("#compose").hidden = true;
+  if (!(me.can_write && self) && state.tab === "compose") setTab(state.lastTab);
+  renderAccount();
 }
 
 function lookUp(name) {
@@ -439,6 +506,7 @@ function lookUp(name) {
   state.feedLoaded = false;
   loadPeople();
   if ($('.tabs button[data-tab="casts"]').getAttribute("aria-selected") === "true") { state.feedLoaded = true; loadFeed(true); }
+  if (state.tab === "you") setTab("people");
 }
 
 async function init() {
@@ -468,11 +536,8 @@ async function init() {
   $("#lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("#lookup-name").value); });
   $("#lookup-me").addEventListener("click", () => lookUp(""));
 
-  $("#new-cast").addEventListener("click", () => {
-    const c = $("#compose");
-    c.hidden = !c.hidden;
-    if (!c.hidden) $("#compose-text").focus();
-  });
+  $("#compose-close").addEventListener("click", () => setTab(state.lastTab));
+  $("#compose-channel").addEventListener("input", renderChannelPicks);
   const text = $("#compose-text");
   text.addEventListener("input", () => {
     $("#compose-count").textContent = `${new TextEncoder().encode(text.value).length}/1024`;
@@ -487,19 +552,20 @@ async function init() {
       await api("/api/cast", { text: text.value, channel: $("#compose-channel").value });
       text.value = "";
       $("#compose-count").textContent = "0/1024";
-      $("#compose").hidden = true;
+      $("#compose-channel").value = "";
+      renderChannelPicks();
+      setTab(state.lastTab);
       toast("Cast sent.");
     } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   });
 
-  $("#hours").value = String(state.hours);
-  $("#hours").addEventListener("change", () => { state.hours = Number($("#hours").value); loadFeed(true); });
+  setHours(state.hours);
+  $("#hours").addEventListener("change", (ev) => { setHours(Number(ev.target.value)); loadFeed(true); });
   $("#refresh").addEventListener("click", () => loadFeed(true, true));
   $("#more").addEventListener("click", () => {
     if ($("#more").dataset.mode === "wider") {
       const wider = WINDOWS.find((w) => w > state.hours);
-      state.hours = wider;
-      $("#hours").value = String(wider);
+      setHours(wider);
       loadFeed(true);
     } else loadFeed(false);
   });
@@ -507,7 +573,7 @@ async function init() {
   $("#apps-none").addEventListener("click", () => setAllApps(false));
   $("#people-refresh").addEventListener("click", () => loadPeople(true));
 
-  setTab("people");
+  setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
 }
 

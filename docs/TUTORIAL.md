@@ -784,6 +784,11 @@ The **Casts** tab has the classic feed:
   "unknown". Untick one to hide its casts.
 * **New cast**, to post, optionally to a channel.
 
+**New cast** opens a composer that offers the channels it has seen as
+one-tap picks. On a phone the page becomes four screens, switched from a
+bottom bar: People, Casts, the composer (the **+**) and You (who you are,
+and the search box to look up anyone's people).
+
 Without an app key it is read-only: everything browses, and the write
 buttons tell you to run `phunk key add`. The page never asks for a seed
 phrase. The server binds to 127.0.0.1, answers only to a local Host, and
