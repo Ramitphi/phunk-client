@@ -131,19 +131,28 @@ phunk post "hello" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<hash>
 phunk follow dwr
 phunk feed --hide warpcast         # who you follow, filtered by app
-phunk ui                           # local web client: feed, app filter, people to follow
+phunk ui                           # local web client: people to connect with, then casts
 ```
 
 ## Web client
 
-`phunk ui` serves a small web client on `http://127.0.0.1:8008`: your feed
-with the app that signed each cast, a checkbox filter by app, people to
-follow (from the node only, with the reason for each), and posting,
-replies, likes, recasts and follows with your app key.
+`phunk ui` serves a small web client on `http://127.0.0.1:8008`. Its main
+screen is a feed of **people**, not posts: who to connect with, one plain
+reason each, their latest casts, and Follow / Say hi / Not now.
+
+* **Reconnect**: people you talked to who moved to another app, went quiet,
+  or whom you never followed.
+* **Your circle**: friends of friends with many mutual follows.
+* **Bridge**: a few mutual follows, but posting from another app or in
+  channels you don't use.
+
+The **Casts** tab has the classic feed with the app that signed each cast,
+a filter by app, and a **New cast** button. Anyone's people feed can be
+looked up by name, read-only.
 
 ```sh
-phunk ui --as dwr      # read-only: browse anyone's feed
-phunk ui               # with the key from `phunk key add`: can post
+phunk ui --as dwr      # read-only: look at anyone's people
+phunk ui               # with the key from `phunk key add`: follow, say hi, post
 ```
 
 Without a key it is read-only and never asks for a seed phrase. It binds

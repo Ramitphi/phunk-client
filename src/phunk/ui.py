@@ -1,7 +1,10 @@
 """`phunk ui`: a small local web client.
 
     phunk ui                 # http://127.0.0.1:8008, as your saved app key's fid
-    phunk ui --as dwr        # browse someone's feed, read-only
+    phunk ui --as dwr        # look at someone else's people feed, read-only
+
+The main screen is a feed of people to connect with (see `phunk.people`),
+not posts. Casts live in a second tab.
 
 The page is plain HTML, CSS and JS from `phunk/static`. It talks to this
 server's JSON API, which talks to the node through one `Hub`. With an app key
@@ -26,6 +29,7 @@ from aiohttp import web
 
 from .hub import Hub, NodeError, NotFound
 from .models import Cast, User
+from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
 
@@ -147,6 +151,7 @@ class UI:
         self._users: dict[int, asyncio.Future] = {}
         self._feeds: dict[tuple[int, int], tuple[float, asyncio.Future]] = {}
         self._suggest: dict[int, tuple[float, asyncio.Future]] = {}
+        self._people: dict[int, tuple[float, asyncio.Future]] = {}
         self.followed_here: set[int] = set()  # keep them out of suggestions
 
     # ------------------------------------------------------------ cached reads
@@ -230,6 +235,31 @@ class UI:
             hit = (time.monotonic(), asyncio.ensure_future(load()))
             self._suggest[fid] = hit
         return [s for s in await hit[1] if s["fid"] not in self.followed_here]
+
+    async def people(self, fid: int, refresh: bool = False) -> dict:
+        """The people feed for `fid`: cards plus a summary. Cached."""
+        hit = self._people.get(fid)
+        if not (hit and not refresh and time.monotonic() - hit[0] < SUGGEST_TTL and not (
+                hit[1].done() and hit[1].exception())):
+            async def load():
+                feed = await people_feed(self.hub, fid, limit=30, channel_name=lambda u: channel_name(u) or u)
+                profiles = feed["profiles"]
+
+                async def card_json(c):
+                    u = await self.user(c.fid)
+                    p = profiles.get(c.fid)
+                    latest = [await self.cast_json(x) for x in (p.latest if p else [])]
+                    return dict(self.user_json(u), kind=c.kind, why=c.why, talked=c.talked,
+                                following=c.following, followed_by=len(c.followed_by),
+                                app_now=p.app_now if p else None, app_before=p.app_before if p else None,
+                                latest=latest)
+                cards = await asyncio.gather(*(card_json(c) for c in feed["cards"]))
+                return {"summary": feed["summary"], "cards": list(cards)}
+            hit = (time.monotonic(), asyncio.ensure_future(load()))
+            self._people[fid] = hit
+        out = await hit[1]
+        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here) for c in out["cards"]]
+        return {"summary": out["summary"], "cards": cards}
 
     async def who(self, value: str | None) -> int:
         """A username or fid from the query, or the key's fid."""
@@ -347,6 +377,13 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         async def go():
             fid = await ui.who(request.query.get("who"))
             return {"fid": fid, "people": await ui.suggestions(fid, refresh=request.query.get("refresh") == "1")}
+        return await run(go())
+
+    @r.get("/api/people")
+    async def people(request):
+        async def go():
+            fid = await ui.who(request.query.get("who"))
+            return dict(await ui.people(fid, refresh=request.query.get("refresh") == "1"), fid=fid)
         return await run(go())
 
     @r.post("/api/cast")

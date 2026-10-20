@@ -17,91 +17,88 @@
 
 <div id="banner" class="banner" hidden></div>
 
-<!-- On phones this is the bottom bar; on wide screens every pane shows at once. -->
-<nav class="tabs" role="tablist" aria-label="Screens">
-  <button type="button" role="tab" data-tab="feed" aria-selected="true">Feed</button>
-  <button type="button" role="tab" data-tab="people" aria-selected="false">People</button>
-  <button type="button" role="tab" data-tab="compose" aria-selected="false" aria-label="New cast" class="plus"></button>
-  <button type="button" role="tab" data-tab="you" aria-selected="false">You</button>
-</nav>
-
 <main class="layout">
-  <div class="main-col">
-    <section id="you-pane" class="pane" data-pane="you">
-      <div class="hero">
-        <span class="logo big" aria-hidden="true">φ</span>
-        <h1>Farcaster, straight from the <span class="hl">node</span></h1>
-        <p class="muted">No API key. No middleman. A Snapchain node and one small client.</p>
-      </div>
-      <div id="account" class="card account" hidden></div>
-      <form id="browse" class="card browse" hidden>
-        <label for="browse-name">Browse as</label>
-        <div class="row">
-          <input id="browse-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
-          <button type="submit" class="cta">Go</button>
-        </div>
-      </form>
-      <p class="foot muted small">MIT licensed · <a href="https://github.com/Ramitphi/phunk-client" target="_blank" rel="noopener noreferrer">phunk-client on GitHub</a></p>
-    </section>
-
-    <section id="compose-pane" class="pane" data-pane="compose">
-      <div class="sheet-head">
-        <h1>New cast</h1>
-        <button id="compose-close" type="button" class="ghost round" aria-label="Close">×</button>
-      </div>
-      <form id="compose" class="card compose">
-        <label for="compose-text" class="sr-only">Cast text</label>
-        <textarea id="compose-text" rows="3" maxlength="1024" placeholder="What's happening?"></textarea>
-        <div class="row">
-          <label for="compose-channel" class="sr-only">Channel</label>
-          <input id="compose-channel" placeholder="channel (optional): name or URL" autocomplete="off" autocapitalize="off">
-          <span id="compose-count" class="muted small">0/1024</span>
-          <div id="compose-channels" class="channel-picks" hidden></div>
-          <button type="submit" class="cta">Cast</button>
-        </div>
-      </form>
-      <p class="sheet-note muted small">Goes straight to your node, signed with your app key.</p>
-    </section>
-
-    <section id="feed-pane" class="pane" data-pane="feed">
-      <div class="card controls">
-        <div class="row">
-          <fieldset id="hours" class="pills">
-            <legend>Window</legend>
-            <label><input type="radio" name="hours" value="6">6h</label>
-            <label><input type="radio" name="hours" value="24" checked>24h</label>
-            <label><input type="radio" name="hours" value="72">3d</label>
-            <label><input type="radio" name="hours" value="168">7d</label>
-          </fieldset>
-          <button id="refresh" type="button" class="ghost">Refresh</button>
-          <span id="feed-status" class="muted small"></span>
-        </div>
-        <details id="apps-box">
-          <summary>Apps <span id="apps-summary" class="muted small"></span></summary>
-          <p class="muted small">Show casts signed by these apps. Unticked apps are hidden.</p>
-          <div class="row small">
-            <button type="button" class="ghost small" id="apps-all">All</button>
-            <button type="button" class="ghost small" id="apps-none">None</button>
-          </div>
-          <div id="apps" class="apps"></div>
-        </details>
-      </div>
-
-      <div id="feed" class="feed" aria-live="polite"></div>
-      <button id="more" type="button" class="ghost wide" hidden>Load more</button>
-    </section>
-  </div>
-
-  <aside id="people-pane" class="pane" data-pane="people">
-    <div class="card">
-      <div class="row between">
-        <h2>People to <span class="hl">follow</span></h2>
-        <button id="people-refresh" type="button" class="ghost small">Refresh</button>
-      </div>
-      <p class="muted small">From the node only: who the people you follow follow, and who posts in your channels.</p>
-      <div id="people"></div>
+  <!-- You: on phones its own screen; on wide screens only the lookup shows. -->
+  <section id="you-pane" class="pane" data-pane="you">
+    <div class="hero">
+      <span class="logo big" aria-hidden="true">φ</span>
+      <h1>Farcaster, straight from the <span class="hl">node</span></h1>
+      <p class="muted">No API key. No middleman. A Snapchain node and one small client.</p>
     </div>
-  </aside>
+    <div id="account" class="card account" hidden></div>
+    <form id="lookup" class="lookup">
+      <label for="lookup-name">See anyone's people</label>
+      <div class="row">
+        <input id="lookup-name" placeholder="username or fid, e.g. dwr" autocomplete="off" autocapitalize="off">
+        <button type="submit" class="cta">Look up</button>
+        <button type="button" id="lookup-me" class="ghost" hidden>Back to me</button>
+      </div>
+    </form>
+    <p class="foot muted small">MIT licensed · <a href="https://github.com/Ramitphi/phunk-client" target="_blank" rel="noopener noreferrer">phunk-client on GitHub</a></p>
+  </section>
+
+  <!-- Top tabs on wide screens, the bottom bar on phones. -->
+  <nav class="tabs" role="tablist" aria-label="Screens">
+    <button type="button" role="tab" data-tab="people" aria-selected="true">People</button>
+    <button type="button" role="tab" data-tab="casts" aria-selected="false">Casts</button>
+    <button type="button" role="tab" data-tab="compose" aria-selected="false" aria-label="New cast" class="plus"><span class="plus-label">New cast</span></button>
+    <button type="button" role="tab" data-tab="you" aria-selected="false" class="you-tab">You</button>
+  </nav>
+
+  <section id="people-pane" class="pane" data-pane="people">
+    <h1 class="pane-title">Your <span class="hl">people</span></h1>
+    <div id="summary" class="summary"></div>
+    <div id="people" class="people" aria-live="polite"></div>
+    <div class="row between muted small foot">
+      <span id="people-status"></span>
+      <button id="people-refresh" type="button" class="ghost small">Refresh</button>
+    </div>
+  </section>
+
+  <section id="compose-pane" class="pane" data-pane="compose">
+    <div class="sheet-head">
+      <h1>New cast</h1>
+      <button id="compose-close" type="button" class="ghost round" aria-label="Close">×</button>
+    </div>
+    <form id="compose" class="card compose">
+      <textarea id="compose-text" rows="5" maxlength="1024" placeholder="What's happening?" aria-label="New cast"></textarea>
+      <div class="row">
+        <input id="compose-channel" placeholder="channel (optional): name or URL" autocomplete="off" autocapitalize="off" aria-label="Channel">
+        <span id="compose-count" class="muted small">0/1024</span>
+        <div id="compose-channels" class="channel-picks" hidden></div>
+        <button type="submit" class="cta">Cast</button>
+      </div>
+    </form>
+    <p class="sheet-note muted small">Goes straight to your node, signed with your app key.</p>
+  </section>
+
+  <section id="casts-pane" class="pane" data-pane="casts">
+    <div class="card controls">
+      <div class="row">
+        <fieldset id="hours" class="pills">
+          <legend>Window</legend>
+          <label><input type="radio" name="hours" value="6">6h</label>
+          <label><input type="radio" name="hours" value="24" checked>24h</label>
+          <label><input type="radio" name="hours" value="72">3d</label>
+          <label><input type="radio" name="hours" value="168">7d</label>
+        </fieldset>
+        <button id="refresh" type="button" class="ghost">Refresh</button>
+        <span id="feed-status" class="muted small"></span>
+      </div>
+      <details id="apps-box">
+        <summary>Apps <span id="apps-summary" class="muted small"></span></summary>
+        <p class="muted small">Show casts signed by these apps. Unticked apps are hidden.</p>
+        <div class="row small">
+          <button type="button" class="ghost small" id="apps-all">All</button>
+          <button type="button" class="ghost small" id="apps-none">None</button>
+        </div>
+        <div id="apps" class="apps"></div>
+      </details>
+    </div>
+
+    <div id="feed" class="feed" aria-live="polite"></div>
+    <button id="more" type="button" class="ghost wide" hidden>Load more</button>
+  </section>
 </main>
 
 <div id="toast" class="toast" role="status" hidden></div>

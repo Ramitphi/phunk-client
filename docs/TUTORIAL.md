@@ -718,23 +718,44 @@ Everything above, in a browser. `phunk ui` serves a small web client on
 your own machine:
 
 ```sh
-phunk ui --as dwr          # browse anyone's feed, read-only
-phunk ui                   # as your app key's fid: post, reply, like, recast, follow
+phunk ui --as dwr          # look at anyone's people, read-only
+phunk ui                   # as your app key's fid: follow, say hi, post
 phunk ui --open            # and open it in your browser
 ```
 
-Then visit `http://127.0.0.1:8008`. It shows:
+Then visit `http://127.0.0.1:8008`.
 
-* **Your feed**: recent casts from everyone you follow, newest first, each
-  with the app that signed it. Pick a window (6 hours to 7 days) and load
-  more.
-* **An app filter**: a checkbox for every app seen in the feed, plus
-  "own key" and "unknown". Untick one to hide its casts.
-* **People to follow**: worked out from the node alone (below).
+Its main screen is a feed of **people**, not posts. As people spread across
+clients, the risk isn't that the network dies, it's that it splits into
+islands and you lose the people you used to talk to. So each card is one
+person to connect with: who they are, which app they post from now, one
+plain reason, their latest casts, and **Follow**, **Say hi** (a reply to
+their latest cast) and **Not now**. There are three kinds:
 
-On a phone the same page becomes four screens, switched from a bottom bar:
-Feed, People, a composer (the **+**, with the channels seen in your feed as
-one-tap picks) and You (who you are, or "Browse as" anyone).
+* **Reconnect**: people you replied to, mentioned, liked or recast in the
+  last 90 days who now post from a different app, went quiet, or whom you
+  never followed.
+* **Your circle**: friends of friends with many mutual follows (4 or more).
+* **Bridge**: only 2 or 3 mutual follows, but posting from a different app
+  or in a channel you don't use. These keep you connected beyond your own
+  island.
+
+A line on top sums up your network: how many people you talk to, and how
+many of them moved apps. The search box looks up anyone's people feed, so
+you can see what the client would suggest to someone else.
+
+The **Casts** tab has the classic feed:
+
+* **Casts from everyone you follow**, newest first, each with the app that
+  signed it. Pick a window (6 hours to 7 days) and load more.
+* **An app filter**: a checkbox for every app seen, plus "own key" and
+  "unknown". Untick one to hide its casts.
+* **New cast**, to post, optionally to a channel.
+
+**New cast** opens a composer that offers the channels it has seen as
+one-tap picks. On a phone the page becomes four screens, switched from a
+bottom bar: People, Casts, the composer (the **+**) and You (who you are,
+and the search box to look up anyone's people).
 
 Without an app key it is read-only: everything browses, and the write
 buttons tell you to run `phunk key add`. The page never asks for a seed
@@ -742,8 +763,33 @@ phrase. The server binds to 127.0.0.1, answers only to a local Host, and
 refuses POSTs from other sites. The app key stays in the server process.
 
 It is plain HTML, CSS and JS served by `aiohttp`, with a small JSON API
-(`/api/feed`, `/api/suggestions`, `/api/cast`, `/api/react`, `/api/follow`).
-Read `src/phunk/ui.py` and `src/phunk/static/` to see how it works.
+(`/api/people`, `/api/feed`, `/api/suggestions`, `/api/cast`, `/api/react`,
+`/api/follow`). Read `src/phunk/ui.py`, `src/phunk/people.py` and
+`src/phunk/static/` to see how it works.
+
+### Building the people feed
+
+Every card comes from data any node serves:
+
+* **Who you talk to**: your casts (`parentCastId` and `mentions`) and your
+  likes and recasts (`/v1/reactionsByFid`) from the last 90 days.
+* **Which app someone posts from now, and before**: the key that signed
+  their newest cast versus their casts from more than two weeks ago
+  (step 7).
+* **Mutual follows and channels**: below.
+
+```python
+from phunk.people import people_feed
+
+async with Hub() as hub:
+    feed = await people_feed(hub, await hub.fid_by_name("dwr"))
+    for card in feed["cards"][:5]:
+        print(card.kind, card.fid, " ".join(card.why))
+```
+
+The first load reads about 150 things from the node, roughly ten seconds
+on a public one. The ranking itself, `people.build()`, is a pure function
+you can test without a node.
 
 ### People to follow
 

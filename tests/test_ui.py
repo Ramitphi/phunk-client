@@ -54,6 +54,9 @@ CASTS = {
 CHANNELS = {DEV: [cast("d1", 60), cast("d2", 60), cast("d3", 61), cast("d4", 9), cast("d5", 1)],
             ART: [cast("a1", 61)]}
 KEYS = {1: [("0xk1", 9152)], 2: [("0xown", 2)], 3: []}
+# "me" liked two casts by erin (50), whom they don't follow: a reconnect card.
+REACTIONS = {9: [msg(f"r{i}", 9, reactionBody={"type": "REACTION_TYPE_LIKE",
+                                               "targetCastId": {"fid": 50, "hash": f"0x5{i}"}}) for i in range(2)]}
 
 
 async def node(request):
@@ -78,6 +81,10 @@ async def node(request):
             {"blockTimestamp": 1, "signerEventBody": {"key": k, "eventType": "SIGNER_EVENT_TYPE_ADD",
                                                       "metadata": metadata(app)}}
             for k, app in KEYS.get(int(q["fid"]), [])]})
+    if p == "/v1/reactionsByFid":
+        if q.get("reaction_type") != "Like":
+            return web.json_response({"messages": []})
+        return web.json_response({"messages": REACTIONS.get(int(q["fid"]), [])})
     if p == "/v1/signersByFid":
         return web.json_response({"signers": []})
     return web.Response(status=404)
@@ -376,3 +383,26 @@ def test_index_and_static_are_served():
     assert "<title>phunk</title>" in html and "seed" not in html.lower()
     assert "frame-ancestors 'none'" in csp
     assert js == 200
+
+
+def test_people_endpoint_cards_lookup_and_follow(key):
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/people") as r:
+            mine = await r.json()
+        async with client.get(f"{base}/api/people", params={"who": "bob"}) as r:
+            bobs = await r.json()
+        await post(client, f"{base}/api/follow", {"fid": 50})
+        async with client.get(f"{base}/api/people") as r:
+            after = await r.json()
+        return mine, bobs, after
+
+    mine, bobs, after = run(test, key=key)
+    assert mine["fid"] == 9 and mine["summary"]["following"] == 3 and mine["summary"]["talked_to"] == 2  # erin (likes) and alice (a reply)
+    cards = {c["fid"]: c for c in mine["cards"]}
+    assert mine["cards"][0]["fid"] == 50 and mine["cards"][0]["kind"] == "reconnect"
+    assert "You don't follow them yet." in cards[50]["why"] and cards[50]["following"] is False
+    assert all(c["kind"] in ("reconnect", "circle", "bridge") and c["why"] for c in mine["cards"])
+    assert 9 not in cards and not ({1, 2, 3} & set(cards))  # never me or people I follow
+    assert all({"username", "latest", "app_now"} <= set(c) for c in mine["cards"])
+    assert bobs["fid"] == 2  # anyone can be looked up
+    assert {c["fid"]: c for c in after["cards"]}[50]["following"] is True
