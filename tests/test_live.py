@@ -49,3 +49,21 @@ def test_unknown_name():
         with pytest.raises(NotFound):
             await hub.fid_by_name("this-name-should-not-exist-9q8w7e")
     live(t)
+
+
+def test_node_accepts_our_message_format():
+    """validateMessage checks hash, signature and structure without
+    submitting, so nothing is posted. A key the account never added still
+    passes this static check; it would only fail at merge."""
+    nacl = pytest.importorskip("nacl")  # noqa: F841
+    from phunk import proto
+    from phunk.write import AppKey, Custody, build_key_add, now
+
+    key = AppKey.generate()
+    cast = key.sign(proto.CAST_ADD, 3, proto.CastAddBody(text="validate only, never submitted").encode())
+    key_add = build_key_add(Custody.from_private_key("0x" + "11" * 32), 3, key, nonce=1, deadline=now() + 600)
+
+    async def t(hub):
+        return [await hub.validate(m) for m in (cast, key_add)]
+    for r in live(t):
+        assert r["valid"] is True

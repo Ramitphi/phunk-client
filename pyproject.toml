@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "phunk-client"
 version = "0.1.0"
-description = "Read Farcaster straight from a Snapchain / Hypersnap node. No API key, no Neynar."
+description = "Read and write Farcaster straight from a Snapchain / Hypersnap node. No API key, no Neynar."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -20,6 +20,8 @@ classifiers = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+# Signing casts, likes, follows and app keys.
+write = ["pynacl>=1.5", "blake3>=0.4", "eth-account>=0.13"]
 
 [project.urls]
 Homepage = "https://github.com/Ramitphi/phunk-client"

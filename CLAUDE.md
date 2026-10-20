@@ -1,7 +1,8 @@
 # phunk-client
 
-A small async Python client for reading Farcaster straight from a Snapchain /
-Hypersnap node over HTTP, plus a tutorial. MIT licensed, public.
+A small async Python client for reading and writing Farcaster straight
+through a Snapchain / Hypersnap node over HTTP, plus a tutorial. MIT
+licensed, public.
 
 ## Layout
 
@@ -9,30 +10,42 @@ Hypersnap node over HTTP, plus a tutorial. MIT licensed, public.
 |---|---|
 | `src/phunk/hub.py` | `Hub`: HTTP, rate limit, retries, the pager (`pages`), and the typed methods |
 | `src/phunk/models.py` | Dataclasses (`User`, `Cast`, `Reaction`, `Follow`, `Key`); each keeps `.raw` |
+| `src/phunk/proto.py` | Minimal protobuf encoder for the message types a client sends; matches ts-proto byte for byte |
+| `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `Writer` (cast, react, follow). Optional extra `[write]` |
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
+| `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
-| `tests/` | `test_hub.py` and `test_keys.py` run offline (fake node); `test_live.py` hits the real node |
+| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |
+| `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
 ## Commands
 
 ```sh
-pip install -e '.[test]'
+pip install -e '.[test,write]'
 pytest                  # offline
 PHUNK_LIVE=1 pytest     # also against https://haatz.quilibrium.com
 ```
 
 CI (`.github/workflows/ci.yml`) runs the offline tests on Python 3.10 and 3.13.
+`.github/workflows/pages.yml` builds the site (`python site/build.py`) and
+deploys it to GitHub Pages from `main`.
 
 ## Rules
 
 - **Public repo.** Never add personal data, private notes, plans, or code
   from other projects. Examples and docs use well-known public accounts
   (dwr, fid 3; v; vitalik.eth), not the maintainer's.
-- One runtime dependency: `aiohttp`. Don't add more without a strong reason.
+- One runtime dependency: `aiohttp`. Writing needs `pynacl`, `blake3` and
+  `eth-account`, kept in the optional `[write]` extra and imported only by
+  `phunk.write`. Don't add more without a strong reason.
+- Never store, log or print a seed phrase or custody key. Never submit a
+  message from tests; use `validate()` for live checks.
+- Any change to message encoding must keep `tests/test_write.py` passing
+  against `tests/vectors/write.json`.
 - Support Python 3.10+.
 - Every list method goes through `Hub.pages()`, which dedupes by hash and
   stops on a page with nothing new. Cross-shard endpoints (`castsByParent`,
