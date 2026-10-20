@@ -14,12 +14,14 @@ licensed, public.
 | `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `Writer` (cast, react, follow). Optional extra `[write]` |
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
+| `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
+| `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
-| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |
+| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |
 | `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
 ## Commands

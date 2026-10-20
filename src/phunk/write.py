@@ -295,7 +295,7 @@ class Writer:
         """Post a cast.
 
         `reply_to` is (fid, hash) of the parent cast. `channel` is a channel
-        URL such as "https://farcaster.xyz/~/channel/dev". `embeds` are URLs
+        URL such as "https://warpcast.com/~/channel/politics". `embeds` are URLs
         or (fid, hash) quotes, at most 2.
         """
         mentions, positions = [], []
