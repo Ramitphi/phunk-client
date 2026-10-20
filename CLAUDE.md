@@ -13,6 +13,7 @@ Hypersnap node over HTTP, plus a tutorial. MIT licensed, public.
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
+| `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `tests/` | `test_hub.py` and `test_keys.py` run offline (fake node); `test_live.py` hits the real node |
 
@@ -25,6 +26,8 @@ PHUNK_LIVE=1 pytest     # also against https://haatz.quilibrium.com
 ```
 
 CI (`.github/workflows/ci.yml`) runs the offline tests on Python 3.10 and 3.13.
+`.github/workflows/pages.yml` builds the site (`python site/build.py`) and
+deploys it to GitHub Pages from `main`.
 
 ## Rules
 

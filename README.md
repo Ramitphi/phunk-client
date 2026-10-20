@@ -19,7 +19,9 @@ async def main():
 asyncio.run(main())
 ```
 
-New to reading from a node? **[Start with the tutorial](docs/TUTORIAL.md).**
+New to reading from a node? **[Start with the tutorial](docs/TUTORIAL.md)**,
+or read it on the [microsite](https://ramitphi.github.io/phunk-client/) with
+the quickstart and short concept pages.
 
 ## Install
 
