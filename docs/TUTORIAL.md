@@ -704,6 +704,38 @@ casts = await hub.feed(fid)                    # newest first
 apps = [await hub.app_of(c) for c in casts]    # who signed each
 ```
 
+### "Sent from" your app
+
+Clients show where a cast came from ("Sent from Warpcast") by reading the
+key that signed it. Each key's `KEY_ADD` names the app that asked for it:
+the `requestFid` in its `SignedKeyRequest` metadata, signed by that app
+account's custody key. Its username is the name clients show.
+
+`phunk key add` on its own makes the account its own app, so your casts
+show your own username. To show a client's name instead:
+
+1. **Make an account for the app** and give it a username (an fname).
+2. **Run a signing service** that holds the app account's custody key and
+   approves new keys. `signer/` in this repo is one, ready for Vercel. It
+   only ever sees the new public key.
+3. **Point `key add` at it:**
+
+```sh
+phunk key add --app-signer https://<your-signer>/api/sign-key-request
+```
+
+`phunk` checks each approval before using it: it must name the app's fid,
+be signed over this exact key, not be expired, and come from the app
+account's custody address on the node
+(`/v1/onChainEventsByFid?event_type=EVENT_TYPE_ID_REGISTER`).
+
+To set the app account's username, add a key to the app account itself
+(with its own seed phrase, into a separate key file), then:
+
+```sh
+PHUNK_KEY_FILE=~/.config/phunk/app-account.json phunk profile --username yourapp
+```
+
 ### When you're done
 
 You don't have to revoke a key you stop using: its TTL runs out. To revoke

@@ -199,3 +199,92 @@ def test_cast_too_long_is_refused():
         assert submitted == []
 
     asyncio.run(with_node(test))
+
+
+# ------------------------------------------------------------ app signer
+
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location(
+    "sign_key_request", Path(__file__).parent.parent / "signer" / "api" / "sign_key_request.py")
+signer_api = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(signer_api)
+
+from phunk.write import check_key_request, now  # noqa: E402
+
+APP_FID = 777
+APP = Custody.from_private_key("0x" + "33" * 32)
+
+
+def test_signer_approval_checks_out_and_matches_phunk_encoding():
+    out = signer_api.approve(KEY.public_hex, APP_FID, APP._account)
+    md = bytes.fromhex(out["metadata"][2:])
+    req = check_key_request(md, KEY.public_key, app_fid=APP_FID, app_custody=APP.address)
+    assert req.request_fid == APP_FID and out["request_signer"] == APP.address
+    assert md == APP.sign_key_request(APP_FID, KEY.public_key, req.deadline)  # same as signing locally
+
+
+def test_check_key_request_rejects_wrong_app_signer_key_and_expiry():
+    md = bytes.fromhex(signer_api.approve(KEY.public_hex, APP_FID, APP._account)["metadata"][2:])
+    with pytest.raises(ValueError, match="app fid"):
+        check_key_request(md, KEY.public_key, app_fid=APP_FID + 1)
+    with pytest.raises(ValueError, match="custody address"):
+        check_key_request(md, KEY.public_key, app_custody=CUSTODY.address)
+    with pytest.raises(ValueError, match="does not match"):
+        check_key_request(md, AppKey.generate().public_key)  # approval was for another key
+    with pytest.raises(ValueError, match="expired"):
+        check_key_request(md, KEY.public_key, at=now() + 7200)
+    with pytest.raises(ValueError):
+        signer_api.approve("0x1234", APP_FID, APP._account)
+
+
+def test_add_app_key_with_app_signer_registers_under_the_app():
+    async def go(app_custody):
+        submitted, approvals = [], []
+        app = web.Application()
+
+        async def sign(request):
+            body = await request.json()
+            approvals.append(body)
+            return web.json_response(signer_api.approve(body["key"], APP_FID, APP._account))
+
+        async def events(request):
+            fid = int(request.query["fid"])
+            return web.json_response({"events": [{"blockNumber": 1, "logIndex": 0, "fid": fid,
+                                                  "idRegisterEventBody": {"to": app_custody}}]})
+
+        async def signers(request):
+            return web.json_response({"signers": [], "currentUserNonce": 2})
+
+        async def submit(request):
+            submitted.append(await request.read())
+            return web.json_response({"hash": "0x" + "aa" * 20})
+
+        app.router.add_post("/sign", sign)
+        app.router.add_get("/v1/onChainEventsByFid", events)
+        app.router.add_get("/v1/signersByFid", signers)
+        app.router.add_post("/v1/submitMessage", submit)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        base = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+        try:
+            async with Hub(base, rate=1000, retries=1) as hub:
+                try:
+                    fid, key = await add_app_key(hub, CUSTODY, fid=1234, app_signer=f"{base}/sign")
+                except ValueError as e:
+                    return None, str(e), submitted, approvals
+                return key, None, submitted, approvals
+        finally:
+            await runner.cleanup()
+
+    key, err, submitted, approvals = asyncio.run(go(APP.address.lower()))
+    assert err is None and approvals == [{"key": key.public_hex}]  # only the public key is sent
+    body = decode_fields(decode_fields(proto_data(submitted[0]))[19][0])
+    assert decode_key_request(body[6][0]).request_fid == APP_FID  # registered under the app
+    assert body[5] == [3]
+
+    # A signer whose key isn't the app's custody key on-chain is refused before submitting.
+    key, err, submitted, approvals = asyncio.run(go(CUSTODY.address.lower()))
+    assert err and "custody address" in err and submitted == []

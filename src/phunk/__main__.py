@@ -107,7 +107,11 @@ async def run_key(hub: Hub, args) -> None:
     print(f"custody address {custody.address} owns fid {fid}")
     if input(f"Add a new app key to fid {fid}? [y/N] ").strip().lower() != "y":
         sys.exit("cancelled")
-    fid, key = await add_app_key(hub, custody, fid=fid, scopes=DEFAULT_SCOPES, ttl=args.ttl_days * 86400)
+    signer = args.app_signer or os.environ.get("PHUNK_APP_SIGNER")
+    if signer:
+        print(f"asking the app's signer to approve the new key: {signer}")
+    fid, key = await add_app_key(hub, custody, fid=fid, scopes=DEFAULT_SCOPES, ttl=args.ttl_days * 86400,
+                                 app_signer=signer)
     del custody
     if args.print:
         print(f"app key (keep it secret): {key.private_hex}")
@@ -116,6 +120,8 @@ async def run_key(hub: Hub, args) -> None:
         print(f"saved to {KEY_FILE} (only you can read it)")
     print(f"added app key {key.public_hex} to fid {fid}. It stays alive while you use it "
           f"(sliding {args.ttl_days} days).")
+    print("Other clients will show your casts as sent from "
+          + ("the app behind that signer." if signer else "your own account (its own key)."))
 
 
 async def run_write(hub: Hub, args) -> None:
@@ -131,6 +137,12 @@ async def run_write(hub: Hub, args) -> None:
         h = await getattr(me, args.cmd)(await _fid(hub, args.who))
     elif args.cmd == "delete":
         h = await me.delete_cast(args.hash)
+    elif args.cmd == "profile":
+        fields = {k: getattr(args, k) for k in ("username", "display", "bio", "pfp", "url")
+                  if getattr(args, k) is not None}
+        if not fields:
+            sys.exit("nothing to change: pass --username, --display, --bio, --pfp or --url")
+        h = ", ".join(await me.set_profile(**fields))
     print(f"submitted {h}")
 
 
@@ -208,7 +220,7 @@ async def run(args) -> None:
                 print(f"{n:5}  {name}")
 
 
-WRITE_CMDS = {"post", "like", "unlike", "recast", "unrecast", "follow", "unfollow", "delete"}
+WRITE_CMDS = {"post", "like", "unlike", "recast", "unrecast", "follow", "unfollow", "delete", "profile"}
 
 
 def main(argv=None) -> None:
@@ -226,6 +238,9 @@ def main(argv=None) -> None:
     ka = ksub.add_parser("add", help="add a gasless app key, from your seed phrase")
     ka.add_argument("--ttl-days", type=int, default=30, help="sliding expiry, 1-90 days (default 30)")
     ka.add_argument("--print", action="store_true", help="print the key instead of saving it")
+    ka.add_argument("--app-signer", metavar="URL",
+                    help="an app's signing service, so casts show 'Sent from <app>' "
+                         "(default: $PHUNK_APP_SIGNER; without one the account is its own app)")
     ksub.add_parser("show", help="which fid and key are saved")
 
     s = sub.add_parser("post", help="post a cast")
@@ -238,6 +253,12 @@ def main(argv=None) -> None:
     for name in ("follow", "unfollow"):
         sub.add_parser(name, help=f"{name} someone").add_argument("who", help="username or fid")
     sub.add_parser("delete", help="delete one of your casts").add_argument("hash")
+    pr = sub.add_parser("profile", help="update your profile")
+    pr.add_argument("--username", help="a name your fid already owns (fname or ENS)")
+    pr.add_argument("--display", help="display name")
+    pr.add_argument("--bio")
+    pr.add_argument("--pfp", help="picture URL")
+    pr.add_argument("--url", help="website")
 
     f = sub.add_parser("feed", help="recent casts from who you (or WHO) follow")
     f.add_argument("who", nargs="?", help="username or fid (default: your saved key's fid)")

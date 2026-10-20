@@ -20,6 +20,7 @@ licensed, public.
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
+| `signer/` | The app's signing service (Vercel Python function): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |

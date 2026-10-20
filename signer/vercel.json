@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [{ "source": "/api/sign-key-request", "destination": "/api/sign_key_request" }]
+}
