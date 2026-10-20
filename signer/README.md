@@ -44,7 +44,9 @@ Then:
 phunk key add --app-signer https://<your-signer>/api/sign-key-request
 ```
 
-Use a separate wallet for the app account, holding nothing else. Anyone can
+**Never use your main or personal account as the app account.** Its
+custody key would sit on a server. Create a dedicated app account from a
+fresh wallet that holds nothing else, and use only that one here. Anyone can
 get an approval from a public signer, which is the point: any phunk user
 can add a key under the app. Add rate limiting (for example Vercel's
 firewall rules) if it gets abused.
