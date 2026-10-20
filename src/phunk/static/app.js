@@ -26,6 +26,7 @@ const state = {
   apps: [],
   people: [],
   dismissed: new Set(store.sget("dismissed", [])),
+  channels: new Set(),
   feedSeq: 0,
 };
 
@@ -229,6 +230,8 @@ async function loadFeed(reset, refresh = false) {
     state.apps = d.apps;
     renderApps();
     feed.append(...d.casts.map(castCard));
+    for (const c of d.casts) if (c.channel && !c.channel.includes("://")) state.channels.add(c.channel);
+    renderChannelPicks();
     state.offset = d.offset + d.casts.length;
     const label = WINDOW_NAMES[state.hours];
     $("#feed-status").textContent = `${d.total} of ${d.all} casts, last ${label}`;
@@ -316,9 +319,48 @@ function applyTheme(t) {
   $("#theme").textContent = `Theme: ${t}`;
 }
 
+// Phones show one pane at a time; wide screens show them all.
+const narrow = () => matchMedia("(max-width: 800px)").matches;
+
 function setTab(name) {
+  if (name === "compose" && state.me && !state.me.can_write) { needKey(); return; }
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
+  if (name === "compose" && narrow()) $("#compose-text").focus();
+}
+
+// Channels seen in the feed, offered as one-tap picks under the composer.
+function renderChannelPicks() {
+  const box = $("#compose-channels");
+  const input = $("#compose-channel");
+  const names = [...state.channels].slice(0, 8);
+  box.hidden = !names.length;
+  box.replaceChildren(...names.map((n) => {
+    const b = h("button", { type: "button", class: "pick", "aria-pressed": String(input.value === n) }, `/${n}`);
+    b.addEventListener("click", () => {
+      input.value = input.value === n ? "" : n;
+      renderChannelPicks();
+    });
+    return b;
+  }));
+}
+
+// The You screen: who this client reads as, and whether it can post.
+function renderAccount() {
+  const me = state.me;
+  const box = $("#account");
+  const other = state.who && (!me.user || state.who.replace(/^@/, "") !== me.user.username) ? state.who.replace(/^@/, "") : "";
+  if (!me.user && !other) { box.hidden = true; return; }
+  const rows = [];
+  if (me.user) {
+    rows.push(h("div", { class: "person-row" }, avatar(me.user), h("div", {},
+      h("div", { class: "name" }, me.user.display_name || handle(me.user)),
+      h("div", { class: "muted small mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
+      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, me.can_write ? "can post" : "read-only")));
+  }
+  if (other) rows.push(h("p", { class: "muted small" }, `Browsing ${/^\d+$/.test(other) ? "fid " + other : "@" + other}, read-only.`));
+  box.replaceChildren(...rows);
+  box.hidden = false;
 }
 
 function renderWho() {
@@ -329,6 +371,7 @@ function renderWho() {
   } else if (me.user) {
     who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
   } else who.textContent = "read-only";
+  renderAccount();
 }
 
 async function init() {
@@ -356,11 +399,12 @@ async function init() {
     const banner = $("#banner");
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
     banner.hidden = false;
-    $("#compose").hidden = true;
+    $("#compose-pane").hidden = true;
     $("#browse").hidden = false;
     $("#browse-name").value = state.who || (state.me.user && state.me.user.username) || "";
   }
   renderWho();
+  if (!canBrowse()) setTab("you");
 
   $("#browse").addEventListener("submit", (ev) => {
     ev.preventDefault();
@@ -369,9 +413,12 @@ async function init() {
     if (state.who) url.searchParams.set("as", state.who); else url.searchParams.delete("as");
     history.replaceState(null, "", url);
     renderWho();
+    if (state.who) setTab("feed");
     loadFeed(true);
     loadPeople();
   });
+  $("#compose-close").addEventListener("click", () => setTab("feed"));
+  $("#compose-channel").addEventListener("input", renderChannelPicks);
 
   const text = $("#compose-text");
   text.addEventListener("input", () => {
@@ -388,6 +435,7 @@ async function init() {
       text.value = "";
       $("#compose-count").textContent = "0/1024";
       toast("Cast sent.");
+      if (narrow()) setTab("feed");
     } catch (e) { toast(e.message); } finally { btn.disabled = false; }
   });
 

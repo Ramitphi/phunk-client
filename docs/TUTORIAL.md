@@ -732,6 +732,10 @@ Then visit `http://127.0.0.1:8008`. It shows:
   "own key" and "unknown". Untick one to hide its casts.
 * **People to follow**: worked out from the node alone (below).
 
+On a phone the same page becomes four screens, switched from a bottom bar:
+Feed, People, a composer (the **+**, with the channels seen in your feed as
+one-tap picks) and You (who you are, or "Browse as" anyone).
+
 Without an app key it is read-only: everything browses, and the write
 buttons tell you to run `phunk key add`. The page never asks for a seed
 phrase. The server binds to 127.0.0.1, answers only to a local Host, and

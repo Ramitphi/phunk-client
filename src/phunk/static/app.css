@@ -192,7 +192,39 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 .banner code, .toast code { padding: 1px 5px; border-radius: 5px; background: var(--card); color: var(--text); }
 
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mono { font-family: var(--mono); font-size: 12px; }
 .tabs { display: none; }
+.main-col { min-width: 0; }
+
+/* You: the welcome hero, account and browse-as. On wide screens only
+   browse-as shows (when read-only); the header already says who you are. */
+.hero { text-align: center; display: grid; justify-items: center; gap: 10px; padding: 24px 8px 20px; }
+.hero h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 36px; line-height: 1.04; letter-spacing: -0.04em; }
+.hero p { margin: 0; }
+.logo.big { width: 72px; height: 72px; font-size: 44px; border-width: 2px; box-shadow: var(--shadow); transform: rotate(-12deg); }
+.account .person-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.account .name { font-weight: 700; }
+.account p { margin: 10px 0 0; }
+.browse label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.foot { text-align: center; }
+.chip.ok { background: var(--green-bg); color: var(--green-text); border-color: var(--green-text); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px dashed var(--warn-edge); }
+
+/* Compose: a card on wide screens, its own sheet on phones. */
+.sheet-head { display: none; }
+.sheet-note { display: none; }
+.channel-picks { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; order: 5; }
+.channel-picks .pick {
+  min-height: 34px; padding: 0 12px; border-radius: 999px; font-size: 13px;
+  background: var(--card); color: var(--text); border: 1px solid var(--edge); font-weight: 600;
+}
+.channel-picks .pick[aria-pressed="true"] {
+  background: var(--blue-bg); color: var(--blue-text); border: 1.5px solid var(--blue-text); font-weight: 700; transform: rotate(-2deg);
+}
+@media (min-width: 801px) {
+  #you-pane .hero, #you-pane .account, #you-pane .foot { display: none; }
+}
 .layout {
   max-width: 1080px; margin: 0 auto; padding: 16px;
   display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px;
@@ -348,8 +380,23 @@ img.avatar { background: var(--chip); }
     mask: var(--icon) center / contain no-repeat;
   }
   .tabs [data-tab="feed"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z'/%3E%3C/svg%3E"); }
+  .tabs [data-tab="you"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21a8 8 0 0 1 16 0'/%3E%3C/svg%3E"); }
+  .tabs [data-tab="compose"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
   .tabs [data-tab="people"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3C/svg%3E"); }
   .tabs button[aria-selected="true"] { color: var(--tint-text); font-weight: 700; }
+  .tabs .plus, .tabs .plus[aria-selected="true"] {
+    flex: 0 0 56px; height: 56px; min-height: 56px; margin: 0 8px; align-self: center;
+    background: var(--cta); color: #fff; border: 1.5px solid var(--edge); border-radius: 18px;
+    box-shadow: var(--shadow); transform: rotate(-6deg);
+  }
+  .tabs .plus::before { width: 26px; height: 26px; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 14px; }
+  .sheet-head h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 26px; letter-spacing: -0.03em; }
+  .round { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 22px; line-height: 1; }
+  .sheet-note { display: block; text-align: center; }
+  #compose-pane textarea { min-height: 200px; font-size: 18px; }
+  #compose-pane .cta { flex: 1 1 100%; min-height: 56px; font-size: 20px; order: 6; margin-top: 6px; }
+  .actions .reply { font-size: 0; width: 40px; padding: 0; }
   .toast { bottom: 96px; }
   .pane:not(.active) { display: none; }
   #people-pane { position: static; max-height: none; overflow: visible; }
