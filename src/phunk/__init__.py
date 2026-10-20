@@ -1,4 +1,9 @@
-"""phunk: read Farcaster straight from a Snapchain / Hypersnap node."""
+"""phunk: read Farcaster straight from a Snapchain / Hypersnap node.
+
+Writing (app keys, casts, likes, follows) lives in `phunk.write` and needs
+`pip install 'phunk-client[write]'`.
+"""
+from . import proto
 from .hub import DEFAULT_NODE, Hub, NodeError, NotFound, RateLimiter
 from .keys import KeyRequest, decode_key_request
 from .models import Cast, Follow, Key, Reaction, User
@@ -20,6 +25,7 @@ __all__ = [
     "Reaction",
     "User",
     "decode_key_request",
+    "proto",
     "from_datetime",
     "from_unix",
     "to_datetime",
