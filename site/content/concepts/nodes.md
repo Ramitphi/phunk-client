@@ -52,4 +52,6 @@ curl -s localhost:3381/v1/info
 
 Look at `blockDelay` for each shard. It is how many seconds that shard's newest block is behind the clock. It counts down while the node catches up. Once every shard is in single digits, you're in sync.
 
+A new node downloads a snapshot for each shard. If it restarts during that download, the shards it had not reached yet skip the snapshot and sync from block 1. You see it in `/v1/info`: one shard is in sync, and the others have a `maxHeight` far below it and a `blockDelay` of hundreds of days. Waiting would take months. `./node.sh status` marks those shards "snapshot interrupted" and prints the fix: stop the node, delete `.rocks` and `.rocks.snapshot` in the node's folder, and start it again. The snapshot downloads again in a few hours. Don't restart the node until it finishes.
+
 Source: [Validators vs. read nodes](https://snapchain.farcaster.xyz/node-types) in the Snapchain docs.
