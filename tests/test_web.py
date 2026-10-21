@@ -5,9 +5,6 @@ import importlib.util
 import json
 import subprocess
 import threading
-import urllib.error
-import urllib.request
-from http.server import HTTPServer
 from pathlib import Path
 
 import pytest
@@ -92,21 +89,46 @@ def test_site_answers_reads_with_cdn_cache_headers(site):
     assert site.respond("/api/nope") == (404, {"error": "no such endpoint"}, "no-store")
 
 
-def test_site_handler_over_http(site):
-    server = HTTPServer(("127.0.0.1", 0), site.handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    try:
-        with opener.open(f"{base}/api/people?who=me") as r:
-            assert r.status == 200 and "s-maxage" in r.headers["Cache-Control"]
-            assert json.loads(r.read())["fid"] == 9
-        req = urllib.request.Request(f"{base}/api/cast", data=b"{}", headers={"Content-Type": "application/json"})
-        with pytest.raises(urllib.error.HTTPError) as e:
-            opener.open(req)
-        assert e.value.code == 405 and json.loads(e.value.read())["read_only"] is True
-    finally:
-        server.shutdown()
+def asgi(app, method, path, body=b""):
+    """One request through an ASGI app -> (status, headers dict, JSON body or None)."""
+    path, _, query = path.partition("?")
+    scope = {"type": "http", "method": method, "path": path, "query_string": query.encode(), "headers": []}
+    sent, todo = [], [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def receive():
+        return todo.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    start = sent[0]
+    headers = {k.decode(): v.decode() for k, v in start["headers"]}
+    raw = b"".join(m.get("body", b"") for m in sent[1:])
+    return start["status"], headers, json.loads(raw) if raw else None
+
+
+def test_site_asgi_app(site):
+    status, headers, body = asgi(site.app, "GET", "/api/people?who=me")
+    assert status == 200 and body["fid"] == 9 and "s-maxage" in headers["cache-control"]
+    assert headers["content-type"] == "application/json"
+    status, headers, body = asgi(site.app, "POST", "/api/cast", b"{}")
+    assert status == 405 and body["read_only"] is True and headers["cache-control"] == "no-store"
+    assert asgi(site.app, "GET", "/api/nope")[0] == 404
+
+
+def test_vercel_services_route_to_the_right_service():
+    config = json.loads((ROOT / "vercel.json").read_text())
+    services = config["services"]
+    # The signer is its own Vercel project (Root Directory signer/), so its key isn't shared.
+    assert set(services) == {"web", "api"}
+    assert 'entrypoint = "api.sign_key_request:app"' in (ROOT / "signer" / "pyproject.toml").read_text()
+    assert (ROOT / services["api"]["root"] / "api" / "index.py").is_file()
+    assert (ROOT / services["web"]["root"] / "build.sh").is_file()
+    assert not {"functions", "buildCommand", "outputDirectory", "framework"} & set(config)
+    # /api/* to the API, the catch-all to the page, last.
+    order = [(r["source"], r["destination"]["service"]) for r in config["rewrites"]]
+    assert order == [("/api/(.*)", "api"), ("/(.*)", "web")]
 
 
 def _png_info(path):
@@ -124,7 +146,8 @@ def test_static_build_page_and_mini_app(monkeypatch):
                    env={**os.environ, **env})
     out = ROOT / "web" / "_site"
     config = json.loads((ROOT / "vercel.json").read_text())
-    assert config["outputDirectory"] == "web/_site"
+    web = config["services"]["web"]
+    assert (web["root"], web["outputDirectory"]) == ("web", "_site")
     assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js"}
 
     # The page, plus the mini app embed and link previews in <head>.

@@ -22,15 +22,21 @@ fill() {
       -e "s|__FARCASTER_SIGNATURE__|${FARCASTER_SIGNATURE:-}|"
 }
 
-rm -rf "$OUT"
-mkdir -p "$OUT/static"
-cp -R web/public/. "$OUT/"
-cp src/phunk/static/app.css src/phunk/static/app.js "$OUT/static/"
-fill < web/head.html > "$OUT/head.tmp"
-awk -v head="$OUT/head.tmp" '/<\/head>/ { while ((getline line < head) > 0) print line } { print }' \
-    src/phunk/static/index.html > "$OUT/index.html"
-rm "$OUT/head.tmp"
-fill < web/public/.well-known/farcaster.json > "$OUT/.well-known/farcaster.json"
+# Build into a fresh folder, then copy over: $OUT never goes missing while a
+# dev server is reading it.
+TMP="$OUT.tmp"
+rm -rf "$TMP"
+mkdir -p "$TMP/static"
+cp -R web/public/. "$TMP/"
+cp src/phunk/static/app.css src/phunk/static/app.js "$TMP/static/"
+fill < web/head.html > "$TMP/head.tmp"
+awk -v head="$TMP/head.tmp" '/<\/head>/ { while ((getline line < head) > 0) print line } { print }' \
+    src/phunk/static/index.html > "$TMP/index.html"
+rm "$TMP/head.tmp"
+fill < web/public/.well-known/farcaster.json > "$TMP/.well-known/farcaster.json"
+mkdir -p "$OUT"
+cp -R "$TMP/." "$OUT/"
+rm -rf "$TMP"
 
 if [ -z "${FARCASTER_HEADER:-}" ]; then
   echo "note: FARCASTER_HEADER is not set; the mini app manifest has no accountAssociation yet"

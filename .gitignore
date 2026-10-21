@@ -6,3 +6,4 @@ dist/
 site/_site/
 web/_site/
 .vercel/
+web/_site.tmp/

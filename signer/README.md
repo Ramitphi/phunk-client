@@ -29,19 +29,31 @@ An approval is valid for one hour.
 
 ## Deploy on Vercel
 
+The signer is its **own Vercel project**, apart from phunk.social. Vercel
+shares environment variables across a project, so keeping the signer
+separate means only this project ever holds the app's custody key; the
+website and its API never see it.
+
+`signer/pyproject.toml` names the entrypoint (the ASGI `app` in
+`api/sign_key_request.py`) and the one dependency, `eth-account`.
+
 1. New project from this repo, **Root Directory: `signer`**. No build step.
 2. Environment variables (Settings → Environment Variables), marked sensitive:
    - `PHUNK_APP_FID`: the app account's fid
    - `PHUNK_APP_CUSTODY_KEY`: its custody private key (`0x...`), **or**
      `PHUNK_APP_MNEMONIC`: its seed phrase
-3. Deploy, then optionally add a domain such as `sign.example.com`.
-4. Check it: `GET /api/sign-key-request` should show the app fid and the
-   custody address the node has for it.
+3. Deploy, then add the domain `sign.phunk.social` (Settings → Domains).
+   Where you bought phunk.social, add the record Vercel shows, usually a
+   CNAME `sign` → `cname.vercel-dns.com`.
+4. Check it: `GET https://sign.phunk.social/api/sign-key-request` should show
+   the app fid and the custody address the node has for it.
+5. Add a rate limit: Firewall → **Add Rule** → path `/api/sign-key-request`,
+   for example 10 requests a minute per IP.
 
 Then:
 
 ```sh
-phunk key add --app-signer https://<your-signer>/api/sign-key-request
+phunk key add --app-signer https://sign.phunk.social/api/sign-key-request
 ```
 
 **Never use your main or personal account as the app account.** Its

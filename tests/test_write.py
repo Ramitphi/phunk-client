@@ -224,6 +224,24 @@ def test_signer_approval_checks_out_and_matches_phunk_encoding():
     assert md == APP.sign_key_request(APP_FID, KEY.public_key, req.deadline)  # same as signing locally
 
 
+def test_signer_asgi_app(monkeypatch):
+    from test_web import asgi
+
+    monkeypatch.setenv("PHUNK_APP_FID", str(APP_FID))
+    monkeypatch.setenv("PHUNK_APP_CUSTODY_KEY", "0x" + "33" * 32)
+    status, headers, body = asgi(signer_api.app, "GET", "/api/sign-key-request")
+    assert status == 200 and body == {"request_fid": APP_FID, "request_signer": APP.address}
+    assert headers["access-control-allow-origin"] == "*"
+    status, _, body = asgi(signer_api.app, "POST", "/api/sign-key-request", json.dumps({"key": KEY.public_hex}).encode())
+    md = bytes.fromhex(body["metadata"][2:])
+    assert status == 200 and check_key_request(md, KEY.public_key, app_fid=APP_FID, app_custody=APP.address)
+    assert asgi(signer_api.app, "POST", "/api/sign_key_request", b"nope")[0] == 400
+    assert asgi(signer_api.app, "POST", "/api/sign-key-request", b"x" * 2000)[0] == 413
+    assert asgi(signer_api.app, "GET", "/elsewhere")[0] == 404
+    monkeypatch.delenv("PHUNK_APP_CUSTODY_KEY")
+    assert asgi(signer_api.app, "GET", "/api/sign-key-request")[0] == 500
+
+
 def test_check_key_request_rejects_wrong_app_signer_key_and_expiry():
     md = bytes.fromhex(signer_api.approve(KEY.public_hex, APP_FID, APP._account)["metadata"][2:])
     with pytest.raises(ValueError, match="app fid"):

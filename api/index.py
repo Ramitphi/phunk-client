@@ -1,7 +1,8 @@
-"""phunk.social: the web client's read API as a Vercel Python function.
+"""phunk.social: the web client's read API, the `api` Vercel service.
 
-The page (index.html, app.js, app.css) is static; vercel.json sends every
-/api/* request here. It answers the same read endpoints as `phunk ui`,
+An ASGI app (`app`), the entrypoint vercel.json names. The page is the
+`web` service; vercel.json sends every /api/* request here (except the
+signer's path). It answers the same read endpoints as `phunk ui`,
 from one shared `UI` in public mode: no account, no key, nothing to post
 with. Follow, reply and like open Farcaster in the page instead.
 
@@ -25,7 +26,6 @@ import json
 import os
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
@@ -67,11 +67,19 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
     return _loop, _ui
 
 
-def respond(target: str) -> tuple[int, dict, str]:
-    """GET `target` ("/api/people?who=dwr") -> (status, JSON body, Cache-Control)."""
+def _cache(path: str, status: int, query: dict) -> str:
+    cache = CACHE.get(path) if status == 200 and query.get("refresh") != "1" else None
+    return cache or "no-store"
+
+
+def _split(target: str) -> tuple[str, dict]:
     parts = urlsplit(target)
-    path = parts.path.rstrip("/")
-    query = dict(parse_qsl(parts.query))
+    return parts.path.rstrip("/"), dict(parse_qsl(parts.query))
+
+
+def respond(target: str) -> tuple[int, dict, str]:
+    """GET `target` ("/api/people?who=dwr") -> (status, JSON body, Cache-Control). Blocking."""
+    path, query = _split(target)
     loop, ui = _start()
     future = asyncio.run_coroutine_threadsafe(get_json(ui, path, query), loop)
     try:
@@ -79,26 +87,44 @@ def respond(target: str) -> tuple[int, dict, str]:
     except concurrent.futures.TimeoutError:
         future.cancel()
         return 504, {"error": "the node took too long; try again in a minute"}, "no-store"
-    cache = CACHE.get(path) if status == 200 and query.get("refresh") != "1" else None
-    return status, body, cache or "no-store"
+    return status, body, _cache(path, status, query)
 
 
-class handler(BaseHTTPRequestHandler):  # Vercel's Python runtime looks for this name
-    def _send(self, status: int, body: dict, cache: str = "no-store") -> None:
-        raw = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Cache-Control", cache)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(raw)
+async def respond_async(target: str) -> tuple[int, dict, str]:
+    """`respond`, awaitable from any event loop (the UI's loop stays its own)."""
+    path, query = _split(target)
+    loop, ui = await asyncio.to_thread(_start)
+    future = asyncio.run_coroutine_threadsafe(get_json(ui, path, query), loop)
+    try:
+        status, body = await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+    except asyncio.TimeoutError:
+        future.cancel()
+        return 504, {"error": "the node took too long; try again in a minute"}, "no-store"
+    return status, body, _cache(path, status, query)
 
-    def do_GET(self):  # noqa: N802
-        self._send(*respond(self.path))
 
-    def do_POST(self):  # noqa: N802
-        self._send(405, {"error": PUBLIC_HELP, "read_only": True})
-
-    def log_message(self, format, *args):  # keep usernames out of the logs
-        pass
+async def app(scope, receive, send):
+    """ASGI entrypoint: GET reads, anything else 405."""
+    if scope["type"] == "lifespan":
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+    if scope["type"] != "http":
+        return
+    if scope["method"] in ("GET", "HEAD"):
+        target = scope["path"] + ("?" + scope["query_string"].decode("latin-1") if scope.get("query_string") else "")
+        status, body, cache = await respond_async(target)
+    else:
+        status, body, cache = 405, {"error": PUBLIC_HELP, "read_only": True}, "no-store"
+    raw = json.dumps(body).encode()
+    await send({"type": "http.response.start", "status": status, "headers": [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(raw)).encode()),
+        (b"cache-control", cache.encode()),
+        (b"x-content-type-options", b"nosniff"),
+    ]})
+    await send({"type": "http.response.body", "body": b"" if scope["method"] == "HEAD" else raw})
