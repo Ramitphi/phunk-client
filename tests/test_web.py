@@ -120,16 +120,15 @@ def test_site_asgi_app(site):
 def test_vercel_services_route_to_the_right_service():
     config = json.loads((ROOT / "vercel.json").read_text())
     services = config["services"]
-    assert set(services) == {"web", "api", "signer"}
-    # Every service's entrypoint exists, and top-level build keys moved into services.
+    # The signer is its own Vercel project (Root Directory signer/), so its key isn't shared.
+    assert set(services) == {"web", "api"}
+    assert 'entrypoint = "api.sign_key_request:app"' in (ROOT / "signer" / "pyproject.toml").read_text()
     assert (ROOT / services["api"]["root"] / "api" / "index.py").is_file()
-    assert (ROOT / services["signer"]["root"] / "api" / "sign_key_request.py").is_file()
     assert (ROOT / services["web"]["root"] / "build.sh").is_file()
     assert not {"functions", "buildCommand", "outputDirectory", "framework"} & set(config)
-    # Most specific first, the catch-all last.
+    # /api/* to the API, the catch-all to the page, last.
     order = [(r["source"], r["destination"]["service"]) for r in config["rewrites"]]
-    assert order[-1] == ("/(.*)", "web")
-    assert order.index(("/api/sign-key-request", "signer")) < order.index(("/api/(.*)", "api"))
+    assert order == [("/api/(.*)", "api"), ("/(.*)", "web")]
 
 
 def _png_info(path):

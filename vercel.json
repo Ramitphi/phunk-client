@@ -58,26 +58,9 @@
           "excludeFiles": "{tests,docs,site,examples,scripts,signer,web}/**"
         }
       }
-    },
-    "signer": {
-      "root": "signer",
-      "runtime": "python",
-      "entrypoint": "api.sign_key_request:app"
     }
   },
   "rewrites": [
-    {
-      "source": "/api/sign-key-request",
-      "destination": {
-        "service": "signer"
-      }
-    },
-    {
-      "source": "/api/sign_key_request",
-      "destination": {
-        "service": "signer"
-      }
-    },
     {
       "source": "/api/(.*)",
       "destination": {

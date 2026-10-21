@@ -6,21 +6,21 @@ Reply and New cast open Farcaster, because the site holds no keys and
 can't post for anyone. Inside a Farcaster client it runs as a mini app
 (see below).
 
-One Vercel project, three [services](https://vercel.com/docs/services),
-all on one domain:
+One Vercel project with two [services](https://vercel.com/docs/services)
+on one domain:
 
 | Service | Root | Public paths | What |
 |---|---|---|---|
-| `signer` | `signer/` | `/api/sign-key-request` | Approves app keys (`signer/README.md`). ASGI `app` in `signer/api/sign_key_request.py` |
-| `api` | `.` | `/api/*` (everything else under it) | The read API: ASGI `app` in `api/index.py`, through `phunk.ui` in public mode |
+| `api` | `.` | `/api/*` | The read API: ASGI `app` in `api/index.py`, through `phunk.ui` in public mode |
 | `web` | `web/` | everything else | The static page, built by `web/build.sh` into `web/_site/` |
 
-No service calls another, so there are no bindings: the browser calls
-`api`, and the `phunk` CLI calls `signer`, both over the public URL.
+The page calls `api` from the browser, so there are no bindings. The app key
+signer is a separate Vercel project at `sign.phunk.social`
+(`signer/README.md`), so its custody key never sits in this project.
 
 | Path | What |
 |---|---|
-| `vercel.json` (repo root) | The services, the public routes (most specific first), the page's headers |
+| `vercel.json` (repo root) | The two services, their public routes, and the page's headers |
 | `web/build.sh` | Copies `src/phunk/static/` into `web/_site/` with the head tags, images and manifest |
 | `requirements.txt` (repo root) | The `api` service's one dependency, `aiohttp` |
 | `web/head.html` | Link previews and the Farcaster mini app embed, put into the page at build |
@@ -35,7 +35,7 @@ last username in the browser.
 
 ```sh
 phunk ui --public          # http://127.0.0.1:8008, the same mode as the site
-vercel dev -L              # all three services, routed as on Vercel, on :3000
+vercel dev -L              # both services, routed as on Vercel, on :3000
 ```
 
 ## Deploy on Vercel
@@ -43,25 +43,12 @@ vercel dev -L              # all three services, routed as on Vercel, on :3000
 1. Vercel → **Add New → Project** → import `Ramitphi/phunk-client`.
 2. Leave **Root Directory** empty (the repo root). Vercel reads the
    services from `vercel.json`; don't override build settings.
-3. Environment variables (shared by all services):
-   - `PHUNK_APP_FID`, and `PHUNK_APP_CUSTODY_KEY` or `PHUNK_APP_MNEMONIC`:
-     the **dedicated app account** the signer approves keys for (never a
-     main or personal account; see `signer/README.md`). Mark them sensitive.
+3. Environment variables (none are secret; never put the signer's key here):
    - Optional: `PHUNK_NODE` (node to read from, default
      `https://haatz.quilibrium.com`) and `PHUNK_RATE` (requests per second, default 20).
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below).
-4. **Deploy**. Open the `*.vercel.app` URL and look someone up, and check
-   `GET /api/sign-key-request` shows the app fid.
-
-Then keys can be approved through the same domain:
-
-```sh
-phunk key add --app-signer https://phunk.social/api/sign-key-request
-```
-
-If the signer already runs as its own Vercel project, retire it once this
-one works (and update any `PHUNK_APP_SIGNER` that points at it).
+4. **Deploy**. Open the `*.vercel.app` URL and look someone up.
 
 Vercel deploys `main` to production and every other branch as a preview.
 

@@ -17,9 +17,10 @@ Settings (environment variables, never in code):
     PHUNK_APP_CUSTODY_KEY    its custody private key (0x...), or
     PHUNK_APP_MNEMONIC       its seed phrase (custody key on m/44'/60'/0'/0/0)
 
-Deploys as the `signer` service of the phunk.social Vercel project (the
-ASGI `app`, see vercel.json), or on its own as a Vercel function (the
-`handler` class, see signer/README.md). Needs only eth-account.
+An ASGI app (`app`, named in signer/pyproject.toml). Deploys as its own
+Vercel project (Root Directory `signer`), apart from phunk.social, so the
+custody key sits in a project of its own. See signer/README.md. Needs only
+eth-account.
 """
 from __future__ import annotations
 
@@ -27,7 +28,6 @@ import json
 import os
 import re
 import time
-from http.server import BaseHTTPRequestHandler
 
 from eth_account import Account
 from eth_account.messages import encode_typed_data
@@ -120,7 +120,7 @@ HEADERS = [(b"content-type", b"application/json"), (b"access-control-allow-origi
 
 
 async def app(scope, receive, send):
-    """ASGI entrypoint (the `signer` service)."""
+    """ASGI entrypoint."""
     if scope["type"] == "lifespan":
         while True:
             message = await receive()
@@ -151,29 +151,3 @@ async def app(scope, receive, send):
     await send({"type": "http.response.start", "status": status,
                 "headers": HEADERS + [(b"content-length", str(len(out)).encode())]})
     await send({"type": "http.response.body", "body": out})
-
-
-class handler(BaseHTTPRequestHandler):  # a standalone Vercel function looks for this name
-    def _send(self, status: int, body: dict) -> None:
-        raw = json.dumps(body).encode()
-        self.send_response(status)
-        for k, v in HEADERS:
-            self.send_header(k.decode(), v.decode())
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def do_OPTIONS(self):  # noqa: N802
-        self._send(204, {})
-
-    def do_GET(self):  # noqa: N802
-        self._send(*info())
-
-    def do_POST(self):  # noqa: N802
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = 0
-        if length > MAX_BODY:
-            return self._send(413, {"error": "body too large"})
-        self._send(*sign(self.rfile.read(length)))

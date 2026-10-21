@@ -1,0 +1,10 @@
+# The signer is its own Vercel project (Root Directory: signer), apart from
+# phunk.social, so the app's custody key lives in a project of its own.
+[project]
+name = "phunk-signer"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["eth-account==0.14.0"]
+
+[tool.vercel]
+entrypoint = "api.sign_key_request:app"

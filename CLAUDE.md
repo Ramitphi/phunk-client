@@ -17,11 +17,11 @@ licensed, public.
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
 | `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |
 | `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
-| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with three services (`web` static page, `api` read API, `signer`), `phunk ui` in public (read-only) mode, also a Farcaster mini app (manifest and images in `web/public/`); see `web/README.md` |
+| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode, also a Farcaster mini app (manifest and images in `web/public/`); see `web/README.md` |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
-| `signer/` | The app's signing service (the `signer` Vercel service, ASGI `app`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only |
+| `signer/` | The app's signing service, its own Vercel project at sign.phunk.social (ASGI `app`, entrypoint in `signer/pyproject.toml`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only, kept out of the phunk.social project |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server) and `node.sh` (Snapchain read node, wraps the official `snapchain.sh`); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py` run offline (fake node); `test_live.py` hits the real node (writes are validate-only) |
