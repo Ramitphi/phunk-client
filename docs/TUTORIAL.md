@@ -503,6 +503,25 @@ user messages, split by fid. "Behind" is `blockDelay`: how many seconds the
 shard's newest block is behind the clock. Under 10 seconds on every shard
 means in sync.
 
+Don't restart or upgrade the node while the snapshot downloads. The
+snapshot comes one shard at a time. After a restart, the shards not yet
+downloaded sync from block 1 instead, which takes months. `status` spots
+this and prints the fix:
+
+```
+  shard 0  height 190123     575d 5h behind snapshot interrupted
+  shard 1  height 49200000   2s behind      in sync
+  shard 2  height 190456     575d 5h behind snapshot interrupted
+
+Shards 0 and 2 are far behind the others. The snapshot download for them was
+interrupted, probably by a restart, so the node is syncing them from block 1.
+Waiting would take months. Download the snapshot again instead (a few hours):
+
+  ./node.sh stop
+  sudo rm -rf /home/snapchain/snapchain/.rocks /home/snapchain/snapchain/.rocks.snapshot
+  ./node.sh start
+```
+
 ### Ports
 
 | Port | | What |

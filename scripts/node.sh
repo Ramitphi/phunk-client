@@ -38,6 +38,7 @@ NODE_DIR="${SNAPCHAIN_DIR:-$HOME/snapchain}"
 API="${SNAPCHAIN_API:-http://localhost:3381}"
 OVERRIDE_MARK="written by phunk-client scripts/node.sh"
 COMPOSE_MIN="2.24.4"   # first Compose release with the !override tag
+STALL_DELAY=$((30 * 86400))   # a shard this far behind is syncing from block 1
 
 say()  { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -219,6 +220,7 @@ print_next() {
 
 The node is running. First it downloads a snapshot of several hundred GB,
 which takes a few hours. Then it syncs the blocks made since.
+Don't restart or upgrade the node until the snapshot download finishes.
 
   ./node.sh status   sync progress
   ./node.sh logs     follow the logs (Ctrl-C stops following; the node keeps running)
@@ -268,6 +270,38 @@ human_secs() {
     elif [ "$s" -lt 86400 ]; then printf '%sh %sm' $((s / 3600)) $((s % 3600 / 60))
     else                          printf '%sd %sh' $((s / 86400)) $((s % 86400 / 3600))
     fi
+}
+
+# "0" -> "0", "0 2" -> "0 and 2", "0 1 2" -> "0, 1 and 2"
+and_list() {
+    local out="$1"
+    shift
+    if [ "$#" -eq 0 ]; then printf '%s' "$out"; return 0; fi
+    while [ "$#" -gt 1 ]; do out="$out, $1"; shift; done
+    printf '%s and %s' "$out" "$1"
+}
+
+# Some shards are syncing from block 1 because their snapshot download was
+# cut short. Say so, and how to fix it. Never deletes anything itself.
+explain_stalled() {
+    local which it
+    if [ "$#" -eq 1 ]; then
+        which="Shard $1 is"; it="it"
+    else
+        which="Shards $(and_list "$@") are"; it="them"
+    fi
+    cat <<EOF
+$which far behind the others. The snapshot download for $it was
+interrupted, probably by a restart, so the node is syncing $it from block 1.
+Waiting would take months. Download the snapshot again instead (a few hours):
+
+  ./node.sh stop
+  sudo rm -rf $NODE_DIR/.rocks $NODE_DIR/.rocks.snapshot
+  ./node.sh start
+
+This deletes the node's data; the snapshot brings it back. Don't restart
+or upgrade the node until the download finishes.
+EOF
 }
 
 # The API is not up yet. Say why, from the container state and its logs.
@@ -337,10 +371,16 @@ cmd_status() {
     printf '  %s messages, %s fids, %s GB on disk\n\n' \
         "$msgs" "$fids" "$(awk -v b="$bytes" 'BEGIN { printf "%.0f", b / 1e9 }')"
 
-    local id height delay word behind lagging=0
+    # The highest shard height, to spot a shard that is far below the rest.
+    local top
+    top="$(printf '%s' "$info" | jq -r '[.shardInfos[].maxHeight // 0] | max // 0')"
+
+    local id height delay word behind lagging=0 stalled=()
     while read -r id height delay; do
         if   [ "$delay" -lt 10 ];  then word="in sync"
         elif [ "$delay" -lt 120 ]; then word="nearly in sync"
+        elif [ "$delay" -gt "$STALL_DELAY" ] && [ $((height * 2)) -lt "$top" ]; then
+            word="snapshot interrupted"; lagging=1; stalled+=("$id")
         else                            word="catching up"; lagging=1
         fi
         behind="$(human_secs "$delay") behind"
@@ -357,6 +397,10 @@ cmd_status() {
         echo
     fi
 
+    if [ "${#stalled[@]}" -gt 0 ]; then
+        explain_stalled "${stalled[@]}"
+        return 2
+    fi
     if [ "$lagging" -eq 1 ]; then
         echo "Still catching up. Reads work, but recent messages may be missing."
         return 2
