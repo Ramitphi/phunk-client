@@ -107,7 +107,10 @@ function avatar(user) {
 
 // "dev" -> "/dev"; a channel URL stays as it is.
 function chan(name) {
-  return name.includes("://") ? name : `/${name}`;
+  if (!name.includes("://")) return `/${name}`;
+  // Token channels ("chain://eip155:1/erc721:0x1538…") are long; keep the start and end of the address.
+  const m = name.match(/^chain:\/\/.*?(0x[0-9a-fA-F]{40})$/);
+  return m ? `${m[1].slice(0, 6)}…${m[1].slice(-4)}` : name;
 }
 
 function noteChannel(name) {
@@ -210,11 +213,11 @@ async function renderTip() {
     const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
     go.addEventListener("click", showTip);
     n.replaceChildren(h("div", { class: "card tip-nudge" },
-      h("span", {}, "If you like it, buy me a coffee"), go));
+      h("span", {}, "If you like it, use your money gun 🔫"), go));
   }
   const wallet = await canSendToken();
   const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-    h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
+    h("span", { class: "muted small" }, wallet ? "If you like it, use your money gun 🔫"
       : `Like phunk? Tip ${who} on Farcaster.`));
   if (!wallet) {
     // No wallet to open here: the maker's profile instead.
@@ -260,6 +263,39 @@ async function renderTip() {
 function showTip() {
   setTab("coffee");
   window.scrollTo({ top: 0 });
+}
+
+// ----------------------------------------------------------- add the app
+// Once someone's people are on screen, offer to keep phunk in their apps,
+// which is also what lets it send the weekly note. Asked at most twice.
+
+const ADD_KEY = "add-asked";
+
+async function renderAddApp() {
+  const box = $("#add-app");
+  box.replaceChildren();
+  if (!miniapp || store.get(ADD_KEY, 0) >= 2) return;
+  try {
+    const context = (await miniapp.context) || {};
+    if (context.client && context.client.added) return;
+  } catch (e) { return; }
+  const add = h("button", { type: "button", class: "cta small" }, "Add phunk");
+  const card = h("div", { class: "card tip-nudge" },
+    h("span", {}, "Keep phunk in your apps, get a weekly note about your people"), add);
+  add.addEventListener("click", async () => {
+    store.set(ADD_KEY, 2);
+    track("Add phunk");
+    try {
+      await miniapp.actions.addMiniApp();
+      box.replaceChildren();
+      toast("Added. You'll get one short note a week.");
+    } catch (e) {
+      box.replaceChildren();
+      toast(/rejected/i.test(e.message || "") ? "No problem." : "Couldn't add it here.");
+    }
+  });
+  store.set(ADD_KEY, store.get(ADD_KEY, 0) + 1);
+  box.replaceChildren(card);
 }
 
 function viewCast(c) {
@@ -366,10 +402,16 @@ function castCard(c) {
   }));
 
   const toggle = (kind) => {
-    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false",
-      title: isPublic() ? "Open this cast in Farcaster" : null }, kind === "like" ? "Like" : "Recast");
+    // The hosted site holds no keys, so it can't like: the button opens the
+    // cast in Farcaster instead, and says so.
+    if (isPublic()) {
+      const open = h("button", { type: "button", class: "ghost open", title: "Open this cast in Farcaster" }, "Open");
+      open.addEventListener("click", () => { track("Open"); viewCast(c); });
+      return open;
+    }
+    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" },
+      kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (isPublic()) { track(kind === "like" ? "Like" : "Recast"); return viewCast(c); }
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
@@ -660,6 +702,7 @@ async function loadPeople(refresh = false) {
     renderChannelPicks();
     renderSummary();
     renderPeople();
+    renderAddApp();
   } catch (e) {
     if (seq !== state.peopleSeq) return;
     track("People failed", { reason: failure(e), took: secs(performance.now() - started) });
@@ -690,11 +733,17 @@ function setTab(name) {
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name === "casts" && state.tab !== "casts") track("Casts opened");
   if (name !== "compose") state.lastTab = name;
+  // All panes share one page scroll: keep each tab's own place, so a tab
+  // never opens halfway down because the last one was scrolled.
+  const scroll = state.scroll || (state.scroll = {});
+  const switching = name !== state.tab;
+  if (switching && state.tab) scroll[state.tab] = window.scrollY;
   state.tab = name;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
   if (name === "casts" && !state.feedLoaded) { state.feedLoaded = true; loadFeed(true); }
-  if (name === "compose") $("#compose-text").focus();
+  if (switching) window.scrollTo(0, scroll[name] || 0);
+  if (name === "compose") $("#compose-text").focus({ preventScroll: true });
 }
 
 // Channels seen in casts and people's previews, as one-tap picks in Compose.
@@ -771,7 +820,10 @@ async function init() {
     applyTheme(theme);
     track("Theme", { theme });
   });
-  for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => setTab(b.dataset.tab));
+  for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => {
+    if (b.dataset.tab === state.tab) window.scrollTo({ top: 0, behavior: "smooth" });
+    else setTab(b.dataset.tab);
+  });
 
   try {
     state.me = await api("/api/me");
@@ -810,7 +862,7 @@ async function init() {
   }
   if (isPublic()) {
     const remembered = !!state.who; // only whether there is one, never the name
-    track("Open", { start: miniapp && state.me.user ? "miniapp" : state.whoFromUrl ? "link" : remembered ? "returning" : "new" });
+    track("Visit", { start: miniapp && state.me.user ? "miniapp" : state.whoFromUrl ? "link" : remembered ? "returning" : "new" });
   }
   renderTip();
   $("#lookup-name").value = state.who;

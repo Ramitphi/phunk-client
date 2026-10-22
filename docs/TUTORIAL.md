@@ -386,7 +386,7 @@ Who signed their last 100 casts, likes and follows:
 Public nodes are shared. `Hub` defaults to at most 20 requests a second and
 12 in flight, retries 429s, 5xx errors and timeouts with backoff, and raises
 `NotFound` on 404 (and on the 400 some nodes send for an unknown fid). Turn
-those down for big jobs:
+those down for big jobs on a shared node:
 
 ```python
 async with Hub(rate=5, concurrency=4) as hub:
@@ -541,8 +541,9 @@ Waiting would take months. Download the snapshot again instead (a few hours):
 | 3382 | UDP | gossip with other nodes |
 | 3383 | TCP | gRPC API |
 
-All three must be reachable from the internet. That also means anyone can
-read from your node, like any public node.
+Out of the box all three are open to the internet, so anyone who finds
+your node can read from it, as fast as it answers. Only gossip (3382) has
+to stay open: the node syncs over it. The next section closes the other two.
 
 Docker publishes ports around `ufw`, so a firewall rule alone won't hide a
 container. `node.sh` binds Grafana (3000) and statsd (8125, 8126) to
@@ -564,6 +565,74 @@ phunk --node http://<ip>:3381 info
 ```
 
 On the server itself, use `http://localhost:3381`.
+
+### Keep it for your own apps
+
+To stop strangers using your node, put it behind a gateway and close its
+own ports. `scripts/gateway.sh` sets up nginx on port 443 with:
+
+- a token per app: requests without a known token get a 401
+- a rate limit per token, so one app, or a leaked token, can't take the
+  whole node (429s, which `Hub` retries)
+- only `/v1/` reads, plus `submitMessage` and `validateMessage`
+- gzip, which makes the JSON pages several times smaller
+- a 15-second cache shared by every app
+
+You need a DNS name that points at the server, like `node.example.com`.
+Then, on the server:
+
+```sh
+sudo NODE_DOMAIN=node.example.com ./gateway.sh setup
+sudo ./gateway.sh token add my-app     # prints the token once
+./node.sh private                      # 3381 and 3383 on 127.0.0.1 only
+sudo ./gateway.sh status
+```
+
+`./node.sh private` restarts the node, and refuses to while the snapshot
+is still downloading. `./node.sh public` undoes it.
+
+Check from another machine. Without the token:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://node.example.com/v1/info   # 401
+curl -s -m 5 http://<ip>:3381/v1/info                                      # no answer
+```
+
+With it:
+
+```sh
+curl -s -H "Authorization: Bearer $PHUNK_NODE_TOKEN" https://node.example.com/v1/info
+```
+
+```python
+import os
+
+async with Hub("https://node.example.com", token=os.environ["PHUNK_NODE_TOKEN"],
+               rate=150, concurrency=48) as hub:
+    print(await hub.info())
+```
+
+```sh
+export PHUNK_NODE=https://node.example.com PHUNK_NODE_TOKEN=...
+phunk info
+```
+
+The token goes in a header, never in the URL. Keep it out of code and
+repos: put it in an environment variable. Give each app its own, so
+`sudo ./gateway.sh token remove my-app` cuts off one without the others.
+
+### Make it fast
+
+A feed is one request per account followed, so most of its time is
+waiting on the network. Three things help, in order:
+
+1. **More in flight.** On your own node, raise `concurrency` (48 or more)
+   and `rate` (150 or more). The gateway's per-token limit (300 a second
+   by default) still caps the total.
+2. **Close to the node.** Run the client in the same region as the node.
+   Each request costs a round trip, so 5 ms beats 90 ms.
+3. **gzip and the cache.** The gateway does both. `Hub` asks for gzip by
+   default.
 
 ### Read nodes and validators
 

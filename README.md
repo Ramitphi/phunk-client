@@ -125,6 +125,9 @@ first: it covers what a seed phrase can do and how to keep it safe.
 - **Rate limits.** A token bucket (`rate=`, default 20/s) and a cap on requests
   in flight (`concurrency=`). 429s, 5xx and timeouts retry with backoff.
   404s (and the 400s some nodes send for "no such fid") raise `NotFound`.
+- **Private nodes.** `token=` sends `Authorization: Bearer <token>`. A 401
+  or 403 raises `NodeError` saying whether the token was missing or wrong,
+  and is not retried.
 
 ## Command line
 
@@ -186,20 +189,33 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow and Like open Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+a username, and Follow and Open take you to Farcaster. Inside a Farcaster
+client it is a mini app that shows your own people right away, and people
+who add it can get one short note a week about their people. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node
 
 The default is `https://haatz.quilibrium.com`, a public Hypersnap node on
 port 443 that sends CORS headers. Pass any other node's URL to `Hub(...)`,
-for example your own Snapchain at `http://localhost:3381`.
+for example your own Snapchain at `http://localhost:3381`. On your own
+node, raise `rate=` and `concurrency=` (say 150 and 48): a feed is one
+request per account followed, so this is what makes it fast.
 
 To run your own read node on a fresh Ubuntu 22.04 server, use
 [`scripts/provision.sh`](scripts/provision.sh) and
-[`scripts/node.sh`](scripts/node.sh). See
-[step 9 of the tutorial](docs/TUTORIAL.md#9-run-your-own-node).
+[`scripts/node.sh`](scripts/node.sh). To keep it for your own apps, put it
+behind [`scripts/gateway.sh`](scripts/gateway.sh): HTTPS, a token per app,
+a rate limit per token, gzip and a short cache. Then `./node.sh private`
+closes the node's own ports. Clients pass the token:
+
+```python
+Hub("https://node.example.com", token=os.environ["PHUNK_NODE_TOKEN"], rate=150, concurrency=48)
+```
+
+The CLI reads `PHUNK_NODE`, `PHUNK_NODE_TOKEN`, `PHUNK_RATE` and
+`PHUNK_CONCURRENCY`. See
+[step 9 of the tutorial](docs/TUTORIAL.md#keep-it-for-your-own-apps).
 
 ## Examples
 

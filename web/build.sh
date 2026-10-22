@@ -6,7 +6,8 @@
 # The read API is api/index.py.
 #
 # Settings (environment variables):
-#   SITE_DOMAIN            default phunk.social (link previews)
+#   SITE_DOMAIN            default www.phunk.social (link previews; the host that
+#                          serves the image, since phunk.social redirects to it)
 #   MINIAPP_DOMAIN         default miniapp.phunk.social (the manifest, and
 #                          where the cast embed opens the mini app)
 #   FARCASTER_HEADER       the manifest's accountAssociation, from Farcaster's
@@ -14,7 +15,7 @@
 #   FARCASTER_SIGNATURE    unset: the site works, but isn't a verified mini app.
 set -eu
 cd "$(dirname "$0")/.."
-DOMAIN="${SITE_DOMAIN:-phunk.social}"
+DOMAIN="${SITE_DOMAIN:-www.phunk.social}"
 MINIAPP_DOMAIN="${MINIAPP_DOMAIN:-miniapp.phunk.social}"
 OUT=web/_site
 

@@ -89,10 +89,11 @@ def test_site_answers_reads_with_cdn_cache_headers(site):
     assert site.respond("/api/nope") == (404, {"error": "no such endpoint"}, "no-store")
 
 
-def asgi(app, method, path, body=b""):
+def asgi(app, method, path, body=b"", headers=()):
     """One request through an ASGI app -> (status, headers dict, JSON body or None)."""
     path, _, query = path.partition("?")
-    scope = {"type": "http", "method": method, "path": path, "query_string": query.encode(), "headers": []}
+    scope = {"type": "http", "method": method, "path": path, "query_string": query.encode(),
+             "headers": [(k.encode(), v.encode()) for k, v in headers]}
     sent, todo = [], [{"type": "http.request", "body": body, "more_body": False}]
 
     async def receive():
@@ -115,6 +116,28 @@ def test_site_asgi_app(site):
     status, headers, body = asgi(site.app, "POST", "/api/cast", b"{}")
     assert status == 405 and body["read_only"] is True and headers["cache-control"] == "no-store"
     assert asgi(site.app, "GET", "/api/nope")[0] == 404
+
+
+def test_webhook_and_digest_say_so_when_notifications_are_not_set_up(site):
+    """Without a Redis, the two notification endpoints answer 503, not 404 or 500."""
+    status, headers, body = asgi(site.app, "POST", "/api/webhook", b'{"header": "x"}')
+    assert status == 503 and "not set up" in body["error"] and headers["cache-control"] == "no-store"
+    assert asgi(site.app, "GET", "/api/cron/digest")[0] == 503
+    # Still not a read endpoint: a GET of the webhook path is a 404 from the read API.
+    assert asgi(site.app, "GET", "/api/webhook")[0] == 404
+
+
+def test_the_digest_cron_is_only_for_vercel(site, monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    assert asgi(site.app, "GET", "/api/cron/digest")[0] == 401
+    assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer wrong")])[0] == 401
+    # With the right secret it gets past the gate (503: no store on this deployment).
+    assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
+
+
+def test_vercel_runs_the_weekly_digest():
+    config = json.loads((ROOT / "vercel.json").read_text())
+    assert config["crons"] == [{"path": "/api/cron/digest", "schedule": "0 16 * * 2"}]
 
 
 def test_vercel_services_route_to_the_right_service():
@@ -163,6 +186,8 @@ def test_static_build_page_and_mini_app(monkeypatch):
     assert embeds["fc:frame"]["button"]["action"]["type"] == "launch_frame"
     assert embed["imageUrl"] == "https://miniapp.phunk.social/img/embed.png"
     assert embed["button"]["action"]["url"] == "https://miniapp.phunk.social/"  # the mini app's own domain
+    # Link previews point at the host that serves the image (phunk.social redirects to www).
+    assert '<meta property="og:image" content="https://www.phunk.social/img/og.png">' in html
 
     # Analytics on the hosted page only, allowed by its CSP; never in `phunk ui`.
     assert '<script defer src="https://assets.onedollarstats.com/stonks.js"></script>' in html
@@ -179,10 +204,16 @@ def test_static_build_page_and_mini_app(monkeypatch):
     assert app["version"] == "1" and len(app["name"]) <= 32 and app["homeUrl"] == "https://miniapp.phunk.social/"
     assert len(app["subtitle"]) <= 30 and len(app["description"]) <= 170 and len(app["tagline"]) <= 30
     assert len(app["ogDescription"]) <= 100 and app["canonicalDomain"] == "miniapp.phunk.social"
+    # Where clients post add / remove events, on the mini app's own domain.
+    assert app["webhookUrl"] == "https://miniapp.phunk.social/api/webhook"
     assert all(t == t.lower() and " " not in t and len(t) <= 20 for t in app["tags"]) and len(app["tags"]) <= 5
     sizes = {"icon.png": (1024, 1024), "splash.png": (200, 200), "embed.png": (1200, 800), "og.png": (1200, 630)}
     for name, size in sizes.items():
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
+    # Store screenshots: at most 3, portrait 1284 x 2778 (web/make_screenshots.py).
+    assert 1 <= len(app["screenshotUrls"]) <= 3
+    for url in app["screenshotUrls"]:
+        assert _png_info(out / url.removeprefix("https://miniapp.phunk.social/")) == (1284, 2778, 2), url
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
         assert (out / url.removeprefix("https://miniapp.phunk.social/").split("?")[0]).is_file(), url
 
@@ -192,7 +223,7 @@ def test_every_product_event_is_documented():
     import re
 
     js = (ROOT / "src/phunk/static/app.js").read_text()
-    sent = set(re.findall(r'track\("([^"]+)"', js)) | set(re.findall(r'track\(kind === "like" \? "(\w+)" : "(\w+)"\)', js)[0])
+    sent = set(re.findall(r'track\("([^"]+)"', js))
     table = (ROOT / "web/README.md").read_text().split("### Product events", 1)[1].split("\n## ", 1)[0]
     documented = set(re.findall(r"^\| ((?:`[^`]+`(?:, )?)+) \|", table, re.M))
     documented = {name for row in documented for name in re.findall(r"`([^`]+)`", row)}
@@ -203,3 +234,36 @@ def test_every_product_event_is_documented():
     # Hosted page only: track() sends nothing outside public mode (local `phunk ui`).
     body = js.split("function track(", 1)[1].split("\n}\n", 1)[0]
     assert "isPublic() && window.stonks" in body
+
+
+def test_public_mode_hides_the_node_and_rate_limits_refresh():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        async with client.get(f"{base}/api/people?who=me") as r:
+            assert r.status == 200
+        n = len(calls)
+        for _ in range(3):  # a script hammering Refresh
+            async with client.get(f"{base}/api/people?who=me&refresh=1") as r:
+                assert r.status == 200
+        return me, len(calls) - n
+
+    me, extra = run(test, fid=None, public=True)
+    assert me["node"] is None
+    assert extra == 0  # served from the cache: the first read is under a minute old
+
+
+def test_local_mode_refresh_still_rereads():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        async with client.get(f"{base}/api/people") as r:
+            assert r.status == 200
+        n = len(calls)
+        async with client.get(f"{base}/api/people?refresh=1") as r:
+            assert r.status == 200
+        return me, len(calls) - n
+
+    me, extra = run(test)
+    assert me["node"].startswith("http://127.0.0.1:")
+    assert extra > 0
