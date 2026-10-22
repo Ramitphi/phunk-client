@@ -172,13 +172,15 @@ def test_static_build_page_and_mini_app(monkeypatch):
     config = json.loads((ROOT / "vercel.json").read_text())
     web = config["services"]["web"]
     assert (web["root"], web["outputDirectory"]) == ("web", "_site")
-    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js", "money-gun.svg"}
+    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js"}
 
     # The page, plus the mini app embed and link previews in <head>.
     html = (out / "index.html").read_text()
     # The CSS and JS links carry a version, so phones drop an old cached copy.
     assert re.search(r'href="/static/app\.css\?v=\d+"', html) and re.search(r'src="/static/app\.js\?v=\d+"', html)
     assert html.replace("\n", "").count("</head>") == 1
+    # The money gun is drawn in the page, not loaded as an image, so it takes the theme's colours.
+    assert '<svg class="money-gun"' in html and "money-gun.svg" not in html
     embeds = {}
     for name in ("fc:miniapp", "fc:frame"):
         start = html.index(f'<meta name="{name}" content=\'') + len(f'<meta name="{name}" content=\'')

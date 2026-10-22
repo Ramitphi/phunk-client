@@ -210,22 +210,20 @@ async function renderTip() {
   if (!tip) { slot.replaceChildren(); for (const n of nudges) n.replaceChildren(); return; }
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
   for (const n of nudges) {
-    const go = h("button", { type: "button", class: "cta small" }, "💸 Tip");
+    const go = h("button", { type: "button", class: "cta small" }, "Tip");
     go.addEventListener("click", showTip);
     n.replaceChildren(h("div", { class: "card tip-nudge" },
-      h("span", {}, "If you like it, use your money gun 🔫"), go));
+      h("span", { class: "logo gun-badge", "aria-hidden": "true" }),
+      h("span", { class: "nudge-text" }, "If you like it, use your money gun"), go));
   }
+  // The picture and the title are in the page; this fills in the line under them.
   const wallet = await canSendToken();
-  const head = h("div", { class: "tip-head" },
-    h("img", { src: "/static/money-gun.svg", alt: "", class: "tip-art", width: "240", height: "150" }),
-    h("b", {}, "If you like it, use your money gun 🔫"),
-    h("span", { class: "muted small" }, wallet ? `Tips go to ${who} in USDC on Base.`
-      : `Like phunk? Tip ${who} on Farcaster.`));
+  $("#tip-line").textContent = wallet ? `Tips go to ${who} in USDC on Base.` : `Like phunk? Tip ${who} on Farcaster.`;
   if (!wallet) {
     // No wallet to open here: the maker's profile instead.
-    const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
+    const open = h("button", { type: "button", class: "cta" }, `Open ${who} in Farcaster`);
     open.addEventListener("click", () => { track("Tip profile"); viewProfile(tip); });
-    slot.replaceChildren(h("div", { class: "card tip" }, head, open));
+    slot.replaceChildren(h("div", { class: "tip-open" }, open));
     return;
   }
   const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
@@ -258,7 +256,7 @@ async function renderTip() {
     sendTip(String(d * 1000000), String(d));
   });
   grid.append(form);
-  slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+  slot.replaceChildren(h("div", { class: "card tip" }, grid));
 }
 
 // The nudge's button: open the Tip tab.
@@ -283,7 +281,8 @@ async function renderAddApp() {
   } catch (e) { return; }
   const add = h("button", { type: "button", class: "cta small" }, "Add phunk");
   const card = h("div", { class: "card tip-nudge" },
-    h("span", {}, "Keep phunk in your apps, get a weekly note about your people"), add);
+    h("span", { class: "logo", "aria-hidden": "true" }, "φ"),
+    h("span", { class: "nudge-text" }, "Keep phunk in your apps, get a weekly note about your people"), add);
   add.addEventListener("click", async () => {
     store.set(ADD_KEY, 2);
     track("Add phunk");
