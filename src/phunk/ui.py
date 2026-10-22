@@ -51,7 +51,7 @@ CASTING = False
 
 
 def tip_fid_from_env() -> int | None:
-    """PHUNK_TIP_FID: the account that "Buy me a coffee" tips. Unset: no button."""
+    """PHUNK_TIP_FID: the account that the money gun (Tip tab) tips. Unset: no button."""
     value = os.environ.get("PHUNK_TIP_FID", "").strip()
     return int(value) if value.isdigit() and int(value) > 0 else None
 
