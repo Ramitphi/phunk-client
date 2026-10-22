@@ -57,6 +57,12 @@ _KEY_ADD_TYPE = [
     {"name": "nonce", "type": "uint32"},
     {"name": "deadline", "type": "uint256"},
 ]
+_KEY_REMOVE_TYPE = [
+    {"name": "fid", "type": "uint256"},
+    {"name": "key", "type": "bytes"},
+    {"name": "nonce", "type": "uint32"},
+    {"name": "deadline", "type": "uint256"},
+]
 _SIGNED_KEY_REQUEST_TYPE = [
     {"name": "requestFid", "type": "uint256"},
     {"name": "key", "type": "bytes"},
@@ -184,6 +190,12 @@ class Custody:
         })
 
 
+    def sign_key_remove(self, fid: int, key: bytes, nonce: int, deadline: int) -> bytes:
+        """The custody authorization for a KEY_REMOVE."""
+        return self.sign_typed("KeyRemove", _KEY_REMOVE_TYPE,
+                               {"fid": fid, "key": key, "nonce": nonce, "deadline": deadline})
+
+
 def encode_key_request(request_fid: int, request_signer: str, signature: bytes, deadline: int) -> bytes:
     """abi.encode(SignedKeyRequestMetadata(requestFid, requestSigner, signature, deadline)).
 
@@ -300,6 +312,86 @@ async def add_app_key(hub: Hub, custody: Custody, *, fid: int | None = None,
                         metadata=metadata)
     await hub.submit(msg)
     return fid, key
+
+
+# --------------------------------------------------------------- KEY_REMOVE
+#
+# Revoking a gasless app key. The key stops working at once; casts it already
+# signed stay. On-chain keys can't be removed this way: that takes a
+# transaction to the Key Registry.
+
+_STORED_NONCE = re.compile(r"not greater than stored nonce (\d+)")
+
+
+def build_key_remove_self(key: AppKey, fid: int, *, nonce: int, deadline: int,
+                          timestamp: int | None = None) -> bytes:
+    """A KEY_REMOVE that `key` signs for itself. No custody key needed.
+
+    `nonce` must exceed the app nonce of the app that requested the key
+    (`requesterFidNonces` in /v1/signersByFid)."""
+    body = proto.KeyRemoveBody(key=key.public_key, signature_type=proto.REMOVE_BY_SELF,
+                               deadline=deadline, nonce=nonce)
+    return key.sign(proto.KEY_REMOVE, fid, body.encode(), timestamp)
+
+
+def build_key_remove_custody(custody: Custody, fid: int, key: bytes, *, nonce: int, deadline: int,
+                             envelope_key: AppKey | None = None, timestamp: int | None = None) -> bytes:
+    """A KEY_REMOVE for any gasless key on the account, authorized by custody.
+
+    `key` is the public key to remove. `nonce` must exceed `currentUserNonce`.
+    The node only checks the custody signature, so the envelope can be
+    signed by any Ed25519 key (`envelope_key`, a fresh one by default)."""
+    sig = custody.sign_key_remove(fid, key, nonce, deadline)
+    body = proto.KeyRemoveBody(key=key, signature_type=proto.REMOVE_BY_CUSTODY,
+                               deadline=deadline, nonce=nonce, signature=sig)
+    return (envelope_key or AppKey.generate()).sign(proto.KEY_REMOVE, fid, body.encode(), timestamp)
+
+
+async def _submit_with_nonce(hub: Hub, build, nonce: int) -> int:
+    """Submit build(nonce). If the node says the nonce is used, retry once
+    with the stored nonce + 1 (for nodes that don't report app nonces)."""
+    try:
+        await hub.submit(build(nonce))
+        return nonce
+    except NodeError as e:
+        m = _STORED_NONCE.search(str(e))
+        if not m:
+            raise
+        nonce = int(m.group(1)) + 1
+        await hub.submit(build(nonce))
+        return nonce
+
+
+async def revoke_key(hub: Hub, fid: int, key: AppKey) -> None:
+    """Revoke a gasless app key you hold, signed by the key itself.
+
+    No seed phrase needed. Raises NodeError if the node rejects it, for
+    example because the key is on-chain or already gone."""
+    found = [k for k in await hub.keys(fid) if k.key == key.public_hex and not k.onchain]
+    if not found:
+        raise ValueError(f"{key.public_hex} is not an active gasless key of fid {fid}")
+    app_fid = found[-1].app_fid if found[-1].app_fid is not None else fid
+    nonces = (await hub.signers(fid, [app_fid])).get("requesterFidNonces") or {}
+    nonce = int(nonces.get(str(app_fid), 0)) + 1
+    deadline = now() + 3600
+    await _submit_with_nonce(hub, lambda n: build_key_remove_self(key, fid, nonce=n, deadline=deadline), nonce)
+
+
+async def revoke_key_with_custody(hub: Hub, custody: Custody, key: bytes | str, *,
+                                  fid: int | None = None) -> int:
+    """Revoke any gasless key on the account behind `custody`. Returns the fid.
+
+    Use this for a key you no longer hold (a lost laptop, an app you stopped
+    using). `key` is the public key, bytes or 0x hex."""
+    if isinstance(key, str):
+        key = bytes.fromhex(key.removeprefix("0x"))
+    if fid is None:
+        fid = await hub.fid_by_address(custody.address)
+    nonce = (await hub.signers(fid)).get("currentUserNonce", 0) + 1
+    deadline = now() + 3600
+    await _submit_with_nonce(
+        hub, lambda n: build_key_remove_custody(custody, fid, key, nonce=n, deadline=deadline), nonce)
+    return fid
 
 
 # --------------------------------------------------------------- writing

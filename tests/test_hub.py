@@ -232,3 +232,16 @@ def test_custody_address_is_the_latest_register_or_transfer():
         return await hub.custody_address(3)
 
     assert run({"/v1/onChainEventsByFid": handler}, test) == "0xbbb"
+
+
+def test_signers_asks_for_app_nonces_in_the_nodes_array_syntax():
+    # The node parses query arrays as key[i]=v; a repeated key is an error.
+    async def signers(request):
+        return web.json_response({"signers": [], "currentUserNonce": 2, "requesterFidNonces": {"7": 1, "8": 0}})
+
+    async def test(hub, calls):
+        return await hub.signers(3, [7, 8]), calls
+
+    r, calls = run({"/v1/signersByFid": signers}, test)
+    assert r["requesterFidNonces"] == {"7": 1, "8": 0}
+    assert calls == [("/v1/signersByFid", {"fid": "3", "requesterFids[0]": "7", "requesterFids[1]": "8"})]

@@ -25,6 +25,11 @@ LINK_ADD = 5
 LINK_REMOVE = 6
 USER_DATA_ADD = 11
 KEY_ADD = 16
+KEY_REMOVE = 17
+
+# KeyRemoveBody.signature_type
+REMOVE_BY_CUSTODY = 1
+REMOVE_BY_SELF = 2
 
 # ReactionType
 LIKE = 1
@@ -202,6 +207,24 @@ class KeyAddBody:
         )
 
 
+@dataclass(frozen=True)
+class KeyRemoveBody:
+    key: bytes
+    signature_type: int  # REMOVE_BY_CUSTODY or REMOVE_BY_SELF
+    deadline: int
+    nonce: int
+    signature: bytes = b""  # custody EIP-712; empty for self-revocation
+
+    def encode(self) -> bytes:
+        return (
+            f_bytes(1, self.key)
+            + f_bytes(2, self.signature)
+            + f_int(3, self.signature_type)
+            + f_int(4, self.deadline)
+            + f_int(5, self.nonce)
+        )
+
+
 # MessageData.body oneof: message type -> field number
 BODY_FIELD = {
     CAST_ADD: 5,
@@ -212,6 +235,7 @@ BODY_FIELD = {
     LINK_ADD: 14,
     LINK_REMOVE: 14,
     KEY_ADD: 19,
+    KEY_REMOVE: 20,
 }
 
 

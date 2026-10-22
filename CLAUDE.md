@@ -11,7 +11,7 @@ licensed, public.
 | `src/phunk/hub.py` | `Hub`: HTTP, rate limit, retries, the pager (`pages`), and the typed methods |
 | `src/phunk/models.py` | Dataclasses (`User`, `Cast`, `Reaction`, `Follow`, `Key`); each keeps `.raw` |
 | `src/phunk/proto.py` | Minimal protobuf encoder for the message types a client sends; matches ts-proto byte for byte |
-| `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `Writer` (cast, react, follow). Optional extra `[write]` |
+| `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `revoke_key` / `revoke_key_with_custody` (KEY_REMOVE), `Writer` (cast, react, follow). Optional extra `[write]` |
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
