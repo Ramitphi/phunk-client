@@ -49,6 +49,9 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
      and `PHUNK_TIP_FID` (the fid "Buy me a coffee" tips; unset, there is no button).
      `PHUNK_BASE_RPC` (Base JSON-RPC for the "Voted NS" stamp, default
      `https://mainnet.base.org`; `off` hides it).
+   - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
+     `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
+     Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below).
 4. **Deploy**. Open the `*.vercel.app` URL and look someone up.
@@ -145,4 +148,26 @@ local `phunk ui` never loads it, and it ignores localhost anyway.
 - Each function instance keeps its own in-memory caches and talks to the
   node at `PHUNK_RATE` requests a second at most. If the public node starts
   refusing, point `PHUNK_NODE` at your own node (`scripts/node.sh`).
+- **Refresh** re-reads the node only for results over a minute old, so a
+  script sending `refresh=1` in a loop gets the cached answer. `/api/me`
+  doesn't say which node the site reads from.
+
+## Your own node, fast and private
+
+The site holds a token for your node, so the node itself can refuse
+everyone else (`scripts/gateway.sh`, then `./node.sh private`; see
+[the tutorial](../docs/TUTORIAL.md#keep-it-for-your-own-apps)). The
+gateway caps the token at 300 requests a second, so even a flood of
+visitors can't take the node down; they get slower answers instead.
+
+To make it fast:
+
+1. Set `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`. A feed reads every
+   account followed, one request each, so this is what makes Casts quick.
+2. Run the function next to the node: in Vercel, **Settings → Functions →
+   Function Region**, pick the region closest to the server (for example
+   `fra1` for a server in Germany, `iad1` for US East).
+3. In Vercel → **Firewall**, add a rate limit rule for `/api/*` (say 60
+   requests a minute per IP). Each lookup of a new account costs the node
+   about 150 requests, so this keeps one visitor from asking for thousands.
 - Nothing is stored about visitors. The function doesn't log requests.

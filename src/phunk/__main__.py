@@ -4,6 +4,7 @@
     phunk casts dwr -n 5
     phunk apps dwr
     phunk --node http://localhost:3381 info
+    PHUNK_NODE=https://node.example PHUNK_NODE_TOKEN=... phunk info
 
     phunk key add                # seed phrase in (hidden), app key out
     phunk key list               # the account's keys and which app asked for each
@@ -247,7 +248,8 @@ async def run_ui(hub: Hub, args) -> None:
 
 
 async def run(args) -> None:
-    async with Hub(args.node) as hub:
+    async with Hub(args.node, rate=args.rate, concurrency=args.concurrency,
+                   token=os.environ.get("PHUNK_NODE_TOKEN") or None) as hub:
         if args.cmd == "ui":
             await run_ui(hub, args)
         elif args.cmd == "key":
@@ -288,7 +290,13 @@ WRITE_CMDS = {"post", "like", "unlike", "recast", "unrecast", "follow", "unfollo
 
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="phunk", description="Read and write Farcaster through a Snapchain node.")
-    p.add_argument("--node", default=DEFAULT_NODE, help=f"node URL (default {DEFAULT_NODE})")
+    node = os.environ.get("PHUNK_NODE") or DEFAULT_NODE
+    p.add_argument("--node", default=node, help=f"node URL (default $PHUNK_NODE or {DEFAULT_NODE}); "
+                                                 "a token for it goes in $PHUNK_NODE_TOKEN")
+    p.add_argument("--rate", type=float, default=float(os.environ.get("PHUNK_RATE") or 20),
+                   help="requests per second (default $PHUNK_RATE or 20; raise it on your own node)")
+    p.add_argument("--concurrency", type=int, default=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
+                   help="requests in flight (default $PHUNK_CONCURRENCY or 12)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("info", help="node stats")
     for name, helptext in (("whois", "profile"), ("casts", "latest casts"), ("apps", "which apps signed their casts")):

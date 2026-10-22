@@ -4,7 +4,7 @@ import base64
 
 from aiohttp import web
 
-from phunk import Hub, NotFound
+from phunk import Hub, NodeError, NotFound
 
 
 def msg(h, fid=1, ts=100, signer="0xk1", **body):
@@ -310,3 +310,47 @@ def test_holders_checks_wallets_with_multicall():
 
     assert asyncio.run(go()) == {"0x" + "ab" * 20}
     assert len(seen) == 2  # 251 valid addresses, 200 per call
+
+
+def test_token_goes_in_a_header_and_a_refusal_says_so():
+    seen = []
+
+    async def handler(request):
+        seen.append((request.headers.get("Authorization"), str(request.url)))
+        if request.headers.get("Authorization") != "Bearer s3cret":
+            return web.Response(status=401)
+        return web.json_response({"fid": 3})
+
+    async def body():
+        app = web.Application()
+        app.router.add_get("/v1/userNameProofByName", handler)
+        app.router.add_post("/v1/validateMessage", handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+        out = []
+        try:
+            async with Hub(url, rate=1000, token="s3cret") as hub:
+                out.append(await hub.fid_by_name("dwr"))
+                out.append(await hub.validate(b"\x00"))
+            for token in (None, "wrong"):
+                async with Hub(url, rate=1000, token=token) as hub:
+                    try:
+                        await hub.fid_by_name("dwr")
+                    except NotFound:
+                        out.append("not found")  # a 401 must not look like a missing name
+                    except NodeError as e:
+                        out.append(str(e))
+        finally:
+            await runner.cleanup()
+        return out
+
+    out = asyncio.run(body())
+    assert out[:2] == [3, {"fid": 3}]
+    assert "wants a token" in out[2] and "refused this token" in out[3]
+    assert all("s3cret" not in m and "wrong" not in m for m in out[2:])
+    assert seen[0][0] == "Bearer s3cret" and seen[1][0] == "Bearer s3cret"
+    assert all("s3cret" not in url for _, url in seen)  # never in the URL
+    assert len(seen) == 4  # a refusal is not retried

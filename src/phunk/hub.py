@@ -54,6 +54,12 @@ def _since(since: dt.datetime | int | None) -> int | None:
     return from_datetime(since)
 
 
+def _refused(path: str, status: int, sent_token: bool) -> str:
+    if sent_token:
+        return f"{path}: HTTP {status}: the node refused this token"
+    return f"{path}: HTTP {status}: this node wants a token (Hub(..., token=) or PHUNK_NODE_TOKEN)"
+
+
 class Hub:
     """Read Farcaster from a node.
 
@@ -63,7 +69,13 @@ class Hub:
                 print(cast.text)
 
     `rate` caps requests per second and `concurrency` caps requests in
-    flight. Public nodes are shared, so keep these modest.
+    flight. Public nodes are shared, so keep these modest. On your own node,
+    raise both: most of a feed's time is waiting on the network, so more in
+    flight means a faster feed.
+
+    `token` is for a node behind a gateway that wants one (see
+    `scripts/gateway.sh`). It goes in an `Authorization: Bearer` header,
+    never in the URL, so it stays out of logs and error messages.
     """
 
     def __init__(
@@ -74,9 +86,11 @@ class Hub:
         concurrency: int = 12,
         timeout: float = 60.0,
         retries: int = 5,
+        token: str | None = None,
         session: aiohttp.ClientSession | None = None,
     ):
         self.url = url.rstrip("/")
+        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         self.limiter = RateLimiter(rate)
         self.sem = asyncio.Semaphore(concurrency)
         self.timeout = aiohttp.ClientTimeout(total=timeout)
@@ -117,7 +131,9 @@ class Hub:
             async with self.sem:
                 self.requests += 1
                 try:
-                    async with self.session.get(url, params=params) as r:
+                    async with self.session.get(url, params=params, headers=self._headers) as r:
+                        if r.status in (401, 403):
+                            raise NodeError(_refused(path, r.status, bool(self._headers)))
                         if r.status in (400, 404):
                             text = await r.text()
                             raise NotFound(f"{path} {params}: {text[:200]}")
@@ -145,13 +161,15 @@ class Hub:
         if self.session is None:
             raise RuntimeError("use `async with Hub(...) as hub:` or call `await hub.__aenter__()`")
         url = f"{self.url}{path}"
-        headers = {"Content-Type": "application/octet-stream"}
+        headers = {"Content-Type": "application/octet-stream", **self._headers}
         for attempt in range(self.retries):
             await self.limiter.acquire()
             async with self.sem:
                 self.requests += 1
                 try:
                     async with self.session.post(url, data=body, headers=headers) as r:
+                        if r.status in (401, 403):
+                            raise NodeError(_refused(path, r.status, bool(self._headers)))
                         if r.status in RETRY_STATUS:
                             raise aiohttp.ClientResponseError(r.request_info, (), status=r.status)
                         if r.status >= 400:
