@@ -11,13 +11,14 @@ licensed, public.
 | `src/phunk/hub.py` | `Hub`: HTTP, rate limit, retries, the pager (`pages`), and the typed methods |
 | `src/phunk/models.py` | Dataclasses (`User`, `Cast`, `Reaction`, `Follow`, `Key`); each keeps `.raw` |
 | `src/phunk/proto.py` | Minimal protobuf encoder for the message types a client sends; matches ts-proto byte for byte |
-| `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `Writer` (cast, react, follow). Optional extra `[write]` |
+| `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `revoke_key` / `revoke_key_with_custody` (KEY_REMOVE), `Writer` (cast, react, follow). Optional extra `[write]` |
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
+| `src/phunk/onchain.py` | `holders`: which addresses hold an NFT on Base (Multicall3 `balanceOf`), for the "Voted NS" stamp on people cards |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
 | `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |
 | `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
-| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode, also a Farcaster mini app (manifest and images in `web/public/`); see `web/README.md` |
+| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode, also a Farcaster mini app at miniapp.phunk.social (manifest and images in `web/public/`), with OneDollarStats analytics on the hosted page only; see `web/README.md` |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |

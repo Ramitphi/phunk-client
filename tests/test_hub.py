@@ -234,6 +234,84 @@ def test_custody_address_is_the_latest_register_or_transfer():
     assert run({"/v1/onChainEventsByFid": handler}, test) == "0xbbb"
 
 
+def test_signers_asks_for_app_nonces_in_the_nodes_array_syntax():
+    # The node parses query arrays as key[i]=v; a repeated key is an error.
+    async def signers(request):
+        return web.json_response({"signers": [], "currentUserNonce": 2, "requesterFidNonces": {"7": 1, "8": 0}})
+
+    async def test(hub, calls):
+        return await hub.signers(3, [7, 8]), calls
+
+    r, calls = run({"/v1/signersByFid": signers}, test)
+    assert r["requesterFidNonces"] == {"7": 1, "8": 0}
+    assert calls == [("/v1/signersByFid", {"fid": "3", "requesterFids[0]": "7", "requesterFids[1]": "8"})]
+
+
+def test_eth_addresses_keeps_ethereum_only_lowercase_and_unique():
+    def v(h, address, protocol=None):
+        body = {"address": address}
+        if protocol:
+            body["protocol"] = protocol
+        return msg(h, fid=3, verificationAddAddressBody=body)
+
+    async def handler(request):
+        return web.json_response({"messages": [
+            v("a", "0xABCDEF0000000000000000000000000000000001", "PROTOCOL_ETHEREUM"),
+            v("b", "ExAqci8uUVKtqHqFW58fmwgMMY9PATfRGGyv6837j9Lx", "PROTOCOL_SOLANA"),
+            v("c", "0x0000000000000000000000000000000000000002"),  # default protocol left out
+            v("d", "0xabcdef0000000000000000000000000000000001", "PROTOCOL_ETHEREUM"),
+        ]})
+
+    got = run({"/v1/verificationsByFid": handler}, lambda hub, calls: hub.eth_addresses(3))
+    assert got == ["0xabcdef0000000000000000000000000000000001", "0x0000000000000000000000000000000000000002"]
+
+
+def multicall_reply(data, balance):
+    """A fake Multicall3.aggregate3 answer: `balance(address)` for each balanceOf in `data`."""
+    import re
+
+    from phunk.onchain import BALANCE_OF
+    addrs = ["0x" + m for m in re.findall(BALANCE_OF[2:] + "0{24}([0-9a-f]{40})", data)]
+    w = lambda n: f"{n:064x}"  # noqa: E731
+    heads = "".join(w(32 * len(addrs) + i * 128) for i in range(len(addrs)))
+    tails = "".join(w(1) + w(0x40) + w(32) + w(balance(a)) for a in addrs)
+    return "0x" + w(0x20) + w(len(addrs)) + heads + tails
+
+
+def test_holders_checks_wallets_with_multicall():
+    from phunk.onchain import AGGREGATE3, MULTICALL3, NS_VOTE, holders
+
+    seen = []
+
+    async def rpc(request):
+        call = await request.json()
+        tx = call["params"][0]
+        seen.append(tx)
+        assert call["method"] == "eth_call" and tx["to"] == MULTICALL3 and tx["data"].startswith(AGGREGATE3)
+        assert NS_VOTE[2:] in tx["data"]
+        result = multicall_reply(tx["data"], lambda a: 2 if a == "0x" + "ab" * 20 else 0)
+        return web.json_response({"jsonrpc": "2.0", "id": call["id"], "result": result})
+
+    async def go():
+        app = web.Application()
+        app.router.add_post("/", rpc)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                addrs = ["0x" + f"{i:040x}" for i in range(250)] + ["0x" + "AB" * 20, "not an address"]
+                return await holders(s, addrs, rpc=f"http://127.0.0.1:{port}/")
+        finally:
+            await runner.cleanup()
+
+    assert asyncio.run(go()) == {"0x" + "ab" * 20}
+    assert len(seen) == 2  # 251 valid addresses, 200 per call
+
+
 def test_token_goes_in_a_header_and_a_refusal_says_so():
     seen = []
 

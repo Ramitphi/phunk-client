@@ -7,21 +7,21 @@
   "miniapp": {
     "version": "1",
     "name": "phunk",
-    "homeUrl": "https://__DOMAIN__/",
-    "iconUrl": "https://__DOMAIN__/img/icon.png",
-    "splashImageUrl": "https://__DOMAIN__/img/splash.png",
+    "homeUrl": "https://__MINIAPP_DOMAIN__/",
+    "iconUrl": "https://__MINIAPP_DOMAIN__/img/icon.png?v=2",
+    "splashImageUrl": "https://__MINIAPP_DOMAIN__/img/splash.png?v=2",
     "splashBackgroundColor": "#f5f1ea",
     "subtitle": "Your people on Farcaster",
-    "description": "See who you talk to, who moved to another app, and who to meet next. Read straight from a Snapchain node. Follow and reply right in Farcaster.",
+    "description": "See who you talk to, who moved to another app, and who to meet next. Read straight from a Snapchain node. Follow and like right in Farcaster.",
     "tagline": "Find your people",
     "primaryCategory": "social",
     "tags": ["people", "follow", "social", "friends", "snapchain"],
-    "heroImageUrl": "https://__DOMAIN__/img/og.png",
+    "heroImageUrl": "https://__MINIAPP_DOMAIN__/img/og.png",
     "ogTitle": "phunk",
     "ogDescription": "Find your people on Farcaster. Who you talk to, who moved apps, who to meet next.",
-    "ogImageUrl": "https://__DOMAIN__/img/og.png",
-    "imageUrl": "https://__DOMAIN__/img/embed.png",
+    "ogImageUrl": "https://__MINIAPP_DOMAIN__/img/og.png",
+    "imageUrl": "https://__MINIAPP_DOMAIN__/img/embed.png",
     "buttonTitle": "See your people",
-    "canonicalDomain": "__DOMAIN__"
+    "canonicalDomain": "__MINIAPP_DOMAIN__"
   }
 }

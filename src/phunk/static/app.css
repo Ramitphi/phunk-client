@@ -245,7 +245,7 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 @media (min-width: 801px) {
   #you-pane { display: block; }
-  #you-pane .hero, #you-pane .account, #you-pane .foot { display: none; }
+  #you-pane .hero, #you-pane .account, #you-pane .foot, #you-pane .tip-slot { display: none; }
 }
 .layout { max-width: 720px; margin: 0 auto; padding: 16px 16px 32px; }
 
@@ -320,6 +320,13 @@ img.avatar { background: var(--chip); }
 .chip.channel {
   background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue-text);
   font-weight: 700; transform: rotate(-2deg);
+}
+/* A small sticker: they voted for Network School Farcaster (an NFT on Base). */
+.stamp {
+  display: inline-block; padding: 0 7px; border-radius: 999px; line-height: 18px;
+  background: var(--cta); color: var(--cta-text); border: 1.5px solid var(--edge);
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+  white-space: nowrap; transform: rotate(-4deg); vertical-align: bottom;
 }
 .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 8px; }
 .embeds { display: grid; gap: 6px; margin-bottom: 8px; }
@@ -430,4 +437,20 @@ img.avatar { background: var(--chip); }
   .person { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
   .person .avatar { width: 40px; height: 40px; font-size: 18px; }
   .banner { margin: 10px 12px 0; }
+}
+
+/* First release: casting is coming soon. */
+.tabs .plus.soon { opacity: 0.55; }
+
+/* Buy me a coffee: 2x2 amounts, the custom amount across both columns. */
+.tip .tip-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.tip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
+.tip-custom { grid-column: 1 / -1; display: flex; gap: 8px; }
+.tip-custom input { flex: 1; min-width: 0; }
+.tip-line { text-align: center; margin: 28px 0 8px; }
+button.link {
+  display: inline; background: none; border: 0; padding: 0; min-height: 0; border-radius: 0;
+  color: var(--blue-text); font-weight: 600; text-decoration: underline; text-underline-offset: 3px;
+  box-shadow: none; transform: none;
 }

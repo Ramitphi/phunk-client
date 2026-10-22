@@ -125,6 +125,12 @@ const MINIAPP_SDK = "https://esm.sh/@farcaster/miniapp-sdk@0.3.0";
 const isPublic = () => !!(state.me && state.me.public);
 let miniapp = null; // the mini app SDK, when running inside a Farcaster client
 
+// Count an action on the hosted site's analytics (onedollarstats, loaded by
+// web/head.html only). Names and where it ran, never who: no usernames.
+function track(name) {
+  try { if (window.stonks) window.stonks.event(name, { where: miniapp ? "miniapp" : "web" }); } catch { /* blocked */ }
+}
+
 function openFarcaster(path) {
   if (miniapp) { miniapp.actions.openUrl(FARCASTER + path); return; }
   window.open(FARCASTER + path, "_blank", "noopener,noreferrer");
@@ -133,6 +139,70 @@ function openFarcaster(path) {
 function viewProfile(user) {
   if (miniapp) return miniapp.actions.viewProfile({ fid: Number(user.fid) });
   openFarcaster(profilePath(user));
+}
+
+// ------------------------------------------------------- buy me a coffee
+// Inside a Farcaster client: open the viewer's own wallet with the send
+// filled in (USDC on Base to the maker's account). Elsewhere there is no
+// wallet to open, so the button opens the maker's profile instead.
+
+const USDC_BASE = "eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const TIPS = [1, 37, 69, 420];
+
+// "5" or "2.50" -> USDC base units as a string (6 decimals); null if not an amount.
+function usdcUnits(text) {
+  const m = /^\s*\$?\s*(\d{1,6})(?:\.(\d{0,6}))?\s*$/.exec(text || "");
+  if (!m) return null;
+  const units = BigInt(m[1]) * 1000000n + BigInt((m[2] || "").padEnd(6, "0"));
+  return units > 0n ? units.toString() : null;
+}
+
+async function canSendToken() {
+  if (!miniapp) return false;
+  try { return (await miniapp.getCapabilities()).includes("actions.sendToken"); } catch (e) { return false; }
+}
+
+async function sendTip(units) {
+  const tip = state.me.tip;
+  try {
+    const r = await miniapp.actions.sendToken({ token: USDC_BASE, amount: units, recipientFid: Number(tip.fid) });
+    if (r && r.success) toast("Thank you! ☕");
+    else if (r && r.reason === "send_failed") toast("The send didn't go through. Nothing was sent.");
+  } catch (e) { toast(e.message || "Couldn't open the wallet."); }
+}
+
+async function renderTip() {
+  const tip = state.me && state.me.tip;
+  const slots = document.querySelectorAll(".tip-slot");
+  if (!tip) { for (const s of slots) s.replaceChildren(); return; }
+  const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
+  const wallet = await canSendToken();
+  for (const slot of slots) {
+    if (!wallet) {
+      // No wallet to open here: one quiet line, not a card.
+      const link = h("button", { type: "button", class: "link" }, `tip ${who} on Farcaster`);
+      link.addEventListener("click", () => viewProfile(tip));
+      slot.replaceChildren(h("p", { class: "tip-line muted small" }, "☕ Like phunk? ", link));
+      continue;
+    }
+    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
+      h("span", { class: "muted small" }, `Like phunk? Send ${who} USDC on Base from your wallet.`));
+    const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
+      const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
+      b.addEventListener("click", () => sendTip(String(d * 1000000)));
+      return b;
+    }));
+    const input = h("input", { inputmode: "decimal", placeholder: "Custom amount, e.g. 5", "aria-label": "Custom amount in USD" });
+    const form = h("form", { class: "tip-custom" }, input, h("button", { type: "submit", class: "cta" }, "Send"));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const units = usdcUnits(input.value);
+      if (!units) { toast("Type an amount, like 5 or 2.50."); return; }
+      sendTip(units);
+    });
+    grid.append(form);
+    slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+  }
 }
 
 function viewCast(c) {
@@ -158,12 +228,23 @@ function compose(text, channel) {
 
 // Load the SDK only where a Farcaster client could be the host: in a frame
 // or a phone app's web view. Same check the SDK itself starts with.
+let framedSdk = null; // the SDK, loaded in a frame or web view, host or not
 async function startMiniApp() {
   if (!(window.ReactNativeWebView || window.parent !== window)) return null;
   try {
     const { sdk } = await import(MINIAPP_SDK);
-    return (await sdk.isInMiniApp()) ? sdk : null;
+    framedSdk = sdk;
+    // The SDK's default wait for the host is 1s; some hosts answer slower.
+    return (await sdk.isInMiniApp(5000)) ? sdk : null;
   } catch { return null; }
+}
+
+// Hide the host's splash screen. Called in any frame, even when the host
+// didn't answer in time: a host left on its splash shows a blank app, and
+// outside a host the message goes nowhere. Not awaited: with no host it
+// never resolves.
+function hostReady() {
+  if (framedSdk) framedSdk.actions.ready().catch(() => {});
 }
 
 function profilePath(user) {
@@ -181,6 +262,15 @@ function composePath(text, channel) {
   if (channel && !channel.includes("://")) q.set("channelKey", channel.replace(/^\//, ""));
   const qs = q.toString();
   return `/~/compose${qs ? "?" + qs : ""}`;
+}
+
+// First release: follow and like. Casting, replies and recasts are coming soon.
+const canCast = () => !!(state.me && state.me.can_cast);
+
+const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and like") : "read-only");
+
+function soon() {
+  toast("Casting is coming soon. Follow and like for now.", 5000);
 }
 
 function needKey() {
@@ -218,9 +308,10 @@ function castCard(c) {
   }));
 
   const toggle = (kind) => {
-    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
+    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false",
+      title: isPublic() ? "Open this cast in Farcaster" : null }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (isPublic()) return viewCast(c);
+      if (isPublic()) { track(kind === "like" ? "Like" : "Recast"); return viewCast(c); }
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
@@ -237,7 +328,7 @@ function castCard(c) {
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
   const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
-    if (isPublic()) return replyTo(c);
+    if (isPublic()) { track("Reply"); return replyTo(c); }
     if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -257,7 +348,7 @@ function castCard(c) {
     body.querySelector(".actions").after(form);
     ta.focus();
   });
-  body.append(h("div", { class: "actions" }, replyBtn, toggle("like"), toggle("recast")));
+  body.append(h("div", { class: "actions" }, canCast() ? replyBtn : null, toggle("like"), canCast() ? toggle("recast") : null));
   return h("article", { class: "card cast" }, avatar(c.author), body);
 }
 
@@ -375,7 +466,7 @@ function personCard(p) {
   if (p.following) follow.disabled = true;
   if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
-    if (isPublic()) return viewProfile(p);
+    if (isPublic()) { track("Follow"); return viewProfile(p); }
     if (!canAct) return needKey();
     follow.disabled = true;
     try {
@@ -393,7 +484,10 @@ function personCard(p) {
   const body = h("div", { class: "pbody" });
 
   hi.addEventListener("click", () => {
-    if (isPublic()) return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
+    if (isPublic()) {
+      track("Say hi");
+      return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
+    }
     if (!canAct) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -429,6 +523,7 @@ function personCard(p) {
   const head = h("div", { class: "meta" },
     h("span", { class: "name" }, p.display_name || handle(p)),
     p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null,
+    p.ns_vote ? h("span", { class: "stamp", title: "Holds the \u201cI voted for Network School Farcaster\u201d NFT" }, "voted NS") : null,
     app);
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
     h("span", {}, p.why.join(" ")));
@@ -440,7 +535,7 @@ function personCard(p) {
     p.bio ? h("div", { class: "bio" }, p.bio.length > 160 ? p.bio.slice(0, 160) + "…" : p.bio) : null,
     why,
     previews.length ? h("div", { class: "previews" }, previews) : h("div", { class: "muted small" }, "No recent casts."),
-    h("div", { class: "pactions" }, follow, hi, nope));
+    h("div", { class: "pactions" }, follow, canCast() ? hi : null, nope));
   return h("article", { class: `card person ${p.kind}` }, avatar(p), body);
 }
 
@@ -521,7 +616,8 @@ function setHours(v) {
 const narrow = () => matchMedia("(max-width: 800px)").matches;
 
 function setTab(name) {
-  if (name === "compose" && isPublic()) { compose(); return; }
+  if (name === "compose" && !canCast()) { soon(); return; }
+  if (name === "compose" && isPublic()) { track("New cast"); compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
   state.tab = name;
@@ -556,7 +652,7 @@ function renderAccount() {
     rows.push(h("div", { class: "person-row" }, avatar(me.user), h("div", {},
       h("div", { class: "name" }, me.user.display_name || handle(me.user)),
       h("div", { class: "muted mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
-      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, me.can_write ? "can post" : "read-only")));
+      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, power(me))));
   }
   if (!viewingSelf()) {
     rows.push(h("p", { class: "muted small" },
@@ -575,7 +671,7 @@ function renderWho() {
   } else if (!self) {
     who.textContent = `viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")} · read-only`;
   } else if (me.user) {
-    who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
+    who.textContent = `${handle(me.user)} · ${power(me)}`;
   } else who.textContent = "read-only";
   $("#lookup-me").hidden = self || !me.user;
   if (!(me.can_write && self) && state.tab === "compose") setTab(state.lastTab);
@@ -610,7 +706,7 @@ async function init() {
     state.me = await api("/api/me");
   } catch (e) {
     $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the server: ${e.message}`));
-    startMiniApp().then((sdk) => sdk && sdk.actions.ready()); // never leave a host on its splash
+    startMiniApp().then(hostReady); // never leave a host on its splash
     return;
   }
   if (isPublic()) {
@@ -634,10 +730,22 @@ async function init() {
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
     banner.hidden = false;
   }
+  if (!canCast()) {
+    const tab = $('.tabs button[data-tab="compose"]');
+    tab.setAttribute("aria-label", "New cast: coming soon");
+    tab.title = "Casting is coming soon";
+    tab.classList.add("soon");
+    tab.querySelector(".plus-label").textContent = "New cast · soon";
+  }
+  renderTip();
   $("#lookup-name").value = state.who;
   renderWho();
 
-  $("#lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("#lookup-name").value); });
+  $("#lookup").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (isPublic()) track("Look up");
+    lookUp($("#lookup-name").value);
+  });
   $("#lookup-me").addEventListener("click", () => lookUp(""));
 
   $("#compose-close").addEventListener("click", () => setTab(state.lastTab));
@@ -685,7 +793,7 @@ async function init() {
 
   setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
-  if (miniapp) miniapp.actions.ready(); // hide the host's splash screen
+  hostReady();
 }
 
 init();

@@ -101,6 +101,17 @@ The fields are `username`, `display_name`, `pfp`, `bio`, `url`, `location`,
 `twitter`, `github`, `banner`, `eth_address` and `sol_address`. Any field the
 person never set is `None`.
 
+`eth_address` is the one address the person picked as primary. They can
+verify more, and a token they hold may sit in any of them:
+
+```sh
+curl -s "https://haatz.quilibrium.com/v1/verificationsByFid?fid=3"
+```
+
+```python
+print(await hub.eth_addresses(3))       # ['0x187c...', '0x6ce0...'], lowercase
+```
+
 ## 3. Casts, and Farcaster time
 
 ```sh
@@ -824,11 +835,55 @@ To set the app account's username, add a key to the app account itself
 PHUNK_KEY_FILE=~/.config/phunk/app-account.json phunk profile --username yourapp
 ```
 
-### When you're done
+### When you're done: revoke the key
 
-You don't have to revoke a key you stop using: its TTL runs out. To revoke
-it sooner, send a `KEY_REMOVE` signed by the custody key (or by the key
-itself); see the Snapchain guide on writing messages.
+You don't have to revoke a key you stop using: its TTL runs out. Revoke it
+sooner if a laptop is lost, a key file leaks, or you stop using an app.
+The key stops working at once. Casts it already signed stay up.
+
+See which keys an account has, and which app asked for each:
+
+```sh
+phunk key list dwr
+# 2023-11-07  on-chain  0xc887f5bf...  warpcast
+# 2026-01-24  on-chain  0x27386405...  neynar
+```
+
+Revoke the key saved on this machine. The key signs its own removal, so no
+seed phrase is needed:
+
+```sh
+phunk key revoke
+```
+
+Revoke some other gasless key on the account, one you no longer hold. This
+needs the custody key, so it asks for the seed phrase (test account only):
+
+```sh
+phunk key revoke --key 0x<public key from key list>
+```
+
+Both send a `KEY_REMOVE` message to `/v1/submitMessage`:
+
+- **Self** (`signatureType: 2`): signed by the key being removed. Its nonce
+  must beat the nonce of the app that asked for the key:
+  `GET /v1/signersByFid?fid=...&requesterFids[0]=<app fid>` returns it in
+  `requesterFidNonces`. Nodes that don't report it yet answer a wrong nonce
+  with "not greater than stored nonce N"; phunk then retries once with N + 1.
+- **Custody** (`signatureType: 1`): carries an EIP-712 `KeyRemove`
+  `{fid, key, nonce, deadline}` signed by the custody key, on the same
+  domain as `KeyAdd`. Its nonce must beat `currentUserNonce`.
+
+```python
+from phunk.write import revoke_key, revoke_key_with_custody
+
+async with Hub("http://localhost:3381") as hub:
+    await revoke_key(hub, fid, key)                       # the saved AppKey
+    await revoke_key_with_custody(hub, custody, "0x...")  # any gasless key
+```
+
+Only gasless keys can be removed this way. On-chain keys, like the ones
+in the list above, need a transaction to the Key Registry contract.
 
 ---
 
@@ -839,7 +894,7 @@ your own machine:
 
 ```sh
 phunk ui --as dwr          # look at anyone's people, read-only
-phunk ui                   # as your app key's fid: follow, say hi, post
+phunk ui                   # as your app key's fid: follow and like
 phunk ui --open            # and open it in your browser
 phunk ui --public          # what phunk.social runs: read-only, actions open Farcaster
 ```
@@ -850,8 +905,8 @@ Its main screen is a feed of **people**, not posts. As people spread across
 clients, the risk isn't that the network dies, it's that it splits into
 islands and you lose the people you used to talk to. So each card is one
 person to connect with: who they are, which app they post from now, one
-plain reason, their latest casts, and **Follow**, **Say hi** (a reply to
-their latest cast) and **Not now**. There are three kinds:
+plain reason, their latest casts, and **Follow** and **Not now**. There
+are three kinds:
 
 * **Reconnect**: people you replied to, mentioned, liked or recast in the
   last 90 days who now post from a different app, went quiet, or whom you
@@ -871,15 +926,18 @@ The **Casts** tab has the classic feed:
   signed it. Pick a window (6 hours to 7 days) and load more.
 * **An app filter**: a checkbox for every app seen, plus "own key" and
   "unknown". Untick one to hide its casts.
-* **New cast**, to post, optionally to a channel.
+In this first release the page follows and likes, but doesn't cast.
+**New cast** says "coming soon"; replies and recasts in the page come with
+it. To post now,
+use the command line (`phunk post`, `phunk like`, step 10), or try the
+page's composer early with `phunk ui --casting`.
 
-**New cast** opens a composer that offers the channels it has seen as
-one-tap picks. On a phone the page becomes four screens, switched from a
-bottom bar: People, Casts, the composer (the **+**) and You (who you are,
-and the search box to look up anyone's people).
+On a phone the page becomes four screens, switched from a bottom bar:
+People, Casts, New cast (the **+**) and You (who you are, and the search
+box to look up anyone's people).
 
-Without an app key it is read-only: everything browses, and the write
-buttons tell you to run `phunk key add`. The page never asks for a seed
+Without an app key it is read-only: everything browses, and **Follow**
+and **Like** tell you to run `phunk key add`. The page never asks for a seed
 phrase. The server binds to 127.0.0.1, answers only to a local Host, and
 refuses POSTs from other sites. The app key stays in the server process.
 
@@ -909,7 +967,10 @@ async with Hub() as hub:
 ```
 
 The first load reads about 150 things from the node, roughly ten seconds
-on a public one. The ranking itself, `people.build()`, is a pure function
+on a public one. `phunk ui` also stamps the people who voted for Network
+School Farcaster: it reads each card's verified addresses
+(`hub.eth_addresses`) and asks Base which hold the vote NFT, in one call
+(`phunk.onchain.holders`). The ranking itself, `people.build()`, is a pure function
 you can test without a node.
 
 ### People to follow

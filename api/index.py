@@ -16,6 +16,7 @@ Settings (environment variables, optional):
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
+    PHUNK_TIP_FID      the account "Buy me a coffee" tips (unset: no button)
 
 On your own node, raise PHUNK_RATE and PHUNK_CONCURRENCY (for example 150
 and 48): a feed is one request per account followed, so this is what makes
@@ -38,7 +39,8 @@ from urllib.parse import parse_qsl, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from phunk.hub import DEFAULT_NODE, Hub  # noqa: E402
-from phunk.ui import PUBLIC_HELP, UI, get_json  # noqa: E402
+from phunk.onchain import base_rpc_from_env  # noqa: E402
+from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
 CACHE = {
@@ -68,7 +70,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
                           concurrency=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
                           token=os.environ.get("PHUNK_NODE_TOKEN") or None)
                 await hub.__aenter__()
-                return UI(hub, public=True)
+                return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env())
 
             _ui = asyncio.run_coroutine_threadsafe(make(), loop).result()
             _loop = loop

@@ -21,14 +21,17 @@ import asyncio
 import datetime as dt
 import ipaddress
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from .hub import Hub, NodeError, NotFound
 from .models import Cast, User
+from .onchain import holders
 from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
@@ -38,9 +41,22 @@ CHANNEL_PREFIX = "https://warpcast.com/~/channel/"
 # Older channels use the URL of the NFT they started with. A few well-known ones, for display.
 KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e08d8b0": "/dev"}
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-READ_ONLY_HELP = ("Read-only: no app key. To post, like and follow, run `phunk key add` in a terminal "
+READ_ONLY_HELP = ("Read-only: no app key. To follow and like from here, run `phunk key add` in a terminal "
                   "(use a test account), then restart `phunk ui`.")
-PUBLIC_HELP = "Read-only. Follow, reply and like open in Farcaster."
+PUBLIC_HELP = "Read-only. Follow and Like open in Farcaster."
+# First release: the web client follows people and likes casts; it doesn't
+# cast yet. Casting, replies and recasts come next (`phunk ui --casting` to try
+# them). The CLI already does all of it: `phunk post`, `phunk like`.
+CASTING = False
+
+
+def tip_fid_from_env() -> int | None:
+    """PHUNK_TIP_FID: the account that "Buy me a coffee" tips. Unset: no button."""
+    value = os.environ.get("PHUNK_TIP_FID", "").strip()
+    return int(value) if value.isdigit() and int(value) > 0 else None
+
+
+CASTING_SOON = "Casting from phunk is coming soon. For now: `phunk post` in a terminal."
 FEED_TTL = 300  # seconds a feed window stays cached
 SUGGEST_TTL = 600
 # On the hosted site, Refresh re-reads the node only for results older than
@@ -158,10 +174,14 @@ class UI:
     its own, and the page sends follows, replies and likes to Farcaster.
     """
 
-    def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False):
+    def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False,
+                 casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None):
         self.hub = hub
+        self.vote_rpc = vote_rpc  # Base JSON-RPC for the "voted NS" badge; None: no badge
+        self.tip_fid = tip_fid
         self.fid = fid
         self.public = public
+        self.casting = casting
         self.writer = None
         if key is not None and fid is not None and not public:
             from .write import Writer
@@ -194,6 +214,26 @@ class UI:
             _trim(self._users, MAX_USERS)
             return await fut
         return await self._users[fid]
+
+    async def voters(self, fids) -> set[int]:
+        """Which of `fids` hold the "I voted for Network School Farcaster" NFT
+        in any verified wallet: a fresh balanceOf check each time, nothing
+        cached. If Base can't be reached the stamp just doesn't show."""
+        fids = list(dict.fromkeys(fids))
+        if not self.vote_rpc or not fids:
+            return set()
+
+        async def addresses(fid):
+            try:
+                return await self.hub.eth_addresses(fid)
+            except NodeError:
+                return []
+        found = await asyncio.gather(*(addresses(f) for f in fids))
+        try:
+            held = await holders(self.hub.session, [a for a_s in found for a in a_s], rpc=self.vote_rpc)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return set()
+        return {f for f, a_s in zip(fids, found) if any(a in held for a in a_s)}
 
     async def names(self, fids) -> dict[int, str | None]:
         fids = list(dict.fromkeys(fids))
@@ -287,7 +327,9 @@ class UI:
             self._people[fid] = hit
             _trim(self._people, MAX_WINDOWS)
         out = await hit[1]
-        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here) for c in out["cards"]]
+        voted = await self.voters(c["fid"] for c in out["cards"])  # fresh on every load
+        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here, ns_vote=c["fid"] in voted)
+                 for c in out["cards"]]
         return {"summary": out["summary"], "cards": cards}
 
     async def who(self, value: str | None) -> int:
@@ -314,11 +356,16 @@ class UI:
     async def me_json(self, q) -> dict:
         hint = PUBLIC_HELP if self.public else (None if self.writer else READ_ONLY_HELP)
         # The hosted site keeps its node's address to itself.
-        out = {"fid": self.fid, "can_write": self.writer is not None,
+        out = {"fid": self.fid, "can_write": self.writer is not None, "can_cast": self.casting,
                "node": None if self.public else self.hub.url,
                "public": self.public, "help": hint}
         if self.fid is not None:
             out["user"] = self.user_json(await self.user(self.fid))
+        if self.tip_fid is not None:
+            try:
+                out["tip"] = self.user_json(await self.user(self.tip_fid))
+            except (NotFound, NodeError):
+                out["tip"] = {"fid": self.tip_fid, "username": None}
         return out
 
     async def feed_json(self, q) -> dict:
@@ -415,6 +462,11 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
                                     content_type="application/json")
         return ui.writer
 
+    def need_casting():
+        if not ui.casting:
+            raise web.HTTPForbidden(text=_dumps({"error": CASTING_SOON, "coming_soon": True}),
+                                    content_type="application/json")
+
     async def body(request) -> dict:
         try:
             data = await request.json()
@@ -442,6 +494,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     @r.post("/api/cast")
     async def cast(request):
+        need_casting()
         w = need_writer()
         d = await body(request)
 
@@ -457,8 +510,10 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     @r.post("/api/react")
     async def react(request):
-        w = need_writer()
         d = await body(request)
+        if d.get("action") in ("recast", "unrecast"):
+            need_casting()  # a recast puts the cast in your followers' feeds: comes with casting
+        w = need_writer()
 
         async def go():
             action = d.get("action")
@@ -507,9 +562,10 @@ def is_loopback(host: str) -> bool:
 
 
 async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
-                key=None, open_browser: bool = False, public: bool = False) -> None:
+                key=None, open_browser: bool = False, public: bool = False,
+                casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None) -> None:
     """Run the UI until interrupted. `public=True` previews the hosted, read-only site."""
-    ui = UI(hub, fid=fid, key=key, public=public)
+    ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid, vote_rpc=vote_rpc)
     app = make_app(ui, check_host=is_loopback(host))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -517,7 +573,7 @@ async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int
     await site.start()
     shown = f"[{host}]" if ":" in host else host
     url = f"http://{shown}:{port}/"
-    mode = f"as fid {fid}, can post" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
+    mode = f"as fid {fid}, {'can post' if casting else 'can follow'}" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
     if public:
         mode = "public preview, read-only"
     print(f"phunk ui on {url} ({mode}, node {hub.url})")

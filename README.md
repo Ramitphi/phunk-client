@@ -55,7 +55,8 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
 | `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
-| `signers(fid)` | `/v1/signersByFid` | active keys and `currentUserNonce` |
+| `eth_addresses(fid)` | `/v1/verificationsByFid` | every Ethereum address the account verified (the primary one is just one of them) |
+| `signers(fid, requester_fids=)` | `/v1/signersByFid` | active keys, `currentUserNonce`, and each app's nonce (`requesterFidNonces`) |
 | `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
 | `info()` | `/v1/info` | node stats |
 | `get(path, params)`, `pages(...)`, `collect(...)` | any | raw JSON, for endpoints not wrapped here |
@@ -93,6 +94,10 @@ async with Hub("http://localhost:3381") as hub:
 | `like`, `unlike`, `recast`, `unrecast` `(fid, hash)` | `REACTION_ADD` / `REACTION_REMOVE` |
 | `follow(fid)`, `unfollow(fid)` | `LINK_ADD` / `LINK_REMOVE` |
 | `set_profile(display=, bio=, pfp=, url=, username=)` | `USER_DATA_ADD` |
+
+`revoke_key(hub, fid, key)` revokes a gasless key with the key itself (no
+seed phrase); `revoke_key_with_custody(hub, custody, public_key)` revokes any
+gasless key on the account. Both send `KEY_REMOVE`; casts already signed stay.
 
 `add_app_key(..., app_signer=URL)` registers the key under an app account
 through that app's signing service, so other clients show "Sent from
@@ -134,6 +139,8 @@ phunk --node http://localhost:3381 info
 
 # writing (pip install 'phunk-client[write]')
 phunk key add                      # seed phrase in (hidden), app key saved to ~/.config/phunk
+phunk key list                     # the account's keys and the app behind each
+phunk key revoke                   # the saved key revokes itself; no seed phrase
 phunk post "hello" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<hash>
 phunk follow dwr
@@ -145,7 +152,7 @@ phunk ui                           # local web client: people to connect with, t
 
 `phunk ui` serves a small web client on `http://127.0.0.1:8008`. Its main
 screen is a feed of **people**, not posts: who to connect with, one plain
-reason each, their latest casts, and Follow / Say hi / Not now.
+reason each, their latest casts, and Follow / Not now.
 
 * **Reconnect**: people you talked to who moved to another app, went quiet,
   or whom you never followed.
@@ -153,13 +160,26 @@ reason each, their latest casts, and Follow / Say hi / Not now.
 * **Bridge**: a few mutual follows, but posting from another app or in
   channels you don't use.
 
-The **Casts** tab has the classic feed with the app that signed each cast,
-a filter by app, and a **New cast** button. Anyone's people feed can be
-looked up by name, read-only.
+The **Casts** tab has the classic feed with the app that signed each cast
+and a filter by app. Anyone's people feed can be looked up by name.
+
+Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card: inside a
+Farcaster client it opens the viewer's wallet with USDC on Base to that
+account filled in.
+
+A card gets a small **Voted NS** stamp when the person holds the "I voted
+for Network School Farcaster" NFT on Base in any wallet they verified. The
+check is one `eth_call` to Base (`PHUNK_BASE_RPC`, default
+`https://mainnet.base.org`; `off` hides the stamp).
+
+In this first release the page follows people and likes casts; it doesn't
+cast yet. Casting, replies and recasts in the page are coming soon (`phunk
+ui --casting` previews them). The command line does all of it today:
+`phunk post`, `phunk recast`.
 
 ```sh
 phunk ui --as dwr      # read-only: look at anyone's people
-phunk ui               # with the key from `phunk key add`: follow, say hi, post
+phunk ui               # with the key from `phunk key add`: follow and like
 ```
 
 Without a key it is read-only and never asks for a seed phrase. It binds
@@ -167,9 +187,8 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow, Say hi and Reply open Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away and replies
-in the client's composer. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+a username, and Follow and Like open Farcaster. Inside a Farcaster
+client it is a mini app that shows your own people right away. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node

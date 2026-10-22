@@ -87,10 +87,28 @@ async def node(request):
         return web.json_response({"messages": REACTIONS.get(int(q["fid"]), [])})
     if p == "/v1/signersByFid":
         return web.json_response({"signers": []})
+    if p == "/v1/verificationsByFid":
+        return web.json_response({"messages": [
+            msg(f"v{i}", int(q["fid"]), verificationAddAddressBody={"address": a, "protocol": "PROTOCOL_ETHEREUM"})
+            for i, a in enumerate(WALLETS.get(int(q["fid"]), []))]})
     return web.Response(status=404)
 
 
-async def with_ui(test, *, fid=9, key=None, public=False):
+# erin (50) holds the "I voted for Network School Farcaster" NFT in her second wallet.
+WALLETS = {50: ["0x" + "11" * 20, "0x" + "5e" * 20], 61: ["0x" + "22" * 20]}
+VOTED = {"0x" + "5e" * 20}
+RPC_CALLS = []
+
+
+async def base_rpc(request):
+    from test_hub import multicall_reply
+    call = await request.json()
+    RPC_CALLS.append(call)
+    result = multicall_reply(call["params"][0]["data"], lambda a: 1 if a in VOTED else 0)
+    return web.json_response({"jsonrpc": "2.0", "id": call["id"], "result": result})
+
+
+async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid=None, votes=False):
     """Start the fake node and the UI against it; run `test(client, base, calls, submitted)`."""
     calls, submitted = [], []
     nodeapp = web.Application()
@@ -105,6 +123,7 @@ async def with_ui(test, *, fid=9, key=None, public=False):
 
     nodeapp.router.add_get("/{tail:.*}", get)
     nodeapp.router.add_post("/v1/submitMessage", submit)
+    nodeapp.router.add_post("/rpc", base_rpc)
     runners = []
 
     async def start(app):
@@ -118,7 +137,8 @@ async def with_ui(test, *, fid=9, key=None, public=False):
     try:
         node_port = await start(nodeapp)
         async with Hub(f"http://127.0.0.1:{node_port}", rate=1000, retries=2) as hub:
-            ui = UI(hub, fid=fid, key=key, public=public)
+            rpc = f"http://127.0.0.1:{node_port}/rpc" if votes else None
+            ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid, vote_rpc=rpc)
             port = await start(make_app(ui))
             async with aiohttp.ClientSession() as client:
                 return await test(client, f"http://127.0.0.1:{port}", calls, submitted)
@@ -274,7 +294,7 @@ def test_read_only_write_endpoints_explain_key_add():
                await post(client, f"{base}/api/follow", {"fid": 50})]
         return me, out, submitted
 
-    me, out, submitted = run(test)
+    me, out, submitted = run(test, casting=True)
     assert me["can_write"] is False and "phunk key add" in me["help"]
     for status, body in out:
         assert status == 403 and body["read_only"] and "phunk key add" in body["error"]
@@ -314,6 +334,25 @@ def _varint(buf, i):
         if not b & 0x80:
             return n, i
 
+def test_first_release_follows_and_likes_but_casting_is_coming_soon(key):
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        out = [await post(client, f"{base}/api/cast", {"text": "hi"}),
+               await post(client, f"{base}/api/react", {"action": "recast", "cast": "1:0x" + "ab" * 20})]
+        ok = [await post(client, f"{base}/api/follow", {"fid": 50}),
+              await post(client, f"{base}/api/react", {"action": "like", "cast": "1:0x" + "ab" * 20}),
+              await post(client, f"{base}/api/react", {"action": "unlike", "cast": "1:0x" + "ab" * 20})]
+        return me, out, ok, submitted
+
+    me, out, ok, submitted = run(test, key=key)
+    assert me["can_write"] is True and me["can_cast"] is False
+    for status, body in out:
+        assert status == 403 and body["coming_soon"] and "coming soon" in body["error"]
+    assert [s for s, _ in ok] == [200, 200, 200]
+    assert len(submitted) == 3  # the follow, the like and the unlike; no cast, no recast
+
+
 
 def test_keyed_writes_submit_signed_messages(key):
     from phunk.write import proto_data
@@ -338,7 +377,7 @@ def test_keyed_writes_submit_signed_messages(key):
                await post(client, f"{base}/api/follow", {"fid": "dwr"})]
         return me_text, before, results, after, bad, submitted
 
-    me_text, before, results, after, bad, submitted = run(test, key=key)
+    me_text, before, results, after, bad, submitted = run(test, key=key, casting=True)
     assert '"can_write": true' in me_text
     assert key.private_hex[2:] not in me_text  # the key never leaves the server
     assert all(status == 200 and body["hash"].startswith("0x") for status, body in results)
@@ -355,14 +394,14 @@ def test_keyed_writes_submit_signed_messages(key):
 
 def test_cross_origin_and_non_json_posts_are_refused(key):
     async def test(client, base, calls, submitted):
-        out = [await post(client, f"{base}/api/cast", {"text": "hi"}, Origin="http://evil.example"),
-               await post(client, f"{base}/api/cast", {"text": "hi"}, **{"Sec-Fetch-Site": "cross-site"})]
-        async with client.post(f"{base}/api/cast", data="text=hi",
+        out = [await post(client, f"{base}/api/follow", {"fid": 50}, Origin="http://evil.example"),
+               await post(client, f"{base}/api/follow", {"fid": 50}, **{"Sec-Fetch-Site": "cross-site"})]
+        async with client.post(f"{base}/api/follow", data="fid=50",
                                headers={"Content-Type": "application/x-www-form-urlencoded"}) as r:
             out.append((r.status, await r.json()))
         async with client.get(f"{base}/api/me", headers={"Host": "evil.example"}) as r:
             out.append((r.status, await r.json()))
-        same = await post(client, f"{base}/api/cast", {"text": "ok"}, Origin=base)
+        same = await post(client, f"{base}/api/follow", {"fid": 50}, Origin=base)
         return out, same, submitted
 
     out, same, submitted = run(test, key=key)
@@ -406,3 +445,40 @@ def test_people_endpoint_cards_lookup_and_follow(key):
     assert all({"username", "latest", "app_now"} <= set(c) for c in mine["cards"])
     assert bobs["fid"] == 2  # anyone can be looked up
     assert {c["fid"]: c for c in after["cards"]}[50]["following"] is True
+
+
+def test_people_cards_stamp_who_voted_for_network_school():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/people") as r:
+            first = await r.json()
+        async with client.get(f"{base}/api/people") as r:  # the feed is cached, the stamp check isn't
+            return await r.json(), calls, first
+
+    RPC_CALLS.clear()
+    out, calls, first = run(test, votes=True)
+    assert len(RPC_CALLS) == 2 and first["cards"] == out["cards"]  # one fresh balanceOf multicall per load
+    cards = {c["fid"]: c for c in out["cards"]}
+    assert cards[50]["ns_vote"] is True  # any verified wallet counts, not just the primary one
+    assert not any(c["ns_vote"] for f, c in cards.items() if f != 50)
+    assert any(p == "/v1/verificationsByFid" for p, _ in calls)
+
+    out, calls, _ = run(test)  # no Base RPC configured: no badge, no wallet lookups
+    assert not any(c["ns_vote"] for c in out["cards"])
+    assert not any(p == "/v1/verificationsByFid" for p, _ in calls)
+
+
+def test_tip_account_is_named_in_me_only_when_set(monkeypatch):
+    from phunk.ui import tip_fid_from_env
+
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            return await r.json()
+
+    assert "tip" not in run(test, public=True)
+    me = run(test, public=True, tip_fid=3)
+    assert me["tip"]["fid"] == 3 and me["tip"]["username"] == "carol"
+    monkeypatch.setenv("PHUNK_TIP_FID", " 2391 ")
+    assert tip_fid_from_env() == 2391
+    for bad in ("", "0", "dwr", "-5"):
+        monkeypatch.setenv("PHUNK_TIP_FID", bad)
+        assert tip_fid_from_env() is None

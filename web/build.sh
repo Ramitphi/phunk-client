@@ -6,17 +6,21 @@
 # The read API is api/index.py.
 #
 # Settings (environment variables):
-#   SITE_DOMAIN            default phunk.social
+#   SITE_DOMAIN            default phunk.social (link previews)
+#   MINIAPP_DOMAIN         default miniapp.phunk.social (the manifest, and
+#                          where the cast embed opens the mini app)
 #   FARCASTER_HEADER       the manifest's accountAssociation, from Farcaster's
 #   FARCASTER_PAYLOAD      manifest tool (see web/README.md). Left empty if
 #   FARCASTER_SIGNATURE    unset: the site works, but isn't a verified mini app.
 set -eu
 cd "$(dirname "$0")/.."
 DOMAIN="${SITE_DOMAIN:-phunk.social}"
+MINIAPP_DOMAIN="${MINIAPP_DOMAIN:-miniapp.phunk.social}"
 OUT=web/_site
 
 fill() {
   sed -e "s|__DOMAIN__|$DOMAIN|g" \
+      -e "s|__MINIAPP_DOMAIN__|$MINIAPP_DOMAIN|g" \
       -e "s|__FARCASTER_HEADER__|${FARCASTER_HEADER:-}|" \
       -e "s|__FARCASTER_PAYLOAD__|${FARCASTER_PAYLOAD:-}|" \
       -e "s|__FARCASTER_SIGNATURE__|${FARCASTER_SIGNATURE:-}|"
@@ -41,4 +45,4 @@ rm -rf "$TMP"
 if [ -z "${FARCASTER_HEADER:-}" ]; then
   echo "note: FARCASTER_HEADER is not set; the mini app manifest has no accountAssociation yet"
 fi
-echo "built $OUT for $DOMAIN"
+echo "built $OUT for $DOMAIN (mini app: $MINIAPP_DOMAIN)"

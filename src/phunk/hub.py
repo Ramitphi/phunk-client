@@ -297,6 +297,18 @@ class Hub:
         event = await self.get("/v1/onChainIdRegistryEventByAddress", {"address": address})
         return int(event["fid"])
 
+    async def eth_addresses(self, fid: int) -> list[str]:
+        """Ethereum addresses `fid` has verified, lowercase, oldest first.
+        The primary address (`User.eth_address`) is one of them."""
+        out: list[str] = []
+        async for m in self.pages("/v1/verificationsByFid", {"fid": fid}):
+            body = m["data"].get("verificationAddAddressBody") or m["data"].get("verificationAddEthAddressBody") or {}
+            address = (body.get("address") or "").lower()
+            # The node leaves out the default protocol (Ethereum) in some versions.
+            if body.get("protocol", "PROTOCOL_ETHEREUM") == "PROTOCOL_ETHEREUM" and address.startswith("0x"):
+                out.append(address)
+        return list(dict.fromkeys(out))
+
     # -------------------------------------------------------------- graph
 
     async def following(self, fid: int, *, limit: int | None = None) -> AsyncIterator[Follow]:
@@ -417,10 +429,16 @@ class Hub:
         out.sort(key=lambda k: k.timestamp)
         return out
 
-    async def signers(self, fid: int) -> dict:
+    async def signers(self, fid: int, requester_fids: list[int] | None = None) -> dict:
         """Raw /v1/signersByFid for one page: the account's active keys, plus
-        `currentUserNonce`, which a new KEY_ADD must exceed."""
-        return await self.get("/v1/signersByFid", {"fid": fid})
+        `currentUserNonce`, which a new KEY_ADD (or a custody KEY_REMOVE) must
+        exceed. With `requester_fids`, newer nodes also return
+        `requesterFidNonces` ({"<fid>": n}): each app's nonce, which a
+        self-revoking KEY_REMOVE must exceed."""
+        params: dict = {"fid": fid}
+        for i, f in enumerate(requester_fids or []):
+            params[f"requesterFids[{i}]"] = f  # the node parses arrays as key[i]=v
+        return await self.get("/v1/signersByFid", params)
 
     async def key_apps(self, fid: int) -> dict[str, int | None]:
         """{key: app fid} for every key `fid` has added. Cached per fid."""
