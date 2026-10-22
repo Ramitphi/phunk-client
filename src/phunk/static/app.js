@@ -523,6 +523,7 @@ function personCard(p) {
   const head = h("div", { class: "meta" },
     h("span", { class: "name" }, p.display_name || handle(p)),
     p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null,
+    p.ns_vote ? h("span", { class: "stamp", title: "Holds the \u201cI voted for Network School Farcaster\u201d NFT" }, "voted NS") : null,
     app);
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
     h("span", {}, p.why.join(" ")));

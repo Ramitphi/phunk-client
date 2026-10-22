@@ -13,6 +13,7 @@ licensed, public.
 | `src/phunk/proto.py` | Minimal protobuf encoder for the message types a client sends; matches ts-proto byte for byte |
 | `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `revoke_key` / `revoke_key_with_custody` (KEY_REMOVE), `Writer` (cast, react, follow). Optional extra `[write]` |
 | `src/phunk/keys.py` | `decode_key_request`: ABI-decodes `SignedKeyRequestMetadata` (which app asked for a key) |
+| `src/phunk/onchain.py` | `holders`: which addresses hold an NFT on Base (Multicall3 `balanceOf`), for the "Voted NS" stamp on people cards |
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
 | `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |

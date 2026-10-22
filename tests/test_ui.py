@@ -87,10 +87,26 @@ async def node(request):
         return web.json_response({"messages": REACTIONS.get(int(q["fid"]), [])})
     if p == "/v1/signersByFid":
         return web.json_response({"signers": []})
+    if p == "/v1/verificationsByFid":
+        return web.json_response({"messages": [
+            msg(f"v{i}", int(q["fid"]), verificationAddAddressBody={"address": a, "protocol": "PROTOCOL_ETHEREUM"})
+            for i, a in enumerate(WALLETS.get(int(q["fid"]), []))]})
     return web.Response(status=404)
 
 
-async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid=None):
+# erin (50) holds the "I voted for Network School Farcaster" NFT in her second wallet.
+WALLETS = {50: ["0x" + "11" * 20, "0x" + "5e" * 20], 61: ["0x" + "22" * 20]}
+VOTED = {"0x" + "5e" * 20}
+
+
+async def base_rpc(request):
+    from test_hub import multicall_reply
+    call = await request.json()
+    result = multicall_reply(call["params"][0]["data"], lambda a: 1 if a in VOTED else 0)
+    return web.json_response({"jsonrpc": "2.0", "id": call["id"], "result": result})
+
+
+async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid=None, votes=False):
     """Start the fake node and the UI against it; run `test(client, base, calls, submitted)`."""
     calls, submitted = [], []
     nodeapp = web.Application()
@@ -105,6 +121,7 @@ async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid
 
     nodeapp.router.add_get("/{tail:.*}", get)
     nodeapp.router.add_post("/v1/submitMessage", submit)
+    nodeapp.router.add_post("/rpc", base_rpc)
     runners = []
 
     async def start(app):
@@ -118,7 +135,8 @@ async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid
     try:
         node_port = await start(nodeapp)
         async with Hub(f"http://127.0.0.1:{node_port}", rate=1000, retries=2) as hub:
-            ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid)
+            rpc = f"http://127.0.0.1:{node_port}/rpc" if votes else None
+            ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid, vote_rpc=rpc)
             port = await start(make_app(ui))
             async with aiohttp.ClientSession() as client:
                 return await test(client, f"http://127.0.0.1:{port}", calls, submitted)
@@ -425,6 +443,22 @@ def test_people_endpoint_cards_lookup_and_follow(key):
     assert all({"username", "latest", "app_now"} <= set(c) for c in mine["cards"])
     assert bobs["fid"] == 2  # anyone can be looked up
     assert {c["fid"]: c for c in after["cards"]}[50]["following"] is True
+
+
+def test_people_cards_stamp_who_voted_for_network_school():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/people") as r:
+            return await r.json(), calls
+
+    out, calls = run(test, votes=True)
+    cards = {c["fid"]: c for c in out["cards"]}
+    assert cards[50]["ns_vote"] is True  # any verified wallet counts, not just the primary one
+    assert not any(c["ns_vote"] for f, c in cards.items() if f != 50)
+    assert any(p == "/v1/verificationsByFid" for p, _ in calls)
+
+    out, calls = run(test)  # no Base RPC configured: no badge, no wallet lookups
+    assert not any(c["ns_vote"] for c in out["cards"])
+    assert not any(p == "/v1/verificationsByFid" for p, _ in calls)
 
 
 def test_tip_account_is_named_in_me_only_when_set(monkeypatch):

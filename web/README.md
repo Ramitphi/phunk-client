@@ -47,6 +47,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
    - Optional: `PHUNK_NODE` (node to read from, default
      `https://haatz.quilibrium.com`), `PHUNK_RATE` (requests per second, default 20)
      and `PHUNK_TIP_FID` (the fid "Buy me a coffee" tips; unset, there is no button).
+     `PHUNK_BASE_RPC` (Base JSON-RPC for the "Voted NS" stamp, default
+     `https://mainnet.base.org`; `off` hides it).
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below).
 4. **Deploy**. Open the `*.vercel.app` URL and look someone up.

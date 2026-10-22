@@ -321,6 +321,13 @@ img.avatar { background: var(--chip); }
   background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue-text);
   font-weight: 700; transform: rotate(-2deg);
 }
+/* A small sticker: they voted for Network School Farcaster (an NFT on Base). */
+.stamp {
+  display: inline-block; padding: 0 7px; border-radius: 999px; line-height: 18px;
+  background: var(--cta); color: var(--cta-text); border: 1.5px solid var(--edge);
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+  white-space: nowrap; transform: rotate(-4deg); vertical-align: bottom;
+}
 .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 8px; }
 .embeds { display: grid; gap: 6px; margin-bottom: 8px; }
 .embeds img { max-width: 100%; max-height: 360px; border-radius: 12px; border: 1.5px solid var(--edge); }

@@ -33,6 +33,7 @@ from urllib.parse import parse_qsl, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from phunk.hub import DEFAULT_NODE, Hub  # noqa: E402
+from phunk.onchain import base_rpc_from_env  # noqa: E402
 from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
@@ -61,7 +62,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
                 hub = Hub(os.environ.get("PHUNK_NODE") or DEFAULT_NODE,
                           rate=float(os.environ.get("PHUNK_RATE") or 20))
                 await hub.__aenter__()
-                return UI(hub, public=True, tip_fid=tip_fid_from_env())
+                return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env())
 
             _ui = asyncio.run_coroutine_threadsafe(make(), loop).result()
             _loop = loop
