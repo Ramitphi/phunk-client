@@ -178,15 +178,15 @@ async function renderTip() {
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
   const wallet = await canSendToken();
   for (const slot of slots) {
-    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-      h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
-        : `Like phunk? Tip ${who} on Farcaster.`));
     if (!wallet) {
-      const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
-      open.addEventListener("click", () => viewProfile(tip));
-      slot.replaceChildren(h("div", { class: "card tip" }, head, open));
+      // No wallet to open here: one quiet line, not a card.
+      const link = h("button", { type: "button", class: "link" }, `tip ${who} on Farcaster`);
+      link.addEventListener("click", () => viewProfile(tip));
+      slot.replaceChildren(h("p", { class: "tip-line muted small" }, "☕ Like phunk? ", link));
       continue;
     }
+    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
+      h("span", { class: "muted small" }, `Like phunk? Send ${who} USDC on Base from your wallet.`));
     const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
       const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
       b.addEventListener("click", () => sendTip(String(d * 1000000)));
