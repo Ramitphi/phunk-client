@@ -153,6 +153,10 @@ reason each, their latest casts, and Follow / Not now.
 The **Casts** tab has the classic feed with the app that signed each cast
 and a filter by app. Anyone's people feed can be looked up by name.
 
+Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card: inside a
+Farcaster client it opens the viewer's wallet with USDC on Base to that
+account filled in.
+
 In this first release the page follows people and casts are read-only.
 Casting, replies and likes in the page are coming soon (`phunk ui
 --casting` previews them). The command line does all of it today:

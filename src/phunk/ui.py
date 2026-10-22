@@ -21,6 +21,7 @@ import asyncio
 import datetime as dt
 import ipaddress
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,14 @@ PUBLIC_HELP = "Read-only. Follow opens in Farcaster."
 # Casting, replies, likes and recasts come next (`phunk ui --casting` to try
 # them). The CLI already does all of it: `phunk post`, `phunk like`.
 CASTING = False
+
+
+def tip_fid_from_env() -> int | None:
+    """PHUNK_TIP_FID: the account that "Buy me a coffee" tips. Unset: no button."""
+    value = os.environ.get("PHUNK_TIP_FID", "").strip()
+    return int(value) if value.isdigit() and int(value) > 0 else None
+
+
 CASTING_SOON = "Casting from phunk is coming soon. For now: `phunk post` in a terminal."
 FEED_TTL = 300  # seconds a feed window stays cached
 SUGGEST_TTL = 600
@@ -160,8 +169,9 @@ class UI:
     """
 
     def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False,
-                 casting: bool = CASTING):
+                 casting: bool = CASTING, tip_fid: int | None = None):
         self.hub = hub
+        self.tip_fid = tip_fid
         self.fid = fid
         self.public = public
         self.casting = casting
@@ -307,6 +317,11 @@ class UI:
                "node": self.hub.url, "public": self.public, "help": hint}
         if self.fid is not None:
             out["user"] = self.user_json(await self.user(self.fid))
+        if self.tip_fid is not None:
+            try:
+                out["tip"] = self.user_json(await self.user(self.tip_fid))
+            except (NotFound, NodeError):
+                out["tip"] = {"fid": self.tip_fid, "username": None}
         return out
 
     async def feed_json(self, q) -> dict:
@@ -503,9 +518,9 @@ def is_loopback(host: str) -> bool:
 
 async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
                 key=None, open_browser: bool = False, public: bool = False,
-                casting: bool = CASTING) -> None:
+                casting: bool = CASTING, tip_fid: int | None = None) -> None:
     """Run the UI until interrupted. `public=True` previews the hosted, read-only site."""
-    ui = UI(hub, fid=fid, key=key, public=public, casting=casting)
+    ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid)
     app = make_app(ui, check_host=is_loopback(host))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()

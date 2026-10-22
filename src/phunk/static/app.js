@@ -135,6 +135,70 @@ function viewProfile(user) {
   openFarcaster(profilePath(user));
 }
 
+// ------------------------------------------------------- buy me a coffee
+// Inside a Farcaster client: open the viewer's own wallet with the send
+// filled in (USDC on Base to the maker's account). Elsewhere there is no
+// wallet to open, so the button opens the maker's profile instead.
+
+const USDC_BASE = "eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const TIPS = [1, 37, 69, 420];
+
+// "5" or "2.50" -> USDC base units as a string (6 decimals); null if not an amount.
+function usdcUnits(text) {
+  const m = /^\s*\$?\s*(\d{1,6})(?:\.(\d{0,6}))?\s*$/.exec(text || "");
+  if (!m) return null;
+  const units = BigInt(m[1]) * 1000000n + BigInt((m[2] || "").padEnd(6, "0"));
+  return units > 0n ? units.toString() : null;
+}
+
+async function canSendToken() {
+  if (!miniapp) return false;
+  try { return (await miniapp.getCapabilities()).includes("actions.sendToken"); } catch (e) { return false; }
+}
+
+async function sendTip(units) {
+  const tip = state.me.tip;
+  try {
+    const r = await miniapp.actions.sendToken({ token: USDC_BASE, amount: units, recipientFid: Number(tip.fid) });
+    if (r && r.success) toast("Thank you! ☕");
+    else if (r && r.reason === "send_failed") toast("The send didn't go through. Nothing was sent.");
+  } catch (e) { toast(e.message || "Couldn't open the wallet."); }
+}
+
+async function renderTip() {
+  const tip = state.me && state.me.tip;
+  const slots = document.querySelectorAll(".tip-slot");
+  if (!tip) { for (const s of slots) s.replaceChildren(); return; }
+  const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
+  const wallet = await canSendToken();
+  for (const slot of slots) {
+    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
+      h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
+        : `Like phunk? Tip ${who} on Farcaster.`));
+    if (!wallet) {
+      const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
+      open.addEventListener("click", () => viewProfile(tip));
+      slot.replaceChildren(h("div", { class: "card tip" }, head, open));
+      continue;
+    }
+    const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
+      const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
+      b.addEventListener("click", () => sendTip(String(d * 1000000)));
+      return b;
+    }));
+    const input = h("input", { inputmode: "decimal", placeholder: "Custom amount, e.g. 5", "aria-label": "Custom amount in USD" });
+    const form = h("form", { class: "tip-custom" }, input, h("button", { type: "submit", class: "cta" }, "Send"));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const units = usdcUnits(input.value);
+      if (!units) { toast("Type an amount, like 5 or 2.50."); return; }
+      sendTip(units);
+    });
+    grid.append(form);
+    slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+  }
+}
+
 function viewCast(c) {
   if (miniapp) return miniapp.actions.viewCast({ hash: c.hash, authorUsername: c.author && c.author.username || undefined });
   openFarcaster(castPath(c));
@@ -651,6 +715,7 @@ async function init() {
     tab.classList.add("soon");
     tab.querySelector(".plus-label").textContent = "New cast · soon";
   }
+  renderTip();
   $("#lookup-name").value = state.who;
   renderWho();
 

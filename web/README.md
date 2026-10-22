@@ -45,7 +45,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
    services from `vercel.json`; don't override build settings.
 3. Environment variables (none are secret; never put the signer's key here):
    - Optional: `PHUNK_NODE` (node to read from, default
-     `https://haatz.quilibrium.com`) and `PHUNK_RATE` (requests per second, default 20).
+     `https://haatz.quilibrium.com`), `PHUNK_RATE` (requests per second, default 20)
+     and `PHUNK_TIP_FID` (the fid "Buy me a coffee" tips; unset, there is no button).
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below).
 4. **Deploy**. Open the `*.vercel.app` URL and look someone up.
@@ -78,6 +79,10 @@ Opened inside a Farcaster client, the page:
 - shows the viewer's own people straight away, from the client's context,
 - opens profiles in the client: **Follow** opens the profile (Say hi,
   Reply and New cast come back with casting),
+- with `PHUNK_TIP_FID` set, shows **Buy me a coffee**: $1, $37, $69, $420
+  or a custom amount. It calls `sdk.actions.sendToken`, which opens the
+  viewer's own wallet with USDC on Base to that fid filled in; they confirm
+  or change it there. Outside a client the button opens that profile,
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**

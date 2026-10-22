@@ -90,7 +90,7 @@ async def node(request):
     return web.Response(status=404)
 
 
-async def with_ui(test, *, fid=9, key=None, public=False, casting=False):
+async def with_ui(test, *, fid=9, key=None, public=False, casting=False, tip_fid=None):
     """Start the fake node and the UI against it; run `test(client, base, calls, submitted)`."""
     calls, submitted = [], []
     nodeapp = web.Application()
@@ -118,7 +118,7 @@ async def with_ui(test, *, fid=9, key=None, public=False, casting=False):
     try:
         node_port = await start(nodeapp)
         async with Hub(f"http://127.0.0.1:{node_port}", rate=1000, retries=2) as hub:
-            ui = UI(hub, fid=fid, key=key, public=public, casting=casting)
+            ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid)
             port = await start(make_app(ui))
             async with aiohttp.ClientSession() as client:
                 return await test(client, f"http://127.0.0.1:{port}", calls, submitted)
@@ -422,3 +422,20 @@ def test_people_endpoint_cards_lookup_and_follow(key):
     assert all({"username", "latest", "app_now"} <= set(c) for c in mine["cards"])
     assert bobs["fid"] == 2  # anyone can be looked up
     assert {c["fid"]: c for c in after["cards"]}[50]["following"] is True
+
+
+def test_tip_account_is_named_in_me_only_when_set(monkeypatch):
+    from phunk.ui import tip_fid_from_env
+
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            return await r.json()
+
+    assert "tip" not in run(test, public=True)
+    me = run(test, public=True, tip_fid=3)
+    assert me["tip"]["fid"] == 3 and me["tip"]["username"] == "carol"
+    monkeypatch.setenv("PHUNK_TIP_FID", " 2391 ")
+    assert tip_fid_from_env() == 2391
+    for bad in ("", "0", "dwr", "-5"):
+        monkeypatch.setenv("PHUNK_TIP_FID", bad)
+        assert tip_fid_from_env() is None
