@@ -184,7 +184,7 @@ def test_static_build_page_and_mini_app(monkeypatch):
     for name, size in sizes.items():
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
-        assert (out / url.removeprefix("https://miniapp.phunk.social/")).is_file(), url
+        assert (out / url.removeprefix("https://miniapp.phunk.social/").split("?")[0]).is_file(), url
 
 
 def test_every_product_event_is_documented():
@@ -200,3 +200,6 @@ def test_every_product_event_is_documented():
     # Props never carry who: no usernames or fids.
     calls = [line for line in js.splitlines() if "track(" in line and "function track" not in line]
     assert calls and not [c for c in calls if re.search(r"\.(username|fid|text|hash|who)\b", c)]
+    # Hosted page only: track() sends nothing outside public mode (local `phunk ui`).
+    body = js.split("function track(", 1)[1].split("\n}\n", 1)[0]
+    assert "isPublic() && window.stonks" in body

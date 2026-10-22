@@ -279,6 +279,18 @@ class Hub:
         event = await self.get("/v1/onChainIdRegistryEventByAddress", {"address": address})
         return int(event["fid"])
 
+    async def eth_addresses(self, fid: int) -> list[str]:
+        """Ethereum addresses `fid` has verified, lowercase, oldest first.
+        The primary address (`User.eth_address`) is one of them."""
+        out: list[str] = []
+        async for m in self.pages("/v1/verificationsByFid", {"fid": fid}):
+            body = m["data"].get("verificationAddAddressBody") or m["data"].get("verificationAddEthAddressBody") or {}
+            address = (body.get("address") or "").lower()
+            # The node leaves out the default protocol (Ethereum) in some versions.
+            if body.get("protocol", "PROTOCOL_ETHEREUM") == "PROTOCOL_ETHEREUM" and address.startswith("0x"):
+                out.append(address)
+        return list(dict.fromkeys(out))
+
     # -------------------------------------------------------------- graph
 
     async def following(self, fid: int, *, limit: int | None = None) -> AsyncIterator[Follow]:

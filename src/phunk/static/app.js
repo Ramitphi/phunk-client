@@ -127,13 +127,13 @@ const isPublic = () => !!(state.me && state.me.public);
 let miniapp = null; // the mini app SDK, when running inside a Farcaster client
 
 // Product events for the hosted site's analytics (onedollarstats, loaded by
-// web/head.html only; `phunk ui` never loads it, so these are no-ops there).
+// web/head.html only). Public mode only: local `phunk ui` never sends one.
 // Every event carries `where` (web or miniapp). Props are coarse buckets and
 // labels, never who: no usernames, no fids, no cast text. The full list is
 // in web/README.md.
 function track(name, props) {
   try {
-    if (window.stonks) window.stonks.event(name, Object.assign({ where: miniapp ? "miniapp" : "web" }, props || {}));
+    if (isPublic() && window.stonks) window.stonks.event(name, Object.assign({ where: miniapp ? "miniapp" : "web" }, props || {}));
   } catch { /* blocked */ }
 }
 
@@ -173,13 +173,10 @@ function viewProfile(user) {
 const USDC_BASE = "eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const TIPS = [1, 37, 69, 420];
 
-// "5" or "2.50" -> USDC base units as a string (6 decimals); null if not an amount.
-function usdcUnits(text) {
-  const m = /^\s*\$?\s*(\d{1,6})(?:\.(\d{0,6}))?\s*$/.exec(text || "");
-  if (!m) return null;
-  const units = BigInt(m[1]) * 1000000n + BigInt((m[2] || "").padEnd(6, "0"));
-  return units > 0n ? units.toString() : null;
-}
+// The slider's amounts, $10 to $1000: round numbers, about 15-25% apart, so
+// each step feels the same size and small amounts are as easy to pick as big ones.
+const SLIDER = [10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 125, 150, 200, 250, 300, 400, 500, 600, 750, 1000];
+const SLIDER_START = SLIDER.indexOf(25);
 
 async function canSendToken() {
   if (!miniapp) return false;
@@ -204,36 +201,65 @@ async function sendTip(units, amount) {
 
 async function renderTip() {
   const tip = state.me && state.me.tip;
-  const slots = document.querySelectorAll(".tip-slot");
-  if (!tip) { for (const s of slots) s.replaceChildren(); return; }
+  const slot = $("#tip");
+  const nudges = document.querySelectorAll(".tip-nudge-slot");
+  $('.tabs button[data-tab="coffee"]').hidden = !tip;
+  if (!tip) { slot.replaceChildren(); for (const n of nudges) n.replaceChildren(); return; }
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
-  const wallet = await canSendToken();
-  for (const slot of slots) {
-    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-      h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
-        : `Like phunk? Tip ${who} on Farcaster.`));
-    if (!wallet) {
-      const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
-      open.addEventListener("click", () => { track("Tip profile"); viewProfile(tip); });
-      slot.replaceChildren(h("div", { class: "card tip" }, head, open));
-      continue;
-    }
-    const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
-      const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
-      b.addEventListener("click", () => sendTip(String(d * 1000000), String(d)));
-      return b;
-    }));
-    const input = h("input", { inputmode: "decimal", placeholder: "Custom amount, e.g. 5", "aria-label": "Custom amount in USD" });
-    const form = h("form", { class: "tip-custom" }, input, h("button", { type: "submit", class: "cta" }, "Send"));
-    form.addEventListener("submit", (ev) => {
-      ev.preventDefault();
-      const units = usdcUnits(input.value);
-      if (!units) { toast("Type an amount, like 5 or 2.50."); return; }
-      sendTip(units, "custom");
-    });
-    grid.append(form);
-    slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+  for (const n of nudges) {
+    const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
+    go.addEventListener("click", showTip);
+    n.replaceChildren(h("div", { class: "card tip-nudge" },
+      h("span", {}, "If you like it, buy me a coffee"), go));
   }
+  const wallet = await canSendToken();
+  const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
+    h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
+      : `Like phunk? Tip ${who} on Farcaster.`));
+  if (!wallet) {
+    // No wallet to open here: the maker's profile instead.
+    const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
+    open.addEventListener("click", () => { track("Tip profile"); viewProfile(tip); });
+    slot.replaceChildren(h("div", { class: "card tip" }, head, open));
+    return;
+  }
+  const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
+    const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
+    b.addEventListener("click", () => sendTip(String(d * 1000000), String(d)));
+    return b;
+  }));
+  const slider = h("input", { type: "range", min: "0", max: String(SLIDER.length - 1), step: "1",
+    value: String(SLIDER_START), "aria-label": "Amount in USD" });
+  // The button keeps the width of its longest label, so the track never
+  // shifts under the finger while dragging.
+  const label = h("span", {});
+  const send = h("button", { type: "submit", class: "cta" }, label,
+    h("span", { class: "ghost-label", "aria-hidden": "true" }, `Send $${SLIDER[SLIDER.length - 1]}`));
+  const show = () => {
+    const d = SLIDER[Number(slider.value)];
+    label.textContent = `Send $${d}`;
+    slider.setAttribute("aria-valuetext", `$${d}`);
+    slider.style.setProperty("--fill", `${(100 * Number(slider.value)) / (SLIDER.length - 1)}%`);
+  };
+  slider.addEventListener("input", show);
+  show();
+  const form = h("form", { class: "tip-custom" },
+    h("div", { class: "tip-range" }, slider,
+      h("div", { class: "tip-ends muted small" }, h("span", {}, "$10"), h("span", {}, "$1000"))),
+    send);
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const d = SLIDER[Number(slider.value)];
+    sendTip(String(d * 1000000), String(d));
+  });
+  grid.append(form);
+  slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+}
+
+// The nudge's button: open the Coffee tab.
+function showTip() {
+  setTab("coffee");
+  window.scrollTo({ top: 0 });
 }
 
 function viewCast(c) {
@@ -259,12 +285,23 @@ function compose(text, channel) {
 
 // Load the SDK only where a Farcaster client could be the host: in a frame
 // or a phone app's web view. Same check the SDK itself starts with.
+let framedSdk = null; // the SDK, loaded in a frame or web view, host or not
 async function startMiniApp() {
   if (!(window.ReactNativeWebView || window.parent !== window)) return null;
   try {
     const { sdk } = await import(MINIAPP_SDK);
-    return (await sdk.isInMiniApp()) ? sdk : null;
+    framedSdk = sdk;
+    // The SDK's default wait for the host is 1s; some hosts answer slower.
+    return (await sdk.isInMiniApp(5000)) ? sdk : null;
   } catch { return null; }
+}
+
+// Hide the host's splash screen. Called in any frame, even when the host
+// didn't answer in time: a host left on its splash shows a blank app, and
+// outside a host the message goes nowhere. Not awaited: with no host it
+// never resolves.
+function hostReady() {
+  if (framedSdk) framedSdk.actions.ready().catch(() => {});
 }
 
 function profilePath(user) {
@@ -551,6 +588,7 @@ function personCard(p, i = 0) {
   const head = h("div", { class: "meta" },
     h("span", { class: "name" }, p.display_name || handle(p)),
     p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null,
+    p.ns_vote ? h("span", { class: "stamp", title: "Holds the \u201cI voted for Network School Farcaster\u201d NFT" }, "voted NS") : null,
     app);
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
     h("span", {}, p.why.join(" ")));
@@ -739,7 +777,7 @@ async function init() {
     state.me = await api("/api/me");
   } catch (e) {
     $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the server: ${e.message}`));
-    startMiniApp().then((sdk) => sdk && sdk.actions.ready()); // never leave a host on its splash
+    startMiniApp().then(hostReady); // never leave a host on its splash
     return;
   }
   if (isPublic()) {
@@ -836,7 +874,7 @@ async function init() {
 
   setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
-  if (miniapp) miniapp.actions.ready(); // hide the host's splash screen
+  hostReady();
 }
 
 init();
