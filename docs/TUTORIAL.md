@@ -814,7 +814,7 @@ your own machine:
 
 ```sh
 phunk ui --as dwr          # look at anyone's people, read-only
-phunk ui                   # as your app key's fid: follow people
+phunk ui                   # as your app key's fid: follow and like
 phunk ui --open            # and open it in your browser
 phunk ui --public          # what phunk.social runs: read-only, actions open Farcaster
 ```
@@ -846,8 +846,9 @@ The **Casts** tab has the classic feed:
   signed it. Pick a window (6 hours to 7 days) and load more.
 * **An app filter**: a checkbox for every app seen, plus "own key" and
   "unknown". Untick one to hide its casts.
-Casts are read-only in this first release. **New cast** says "coming
-soon"; replies, likes and recasts in the page come with it. To post now,
+In this first release the page follows and likes, but doesn't cast.
+**New cast** says "coming soon"; replies and recasts in the page come with
+it. To post now,
 use the command line (`phunk post`, `phunk like`, step 10), or try the
 page's composer early with `phunk ui --casting`.
 
@@ -856,7 +857,7 @@ People, Casts, New cast (the **+**) and You (who you are, and the search
 box to look up anyone's people).
 
 Without an app key it is read-only: everything browses, and **Follow**
-tells you to run `phunk key add`. The page never asks for a seed
+and **Like** tell you to run `phunk key add`. The page never asks for a seed
 phrase. The server binds to 127.0.0.1, answers only to a local Host, and
 refuses POSTs from other sites. The app key stays in the server process.
 

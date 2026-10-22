@@ -247,13 +247,13 @@ function composePath(text, channel) {
   return `/~/compose${qs ? "?" + qs : ""}`;
 }
 
-// First release: follow only. Casting, replies and likes are coming soon.
+// First release: follow and like. Casting, replies and recasts are coming soon.
 const canCast = () => !!(state.me && state.me.can_cast);
 
-const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow") : "read-only");
+const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and like") : "read-only");
 
 function soon() {
-  toast("Casting is coming soon. Follow people for now.", 5000);
+  toast("Casting is coming soon. Follow and like for now.", 5000);
 }
 
 function needKey() {
@@ -291,7 +291,8 @@ function castCard(c) {
   }));
 
   const toggle = (kind) => {
-    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
+    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false",
+      title: isPublic() ? "Open this cast in Farcaster" : null }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
       if (isPublic()) return viewCast(c);
       if (!(state.me.can_write && viewingSelf())) return needKey();
@@ -330,7 +331,7 @@ function castCard(c) {
     body.querySelector(".actions").after(form);
     ta.focus();
   });
-  if (canCast()) body.append(h("div", { class: "actions" }, replyBtn, toggle("like"), toggle("recast")));
+  body.append(h("div", { class: "actions" }, canCast() ? replyBtn : null, toggle("like"), canCast() ? toggle("recast") : null));
   return h("article", { class: "card cast" }, avatar(c.author), body);
 }
 

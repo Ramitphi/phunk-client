@@ -314,20 +314,23 @@ def _varint(buf, i):
         if not b & 0x80:
             return n, i
 
-def test_first_release_follows_but_casting_is_coming_soon(key):
+def test_first_release_follows_and_likes_but_casting_is_coming_soon(key):
     async def test(client, base, calls, submitted):
         async with client.get(f"{base}/api/me") as r:
             me = await r.json()
         out = [await post(client, f"{base}/api/cast", {"text": "hi"}),
-               await post(client, f"{base}/api/react", {"action": "like", "cast": "1:0x" + "ab" * 20})]
-        follow = await post(client, f"{base}/api/follow", {"fid": 50})
-        return me, out, follow, submitted
+               await post(client, f"{base}/api/react", {"action": "recast", "cast": "1:0x" + "ab" * 20})]
+        ok = [await post(client, f"{base}/api/follow", {"fid": 50}),
+              await post(client, f"{base}/api/react", {"action": "like", "cast": "1:0x" + "ab" * 20}),
+              await post(client, f"{base}/api/react", {"action": "unlike", "cast": "1:0x" + "ab" * 20})]
+        return me, out, ok, submitted
 
-    me, out, follow, submitted = run(test, key=key)
+    me, out, ok, submitted = run(test, key=key)
     assert me["can_write"] is True and me["can_cast"] is False
     for status, body in out:
         assert status == 403 and body["coming_soon"] and "coming soon" in body["error"]
-    assert follow[0] == 200 and len(submitted) == 1  # only the follow went out
+    assert [s for s, _ in ok] == [200, 200, 200]
+    assert len(submitted) == 3  # the follow, the like and the unlike; no cast, no recast
 
 
 
