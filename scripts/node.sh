@@ -7,6 +7,8 @@
 #   ./node.sh status    sync progress, per shard, in plain words
 #   ./node.sh logs      follow the node's logs (Ctrl-C stops following, not the node)
 #   ./node.sh upgrade   fetch the latest release and restart
+#   ./node.sh private   keep the HTTP and gRPC APIs on 127.0.0.1 (behind gateway.sh)
+#   ./node.sh public    open them to the internet again
 #
 # This is a thin wrapper around Farcaster's official snapchain.sh, the script
 # behind the bootstrap one-liner in
@@ -18,6 +20,8 @@
 #   - keeps Grafana (3000) and statsd (8125/8126) on 127.0.0.1, because
 #     ports that Docker publishes skip the ufw firewall
 #   - returns once the node is up, instead of following the logs forever
+#   - with "private", keeps the APIs (3381, 3383) on 127.0.0.1 too, so the
+#     only way in is gateway.sh's HTTPS gateway, which wants a token
 #
 # Settings (environment variables):
 #   SNAPCHAIN_AGREE_NO_REWARDS=yes  agree that the node earns no rewards
@@ -156,20 +160,37 @@ compose_new_enough() {
     [ "$(printf '%s\n' "$COMPOSE_MIN" "$v" | sort -V | head -n 1)" = "$COMPOSE_MIN" ]
 }
 
-# Keep the dashboard and metrics ports off the internet. snapchain.sh never
-# touches docker-compose.override.yml, and Compose merges it automatically.
-write_override() {
+env_set() {
+    if env_has "$1"; then
+        as_root sed -i "s|^$1=.*|$1=$2|" "$NODE_DIR/.env"
+    else
+        env_add "$1" "$2"
+    fi
+}
+
+# Set by "./node.sh private": the APIs listen on 127.0.0.1 only.
+api_private() { [ "$(env_get PHUNK_API_PRIVATE)" = "true" ]; }
+
+override_is_ours() {
     local f="$NODE_DIR/docker-compose.override.yml"
-    if [ -f "$f" ]; then
-        grep -qF "$OVERRIDE_MARK" "$f" \
-            || warn "$f is yours, leaving it alone; check that port 3000 is not public"
+    [ ! -f "$f" ] || grep -qF "$OVERRIDE_MARK" "$f"
+}
+
+# Keep the dashboard and metrics ports off the internet, and the APIs too
+# when private. snapchain.sh never touches docker-compose.override.yml, and
+# Compose merges it automatically. Rewritten on every run while it is ours.
+write_override() {
+    local f="$NODE_DIR/docker-compose.override.yml" tmp
+    if ! override_is_ours; then
+        warn "$f is yours, leaving it alone; check that port 3000 is not public"
         return 0
     fi
     if ! compose_new_enough; then
         warn "Docker Compose is older than $COMPOSE_MIN; Grafana stays on 0.0.0.0:3000. Block it at your provider's firewall."
         return 0
     fi
-    as_root tee "$f" >/dev/null <<EOF
+    tmp="$(mktemp)"
+    cat >"$tmp" <<EOF
 # $OVERRIDE_MARK.
 # Docker-published ports skip ufw, so bind the local-only services to
 # 127.0.0.1. Reach Grafana with: ssh -L 3000:localhost:3000 <user>@<server>
@@ -182,6 +203,21 @@ services:
       - "127.0.0.1:8125:8125/udp"
       - "127.0.0.1:8126:8126"
 EOF
+    if api_private; then
+        cat >>"$tmp" <<EOF
+  # ./node.sh private: the APIs answer on this machine only; clients come in
+  # through the gateway (gateway.sh). Gossip stays public: the node syncs over it.
+  snapchain:
+    ports: !override
+      - "127.0.0.1:3381:3381/tcp"
+      - "3382:3382/udp"
+      - "127.0.0.1:3383:3383/tcp"
+EOF
+    fi
+    if ! cmp -s "$tmp" "$f"; then
+        as_root install -m 0644 "$tmp" "$f"
+    fi
+    rm -f "$tmp"
 }
 
 prepare() {
@@ -225,10 +261,23 @@ Don't restart or upgrade the node until the snapshot download finishes.
   ./node.sh status   sync progress
   ./node.sh logs     follow the logs (Ctrl-C stops following; the node keeps running)
 
+EOF
+    if api_private; then
+        cat <<EOF
+The API answers on this machine only. Clients read through the gateway:
+
+  Hub("https://<gateway-domain>", token="...")   # see gateway.sh
+EOF
+    else
+        cat <<EOF
 When every shard is in sync, read from it:
 
   Hub("http://<this-server's-public-ip>:3381")
+
+Anyone can, though. To keep it for your own apps, put it behind the
+gateway (sudo ./gateway.sh setup), then run ./node.sh private.
 EOF
+    fi
 }
 
 # --- commands --------------------------------------------------------------
@@ -256,6 +305,31 @@ cmd_stop() {
         return 0
     fi
     (cd "$NODE_DIR" && as_root ./snapchain.sh down)
+}
+
+# Move the APIs to 127.0.0.1 (private) or back to every address (public).
+# This recreates the node's container, which is a restart.
+set_api() {
+    local want="$1" f="$NODE_DIR/docker-compose.override.yml"
+    installed || die "no node installed in $NODE_DIR; run ./node.sh start"
+    override_is_ours || die "$f is yours; set the snapchain ports in it by hand"
+    compose_new_enough || die "this needs Docker Compose $COMPOSE_MIN or newer (docker compose version)"
+    # A restart during the snapshot download starts it over, and can leave a
+    # shard syncing from block 1. The API comes up once the download is done.
+    curl -fsS --max-time 10 "$API/v1/info" >/dev/null 2>&1 \
+        || die "the node's API is not up yet (still downloading the snapshot?). Try again once ./node.sh status answers."
+    as_root true
+    env_set PHUNK_API_PRIVATE "$want"
+    write_override
+    say "Restarting the node with the new ports (it answers again in a minute or so)"
+    # --pull never: change the ports only, don't upgrade on the way.
+    compose up -d --pull never snapchain || die "docker compose up failed"
+    if [ "$want" = true ]; then
+        echo "The HTTP API (3381) and gRPC (3383) now answer on 127.0.0.1 only."
+        echo "Check from another machine: curl -m 5 http://<this-server's-public-ip>:3381/v1/info should fail."
+    else
+        echo "The HTTP API (3381) and gRPC (3383) are open to the internet again."
+    fi
 }
 
 cmd_logs() {
@@ -408,7 +482,11 @@ cmd_status() {
     echo "In sync."
     case "$API" in
         *://localhost:*|*://127.0.0.1:*)
-            echo "Point a client at http://<this-server's-public-ip>:3381" ;;
+            if api_private; then
+                echo "The API is private. Point a client at the gateway: https://<gateway-domain>"
+            else
+                echo "Point a client at http://<this-server's-public-ip>:3381"
+            fi ;;
     esac
 }
 
@@ -421,6 +499,8 @@ usage: node.sh <command>
   status    sync progress, per shard (exit 0 in sync, 2 catching up, 1 down)
   logs      follow the node's logs (Ctrl-C stops following, not the node)
   upgrade   fetch the latest release and restart
+  private   APIs on 127.0.0.1 only; clients come in through gateway.sh (restarts the node)
+  public    APIs open to the internet again (restarts the node)
 EOF
 }
 
@@ -430,6 +510,8 @@ case "${1:-}" in
     status)  cmd_status ;;
     logs)    cmd_logs ;;
     upgrade) cmd_upgrade ;;
+    private) set_api true ;;
+    public)  set_api false ;;
     help|-h|--help|'') usage ;;
     *) usage >&2; exit 64 ;;
 esac

@@ -178,3 +178,36 @@ def test_static_build_page_and_mini_app(monkeypatch):
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
         assert (out / url.removeprefix("https://phunk.social/")).is_file(), url
+
+
+def test_public_mode_hides_the_node_and_rate_limits_refresh():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        async with client.get(f"{base}/api/people?who=me") as r:
+            assert r.status == 200
+        n = len(calls)
+        for _ in range(3):  # a script hammering Refresh
+            async with client.get(f"{base}/api/people?who=me&refresh=1") as r:
+                assert r.status == 200
+        return me, len(calls) - n
+
+    me, extra = run(test, fid=None, public=True)
+    assert me["node"] is None
+    assert extra == 0  # served from the cache: the first read is under a minute old
+
+
+def test_local_mode_refresh_still_rereads():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        async with client.get(f"{base}/api/people") as r:
+            assert r.status == 200
+        n = len(calls)
+        async with client.get(f"{base}/api/people?refresh=1") as r:
+            assert r.status == 200
+        return me, len(calls) - n
+
+    me, extra = run(test)
+    assert me["node"].startswith("http://127.0.0.1:")
+    assert extra > 0

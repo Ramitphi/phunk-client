@@ -43,6 +43,10 @@ READ_ONLY_HELP = ("Read-only: no app key. To post, like and follow, run `phunk k
 PUBLIC_HELP = "Read-only. Follow, reply and like open in Farcaster."
 FEED_TTL = 300  # seconds a feed window stays cached
 SUGGEST_TTL = 600
+# On the hosted site, Refresh re-reads the node only for results older than
+# this, so a script sending refresh=1 in a loop gets the cached answer.
+PUBLIC_MIN_REFRESH = 60
+NAME_TTL = 3600  # username -> fid; names change hands rarely
 PAGE = 30
 # Cache sizes, so a long-running public server doesn't grow without end.
 MAX_USERS = 5000
@@ -167,7 +171,15 @@ class UI:
         self._feeds: dict[tuple[int, int], tuple[float, asyncio.Future]] = {}
         self._suggest: dict[int, tuple[float, asyncio.Future]] = {}
         self._people: dict[int, tuple[float, asyncio.Future]] = {}
+        self._fids: dict[str, tuple[float, asyncio.Future]] = {}
         self.followed_here: set[int] = set()  # keep them out of suggestions
+        self.min_refresh = PUBLIC_MIN_REFRESH if public else 0
+
+    def _fresh(self, hit, ttl: int, refresh: bool) -> bool:
+        """Is a cached (time, future) still good to serve?"""
+        if not hit or (hit[1].done() and hit[1].exception()):
+            return False
+        return time.monotonic() - hit[0] < (self.min_refresh if refresh else ttl)
 
     # ------------------------------------------------------------ cached reads
 
@@ -224,8 +236,7 @@ class UI:
         """Every cast in the window, newest first, with author and app. Cached."""
         key = (fid, hours)
         hit = self._feeds.get(key)
-        if hit and not refresh and time.monotonic() - hit[0] < FEED_TTL and not (
-                hit[1].done() and hit[1].exception()):
+        if self._fresh(hit, FEED_TTL, refresh):
             return await hit[1]
 
         async def load():
@@ -240,8 +251,7 @@ class UI:
 
     async def suggestions(self, fid: int, refresh: bool = False) -> list[dict]:
         hit = self._suggest.get(fid)
-        if not (hit and not refresh and time.monotonic() - hit[0] < SUGGEST_TTL and not (
-                hit[1].done() and hit[1].exception())):
+        if not self._fresh(hit, SUGGEST_TTL, refresh):
             async def load():
                 found = await suggest(self.hub, fid, limit=25)
                 names = await self.names(f for s in found for f in s.followed_by[:3])
@@ -258,8 +268,7 @@ class UI:
     async def people(self, fid: int, refresh: bool = False) -> dict:
         """The people feed for `fid`: cards plus a summary. Cached."""
         hit = self._people.get(fid)
-        if not (hit and not refresh and time.monotonic() - hit[0] < SUGGEST_TTL and not (
-                hit[1].done() and hit[1].exception())):
+        if not self._fresh(hit, SUGGEST_TTL, refresh):
             async def load():
                 feed = await people_feed(self.hub, fid, limit=30, channel_name=lambda u: channel_name(u) or u)
                 profiles = feed["profiles"]
@@ -284,8 +293,16 @@ class UI:
     async def who(self, value: str | None) -> int:
         """A username or fid from the query, or the key's fid."""
         value = (value or "").strip().lstrip("@")
+        if value.isdigit():
+            return int(value)
         if value:
-            return int(value) if value.isdigit() else await self.hub.fid_by_name(value)
+            name = value.lower()
+            hit = self._fids.get(name)
+            if not self._fresh(hit, NAME_TTL, False):
+                hit = (time.monotonic(), asyncio.ensure_future(self.hub.fid_by_name(name)))
+                self._fids[name] = hit
+                _trim(self._fids, MAX_USERS)
+            return await hit[1]
         if self.fid is None:
             raise LookupError("pick an account to browse as")
         return self.fid
@@ -296,7 +313,9 @@ class UI:
 
     async def me_json(self, q) -> dict:
         hint = PUBLIC_HELP if self.public else (None if self.writer else READ_ONLY_HELP)
-        out = {"fid": self.fid, "can_write": self.writer is not None, "node": self.hub.url,
+        # The hosted site keeps its node's address to itself.
+        out = {"fid": self.fid, "can_write": self.writer is not None,
+               "node": None if self.public else self.hub.url,
                "public": self.public, "help": hint}
         if self.fid is not None:
             out["user"] = self.user_json(await self.user(self.fid))

@@ -12,8 +12,14 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET /api/suggestions?who=dwr
 
 Settings (environment variables, optional):
-    PHUNK_NODE   the node to read from (default: the public node)
-    PHUNK_RATE   requests per second to that node (default 20)
+    PHUNK_NODE         the node to read from (default: the public node)
+    PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
+    PHUNK_RATE         requests per second to that node, per instance (default 20)
+    PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
+
+On your own node, raise PHUNK_RATE and PHUNK_CONCURRENCY (for example 150
+and 48): a feed is one request per account followed, so this is what makes
+it fast. The gateway's per-token limit caps the total across instances.
 
 Successful reads carry Cache-Control: s-maxage, so Vercel's CDN answers
 repeat lookups without touching the node. See web/README.md to deploy.
@@ -58,7 +64,9 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
 
             async def make() -> UI:
                 hub = Hub(os.environ.get("PHUNK_NODE") or DEFAULT_NODE,
-                          rate=float(os.environ.get("PHUNK_RATE") or 20))
+                          rate=float(os.environ.get("PHUNK_RATE") or 20),
+                          concurrency=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
+                          token=os.environ.get("PHUNK_NODE_TOKEN") or None)
                 await hub.__aenter__()
                 return UI(hub, public=True)
 
