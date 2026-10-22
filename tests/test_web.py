@@ -161,7 +161,11 @@ def test_static_build_page_and_mini_app(monkeypatch):
     assert embed["version"] == "1" and len(embed["button"]["title"]) <= 32
     assert embed["button"]["action"]["type"] == "launch_miniapp"
     assert embeds["fc:frame"]["button"]["action"]["type"] == "launch_frame"
-    assert embed["imageUrl"] == "https://phunk.social/img/embed.png"
+    # A phunk.social link in a cast opens the mini app on its own domain.
+    for e in embeds.values():
+        assert e["imageUrl"] == "https://miniapp.phunk.social/img/embed.png"
+        assert e["button"]["action"]["url"] == "https://miniapp.phunk.social/"
+    assert '<meta property="og:image" content="https://phunk.social/img/og.png">' in html
 
     # The manifest: filled from the environment, every image there and the right size.
     manifest = json.loads((out / ".well-known" / "farcaster.json").read_text())
@@ -169,12 +173,12 @@ def test_static_build_page_and_mini_app(monkeypatch):
                                               "payload": env["FARCASTER_PAYLOAD"],
                                               "signature": env["FARCASTER_SIGNATURE"]}
     app = manifest["miniapp"]
-    assert app["version"] == "1" and len(app["name"]) <= 32 and app["homeUrl"] == "https://phunk.social/"
+    assert app["version"] == "1" and len(app["name"]) <= 32 and app["homeUrl"] == "https://miniapp.phunk.social/"
     assert len(app["subtitle"]) <= 30 and len(app["description"]) <= 170 and len(app["tagline"]) <= 30
-    assert len(app["ogDescription"]) <= 100 and app["canonicalDomain"] == "phunk.social"
+    assert len(app["ogDescription"]) <= 100 and app["canonicalDomain"] == "miniapp.phunk.social"
     assert all(t == t.lower() and " " not in t and len(t) <= 20 for t in app["tags"]) and len(app["tags"]) <= 5
     sizes = {"icon.png": (1024, 1024), "splash.png": (200, 200), "embed.png": (1200, 800), "og.png": (1200, 630)}
     for name, size in sizes.items():
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
-        assert (out / url.removeprefix("https://phunk.social/")).is_file(), url
+        assert (out / url.removeprefix("https://miniapp.phunk.social/")).is_file(), url
