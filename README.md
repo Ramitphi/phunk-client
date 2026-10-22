@@ -160,9 +160,10 @@ reason each, their latest casts, and Follow / Not now.
 The **Casts** tab has the classic feed with the app that signed each cast
 and a filter by app. Anyone's people feed can be looked up by name.
 
-Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card on the
-**You** screen, with a small "If you like it, buy me a coffee" card at the
-end of the people list that leads to it. Inside a Farcaster client it opens
+Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card in its
+own **Coffee** tab (the last one), with a small "If you like it, buy me a
+coffee" card at the end of the people list that leads to it. Pick $1, $37,
+$69, $420, or any amount from $10 to $1000 on a slider. Inside a Farcaster client it opens
 the viewer's wallet with USDC on Base to that account filled in.
 
 A card gets a small **Voted NS** stamp when the person holds the "I voted
