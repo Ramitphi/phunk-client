@@ -221,6 +221,24 @@ def test_static_build_page_and_mini_app(monkeypatch):
         assert (out / url.removeprefix("https://miniapp.phunk.social/").split("?")[0]).is_file(), url
 
 
+def test_every_product_event_is_documented():
+    """Each name the page sends with track() is in web/README.md's table, and back."""
+    import re
+
+    js = (ROOT / "src/phunk/static/app.js").read_text()
+    sent = set(re.findall(r'track\("([^"]+)"', js))
+    table = (ROOT / "web/README.md").read_text().split("### Product events", 1)[1].split("\n## ", 1)[0]
+    documented = set(re.findall(r"^\| ((?:`[^`]+`(?:, )?)+) \|", table, re.M))
+    documented = {name for row in documented for name in re.findall(r"`([^`]+)`", row)}
+    assert sent == documented, (sent - documented, documented - sent)
+    # Props never carry who: no usernames or fids.
+    calls = [line for line in js.splitlines() if "track(" in line and "function track" not in line]
+    assert calls and not [c for c in calls if re.search(r"\.(username|fid|text|hash|who)\b", c)]
+    # Hosted page only: track() sends nothing outside public mode (local `phunk ui`).
+    body = js.split("function track(", 1)[1].split("\n}\n", 1)[0]
+    assert "isPublic() && window.stonks" in body
+
+
 def test_public_mode_hides_the_node_and_rate_limits_refresh():
     async def test(client, base, calls, submitted):
         async with client.get(f"{base}/api/me") as r:

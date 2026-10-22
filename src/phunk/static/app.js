@@ -65,6 +65,7 @@ async function api(path, body) {
   try { data = await r.json(); } catch { /* not JSON */ }
   if (!r.ok) {
     const err = new Error(data.error || `HTTP ${r.status}`);
+    err.status = r.status;
     err.readOnly = !!data.read_only;
     throw err;
   }
@@ -128,10 +129,33 @@ const MINIAPP_SDK = "https://esm.sh/@farcaster/miniapp-sdk@0.3.0";
 const isPublic = () => !!(state.me && state.me.public);
 let miniapp = null; // the mini app SDK, when running inside a Farcaster client
 
-// Count an action on the hosted site's analytics (onedollarstats, loaded by
-// web/head.html only). Names and where it ran, never who: no usernames.
-function track(name) {
-  try { if (window.stonks) window.stonks.event(name, { where: miniapp ? "miniapp" : "web" }); } catch { /* blocked */ }
+// Product events for the hosted site's analytics (onedollarstats, loaded by
+// web/head.html only). Public mode only: local `phunk ui` never sends one.
+// Every event carries `where` (web or miniapp). Props are coarse buckets and
+// labels, never who: no usernames, no fids, no cast text. The full list is
+// in web/README.md.
+function track(name, props) {
+  try {
+    if (isPublic() && window.stonks) window.stonks.event(name, Object.assign({ where: miniapp ? "miniapp" : "web" }, props || {}));
+  } catch { /* blocked */ }
+}
+
+function secs(ms) {
+  const s = ms / 1000;
+  return s < 5 ? "<5s" : s < 15 ? "5-15s" : s < 60 ? "15-60s" : "60s+";
+}
+
+function count(n) {
+  return n === 0 ? "0" : n <= 5 ? "1-5" : n <= 15 ? "6-15" : "16+";
+}
+
+function slot(i) {
+  return i < 3 ? "1-3" : i < 10 ? "4-10" : "11+";
+}
+
+function failure(e) {
+  if (!e || !e.status) return "network";
+  return e.status === 404 ? "not found" : e.status === 400 ? "bad lookup" : e.status >= 500 ? "server" : String(e.status);
 }
 
 function openFarcaster(path) {
@@ -162,13 +186,20 @@ async function canSendToken() {
   try { return (await miniapp.getCapabilities()).includes("actions.sendToken"); } catch (e) { return false; }
 }
 
-async function sendTip(units) {
+async function sendTip(units, amount) {
   const tip = state.me.tip;
+  track("Tip tapped", { amount });
   try {
     const r = await miniapp.actions.sendToken({ token: USDC_BASE, amount: units, recipientFid: Number(tip.fid) });
-    if (r && r.success) toast("Thank you! 💸");
-    else if (r && r.reason === "send_failed") toast("The send didn't go through. Nothing was sent.");
-  } catch (e) { toast(e.message || "Couldn't open the wallet."); }
+    if (r && r.success) { track("Tip sent", { amount }); toast("Thank you! 💸"); }
+    else if (r && r.reason === "send_failed") {
+      track("Tip failed", { amount, reason: "send failed" });
+      toast("The send didn't go through. Nothing was sent.");
+    } else track("Tip failed", { amount, reason: "cancelled" });
+  } catch (e) {
+    track("Tip failed", { amount, reason: "no wallet" });
+    toast(e.message || "Couldn't open the wallet.");
+  }
 }
 
 async function renderTip() {
@@ -193,13 +224,13 @@ async function renderTip() {
   if (!wallet) {
     // No wallet to open here: the maker's profile instead.
     const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
-    open.addEventListener("click", () => viewProfile(tip));
+    open.addEventListener("click", () => { track("Tip profile"); viewProfile(tip); });
     slot.replaceChildren(h("div", { class: "card tip" }, head, open));
     return;
   }
   const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
     const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
-    b.addEventListener("click", () => sendTip(String(d * 1000000)));
+    b.addEventListener("click", () => sendTip(String(d * 1000000), String(d)));
     return b;
   }));
   const slider = h("input", { type: "range", min: "0", max: String(SLIDER.length - 1), step: "1",
@@ -223,7 +254,8 @@ async function renderTip() {
     send);
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    sendTip(String(SLIDER[Number(slider.value)] * 1000000));
+    const d = SLIDER[Number(slider.value)];
+    sendTip(String(d * 1000000), String(d));
   });
   grid.append(form);
   slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
@@ -333,6 +365,7 @@ const canCast = () => !!(state.me && state.me.can_cast);
 const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and like") : "read-only");
 
 function soon() {
+  track("Casting soon");
   toast("Casting is coming soon. Follow and like for now.", 5000);
 }
 
@@ -429,6 +462,7 @@ function renderApps() {
     cb.addEventListener("change", () => {
       const k = a.name.toLowerCase();
       if (cb.checked) state.hidden.delete(k); else state.hidden.add(k);
+      track("App filter", { change: cb.checked ? "show" : "hide" });
       store.set("hiddenApps", [...state.hidden]);
       loadFeed(true);
     });
@@ -440,6 +474,7 @@ function renderApps() {
 }
 
 function setAllApps(show) {
+  track("App filter", { change: show ? "show all" : "hide all" });
   for (const a of state.apps) {
     if (show) state.hidden.delete(a.name.toLowerCase()); else state.hidden.add(a.name.toLowerCase());
   }
@@ -481,9 +516,11 @@ async function loadFeed(reset, refresh = false) {
   if (state.who) q.set("who", state.who);
   if (state.hidden.size) q.set("hide", [...state.hidden].join(","));
   if (refresh) q.set("refresh", "1");
+  const started = performance.now();
   try {
     const d = await api(`/api/feed?${q}`);
     if (seq !== state.feedSeq) return;
+    if (reset) track("Casts loaded", { took: secs(performance.now() - started), casts: count(d.total), window: `${state.hours}h` });
     if (reset) feed.replaceChildren();
     state.apps = d.apps;
     renderApps();
@@ -505,6 +542,7 @@ async function loadFeed(reset, refresh = false) {
     } else more.hidden = true;
   } catch (e) {
     if (seq !== state.feedSeq) return;
+    track("Casts failed", { reason: failure(e), took: secs(performance.now() - started) });
     feed.replaceChildren(h("div", { class: "card empty" }, `Could not load the feed: ${e.message}`));
     more.hidden = true;
   } finally {
@@ -527,7 +565,8 @@ function viewingSelf() {
   return !!(me && me.user && (w === me.user.username || w === String(me.fid)));
 }
 
-function personCard(p) {
+function personCard(p, i = 0) {
+  const card = { kind: p.kind, slot: slot(i) };
   const [label, hint] = KIND[p.kind] || [p.kind, ""];
   const canAct = state.me.can_write && viewingSelf();
 
@@ -535,7 +574,7 @@ function personCard(p) {
   if (p.following) follow.disabled = true;
   if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
-    if (isPublic()) { track("Follow"); return viewProfile(p); }
+    if (isPublic()) { track("Follow", card); return viewProfile(p); }
     if (!canAct) return needKey();
     follow.disabled = true;
     try {
@@ -554,7 +593,7 @@ function personCard(p) {
 
   hi.addEventListener("click", () => {
     if (isPublic()) {
-      track("Say hi");
+      track("Say hi", card);
       return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
     }
     if (!canAct) return needKey();
@@ -580,6 +619,7 @@ function personCard(p) {
   });
 
   nope.addEventListener("click", () => {
+    track("Not now", card);
     state.dismissed.add(p.fid);
     store.set("dismissed", [...state.dismissed]);
     renderPeople();
@@ -636,7 +676,7 @@ function renderPeople() {
       state.cards.length ? "You've seen everyone for now. Refresh later." : "No one to suggest yet. Follow a few people first."));
     return;
   }
-  box.replaceChildren(...shown.map(personCard));
+  box.replaceChildren(...shown.map((p, i) => personCard(p, i)));
 }
 
 async function loadPeople(refresh = false) {
@@ -652,9 +692,12 @@ async function loadPeople(refresh = false) {
   const q = new URLSearchParams();
   if (state.who) q.set("who", state.who);
   if (refresh) q.set("refresh", "1");
+  const started = performance.now();
   try {
     const d = await api(`/api/people?${q}`);
     if (seq !== state.peopleSeq) return;
+    track("People loaded", { took: secs(performance.now() - started), cards: count(d.cards.length),
+      self: viewingSelf() ? "yes" : "no", refresh: refresh ? "yes" : "no" });
     state.cards = d.cards;
     state.summary = d.summary;
     for (const c of d.cards) for (const l of c.latest || []) noteChannel(l.channel);
@@ -664,6 +707,7 @@ async function loadPeople(refresh = false) {
     renderAddApp();
   } catch (e) {
     if (seq !== state.peopleSeq) return;
+    track("People failed", { reason: failure(e), took: secs(performance.now() - started) });
     box.replaceChildren(h("div", { class: "card empty" }, `Could not load people: ${e.message}`));
   }
 }
@@ -689,6 +733,7 @@ function setTab(name) {
   if (name === "compose" && !canCast()) { soon(); return; }
   if (name === "compose" && isPublic()) { track("New cast"); compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
+  if (name === "casts" && state.tab !== "casts") track("Casts opened");
   if (name !== "compose") state.lastTab = name;
   // All panes share one page scroll: keep each tab's own place, so a tab
   // never opens halfway down because the last one was scrolled.
@@ -775,6 +820,7 @@ async function init() {
     theme = { auto: "light", light: "dark", dark: "auto" }[theme] || "auto";
     store.set("theme", theme);
     applyTheme(theme);
+    track("Theme", { theme });
   });
   for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => {
     if (b.dataset.tab === state.tab) window.scrollTo({ top: 0, behavior: "smooth" });
@@ -816,16 +862,21 @@ async function init() {
     tab.classList.add("soon");
     tab.querySelector(".plus-label").textContent = "New cast · soon";
   }
+  if (isPublic()) {
+    const remembered = !!state.who; // only whether there is one, never the name
+    track("Visit", { start: miniapp && state.me.user ? "miniapp" : state.whoFromUrl ? "link" : remembered ? "returning" : "new" });
+  }
   renderTip();
   $("#lookup-name").value = state.who;
   renderWho();
 
   $("#lookup").addEventListener("submit", (ev) => {
     ev.preventDefault();
-    if (isPublic()) track("Look up");
+    const name = $("#lookup-name").value.trim().replace(/^@/, "");
+    track("Look up", { by: /^\d+$/.test(name) ? "fid" : name ? "username" : "empty" });
     lookUp($("#lookup-name").value);
   });
-  $("#lookup-me").addEventListener("click", () => lookUp(""));
+  $("#lookup-me").addEventListener("click", () => { track("Back to me"); lookUp(""); });
 
   $("#compose-close").addEventListener("click", () => setTab(state.lastTab));
   $("#compose-channel").addEventListener("input", renderChannelPicks);
@@ -851,9 +902,14 @@ async function init() {
   });
 
   setHours(state.hours);
-  $("#hours").addEventListener("change", (ev) => { setHours(Number(ev.target.value)); loadFeed(true); });
-  $("#refresh").addEventListener("click", () => loadFeed(true, true));
+  $("#hours").addEventListener("change", (ev) => {
+    setHours(Number(ev.target.value));
+    track("Window", { window: `${state.hours}h` });
+    loadFeed(true);
+  });
+  $("#refresh").addEventListener("click", () => { track("Refresh", { pane: "casts" }); loadFeed(true, true); });
   $("#more").addEventListener("click", () => {
+    track("Load more", { mode: $("#more").dataset.mode === "wider" ? "wider window" : "next page" });
     if ($("#more").dataset.mode === "wider") {
       const wider = WINDOWS.find((w) => w > state.hours);
       setHours(wider);
@@ -862,7 +918,7 @@ async function init() {
   });
   $("#apps-all").addEventListener("click", () => setAllApps(true));
   $("#apps-none").addEventListener("click", () => setAllApps(false));
-  $("#people-refresh").addEventListener("click", () => loadPeople(true));
+  $("#people-refresh").addEventListener("click", () => { track("Refresh", { pane: "people" }); loadPeople(true); });
 
   // Inside a host, links leave through it (frames can't always open tabs).
   document.addEventListener("click", (ev) => {

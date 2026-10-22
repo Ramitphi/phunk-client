@@ -172,11 +172,51 @@ local `phunk ui` never loads it, and it ignores localhost anyway.
 
 - No cookies. Query strings are dropped before sending, so the usernames
   people look up (`?as=dwr`) are never sent.
-- The page also counts actions, by name only, each with `where=web` or
-  `where=miniapp` (inside a Farcaster client): `Look up`, `Follow` and `Open` now;
-  `Say hi`, `Reply`, `Like`, `Recast` and `New cast` once casting is back.
+- The page sends the product events below (`track()` in
+  `src/phunk/static/app.js`). Every event has `where`: `web`, or `miniapp`
+  inside a Farcaster client. Props are labels and coarse buckets only:
+  never a username, fid or cast text.
 - The page's CSP allows `assets.onedollarstats.com` (the script) and
   `collector.onedollarstats.com` (where it sends events), in `vercel.json`.
+
+### Product events
+
+Buckets: `took` is `<5s`, `5-15s`, `15-60s` or `60s+`; `cards` and `casts`
+are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
+`1-3`, `4-10` or `11+`.
+
+| Event | When | Props |
+|---|---|---|
+| `Visit` | The page is up | `start`: `miniapp` (signed in to a client), `link` (a `?as=` link), `returning` (a remembered username) or `new` |
+| `Look up` | The username box is sent | `by`: `username`, `fid` or `empty` |
+| `People loaded` | The people feed arrives | `took`, `cards`, `self` (the viewer's own people: `yes`/`no`), `refresh` |
+| `People failed` | It doesn't | `reason`: `not found`, `bad lookup`, `server`, `network` or a status; `took` |
+| `Follow` | Follow on a card (opens the profile) | `kind` (`reconnect`, `circle`, `bridge`), `slot` |
+| `Say hi` | Say hi on a card | `kind`, `slot` |
+| `Not now` | A card is dismissed | `kind`, `slot` |
+| `Casts opened` | The Casts tab | |
+| `Casts loaded` | The feed arrives | `took`, `casts`, `window` (`6h` to `168h`) |
+| `Casts failed` | It doesn't | `reason`, `took` |
+| `Window` | A time window is picked | `window` |
+| `Load more` | More casts | `mode`: `next page` or `wider window` |
+| `App filter` | An app is shown or hidden | `change`: `show`, `hide`, `show all`, `hide all` |
+| `Open` | Open on a cast (the hosted site can't like, so it opens the cast in Farcaster) | |
+| `Reply` | Reply on a cast (opens it in Farcaster) | |
+| `New cast` | The composer opens | |
+| `Casting soon` | New cast while casting is off: demand for it | |
+| `Add phunk` | Add phunk, in the mini app (adds it to the viewer's apps) | |
+| `Tip tapped` | A tip amount (the Tip tab or card) | `amount` in dollars: a button (`1`, `37`, `69`, `420`) or the slider (`10` to `1000`) |
+| `Tip sent` | The wallet confirms | `amount` |
+| `Tip failed` | Cancelled or failed | `amount`, `reason`: `cancelled`, `send failed`, `no wallet` |
+| `Tip profile` | The tip button outside a client (opens the profile) | |
+| `Refresh` | A refresh button | `pane`: `people` or `casts` |
+| `Back to me` | Back to the viewer's own people | |
+| `Theme` | The theme toggle | `theme` |
+
+Useful funnels: `Visit` → `Look up` → `People loaded` → `Follow`; and
+`Follow` / `Not now` split by `kind` and `slot`, to see which suggestions
+work. `People failed` and `Casts failed` with `took` show when the node is
+slow or down.
 
 ## How it holds up
 
