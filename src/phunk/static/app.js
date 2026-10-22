@@ -171,14 +171,16 @@ async function sendTip(units) {
 async function renderTip() {
   const tip = state.me && state.me.tip;
   const slot = $("#tip");
-  const nudge = $("#tip-nudge");
+  const nudges = document.querySelectorAll(".tip-nudge-slot");
   $('.tabs button[data-tab="coffee"]').hidden = !tip;
-  if (!tip) { slot.replaceChildren(); nudge.replaceChildren(); return; }
+  if (!tip) { slot.replaceChildren(); for (const n of nudges) n.replaceChildren(); return; }
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
-  const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
-  go.addEventListener("click", showTip);
-  nudge.replaceChildren(h("div", { class: "card tip-nudge" },
-    h("span", {}, "If you like it, buy me a coffee"), go));
+  for (const n of nudges) {
+    const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
+    go.addEventListener("click", showTip);
+    n.replaceChildren(h("div", { class: "card tip-nudge" },
+      h("span", {}, "If you like it, buy me a coffee"), go));
+  }
   const wallet = await canSendToken();
   const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
     h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`

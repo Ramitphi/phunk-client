@@ -87,7 +87,7 @@ the page:
   **Like** opens the cast (Say hi, Reply and New cast come back with
   casting),
 - with `PHUNK_TIP_FID` set, shows **Buy me a coffee** in its own Coffee tab
-  (the people list ends with a small card whose button leads there): $1, $37, $69, $420,
+  (the people list and the You screen end with a small card whose button leads there): $1, $37, $69, $420,
   or $10 to $1000 on a slider (round steps, finer at the low end). It calls `sdk.actions.sendToken`, which opens the
   viewer's own wallet with USDC on Base to that fid filled in; they confirm
   or change it there. Outside a client the button opens that profile,

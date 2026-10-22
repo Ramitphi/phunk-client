@@ -246,7 +246,7 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 @media (min-width: 801px) {
   #you-pane { display: block; }
-  #you-pane .hero, #you-pane .account, #you-pane .foot { display: none; }
+  #you-pane .hero, #you-pane .account, #you-pane .foot, #you-pane .tip-nudge-slot { display: none; }
 }
 .layout { max-width: 720px; margin: 0 auto; padding: 16px 16px 32px; }
 
@@ -473,5 +473,5 @@ img.avatar { background: var(--chip); }
   border: 2px solid var(--edge); box-shadow: 2px 2px 0 var(--edge);
 }
 .tip-range input[type="range"]:focus-visible { outline: 2px solid var(--cta); outline-offset: 4px; border-radius: 8px; }
-.tip-nudge { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; margin-top: 16px; font-weight: 600; }
+.tip-nudge { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; margin: 16px 0 14px; font-weight: 600; }
 .tip-nudge .cta { flex: none; }
