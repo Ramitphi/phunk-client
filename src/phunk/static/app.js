@@ -106,7 +106,10 @@ function avatar(user) {
 
 // "dev" -> "/dev"; a channel URL stays as it is.
 function chan(name) {
-  return name.includes("://") ? name : `/${name}`;
+  if (!name.includes("://")) return `/${name}`;
+  // Token channels ("chain://eip155:1/erc721:0x1538…") are long; keep the start and end of the address.
+  const m = name.match(/^chain:\/\/.*?(0x[0-9a-fA-F]{40})$/);
+  return m ? `${m[1].slice(0, 6)}…${m[1].slice(-4)}` : name;
 }
 
 function noteChannel(name) {

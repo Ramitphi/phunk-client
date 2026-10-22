@@ -365,8 +365,8 @@ img.avatar { background: var(--chip); }
 .kind.reconnect { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-edge); }
 .kind.circle { background: var(--tint); color: var(--tint-text); }
 .kind.bridge { background: var(--blue-bg); color: var(--blue-text); }
-.previews { display: grid; gap: 6px; margin-bottom: 12px; }
-.preview { background: var(--bg); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.previews { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 12px; }
+.preview { min-width: 0; overflow-wrap: anywhere; background: var(--bg); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 10px; }
 .preview .text { margin: 2px 0 0; font-size: 14px; }
 .clamp { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .pactions { display: flex; gap: 8px; flex-wrap: wrap; }
