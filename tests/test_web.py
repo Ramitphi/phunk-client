@@ -185,3 +185,18 @@ def test_static_build_page_and_mini_app(monkeypatch):
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
         assert (out / url.removeprefix("https://miniapp.phunk.social/")).is_file(), url
+
+
+def test_every_product_event_is_documented():
+    """Each name the page sends with track() is in web/README.md's table, and back."""
+    import re
+
+    js = (ROOT / "src/phunk/static/app.js").read_text()
+    sent = set(re.findall(r'track\("([^"]+)"', js)) | set(re.findall(r'track\(kind === "like" \? "(\w+)" : "(\w+)"\)', js)[0])
+    table = (ROOT / "web/README.md").read_text().split("### Product events", 1)[1].split("\n## ", 1)[0]
+    documented = set(re.findall(r"^\| ((?:`[^`]+`(?:, )?)+) \|", table, re.M))
+    documented = {name for row in documented for name in re.findall(r"`([^`]+)`", row)}
+    assert sent == documented, (sent - documented, documented - sent)
+    # Props never carry who: no usernames or fids.
+    calls = [line for line in js.splitlines() if "track(" in line and "function track" not in line]
+    assert calls and not [c for c in calls if re.search(r"\.(username|fid|text|hash|who)\b", c)]
