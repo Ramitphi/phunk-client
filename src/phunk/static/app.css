@@ -441,3 +441,9 @@ img.avatar { background: var(--chip); }
 .tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
 .tip-custom { grid-column: 1 / -1; display: flex; gap: 8px; }
 .tip-custom input { flex: 1; min-width: 0; }
+.tip-line { text-align: center; margin: 28px 0 8px; }
+button.link {
+  display: inline; background: none; border: 0; padding: 0; min-height: 0; border-radius: 0;
+  color: var(--blue-text); font-weight: 600; text-decoration: underline; text-underline-offset: 3px;
+  box-shadow: none; transform: none;
+}
