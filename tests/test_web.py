@@ -184,4 +184,4 @@ def test_static_build_page_and_mini_app(monkeypatch):
     for name, size in sizes.items():
         assert _png_info(out / "img" / name) == (*size, 2), name  # RGB: icons may not have alpha
     for url in [app["iconUrl"], app["splashImageUrl"], app["heroImageUrl"], app["imageUrl"]]:
-        assert (out / url.removeprefix("https://miniapp.phunk.social/")).is_file(), url
+        assert (out / url.removeprefix("https://miniapp.phunk.social/").split("?")[0]).is_file(), url
