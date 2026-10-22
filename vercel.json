@@ -60,6 +60,12 @@
       }
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/digest",
+      "schedule": "0 16 * * 2"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

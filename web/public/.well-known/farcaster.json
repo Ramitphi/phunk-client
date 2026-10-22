@@ -17,11 +17,18 @@
     "primaryCategory": "social",
     "tags": ["people", "follow", "social", "friends", "snapchain"],
     "heroImageUrl": "https://__MINIAPP_DOMAIN__/img/og.png",
+    "screenshotUrls": [
+      "https://__MINIAPP_DOMAIN__/img/screen-people.png",
+      "https://__MINIAPP_DOMAIN__/img/screen-casts.png",
+      "https://__MINIAPP_DOMAIN__/img/screen-coffee.png"
+    ],
     "ogTitle": "phunk",
     "ogDescription": "Find your people on Farcaster. Who you talk to, who moved apps, who to meet next.",
     "ogImageUrl": "https://__MINIAPP_DOMAIN__/img/og.png",
     "imageUrl": "https://__MINIAPP_DOMAIN__/img/embed.png",
     "buttonTitle": "See your people",
-    "canonicalDomain": "__MINIAPP_DOMAIN__"
+    "canonicalDomain": "__MINIAPP_DOMAIN__",
+    "webhookUrl": "https://__MINIAPP_DOMAIN__/api/webhook",
+    "noindex": false
   }
 }

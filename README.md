@@ -190,7 +190,8 @@ build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
 a username, and Follow and Like open Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+client it is a mini app that shows your own people right away, and people
+who add it can get one short note a week about their people. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node

@@ -1,3 +1,5 @@
 # For the phunk.social Vercel function (api/index.py). The library itself
 # installs from pyproject.toml.
 aiohttp>=3.9
+# Checking the signature on the mini app's webhook events (phunk.notify).
+pynacl>=1.5
