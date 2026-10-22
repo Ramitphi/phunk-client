@@ -245,7 +245,7 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 @media (min-width: 801px) {
   #you-pane { display: block; }
-  #you-pane .hero, #you-pane .account, #you-pane .foot { display: none; }
+  #you-pane .hero, #you-pane .account, #you-pane .foot, #you-pane .tip-slot { display: none; }
 }
 .layout { max-width: 720px; margin: 0 auto; padding: 16px 16px 32px; }
 
@@ -431,3 +431,13 @@ img.avatar { background: var(--chip); }
   .person .avatar { width: 40px; height: 40px; font-size: 18px; }
   .banner { margin: 10px 12px 0; }
 }
+
+/* First release: casting is coming soon. */
+.tabs .plus.soon { opacity: 0.55; }
+
+/* Buy me a coffee: 2x2 amounts, the custom amount across both columns. */
+.tip .tip-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.tip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
+.tip-custom { grid-column: 1 / -1; display: flex; gap: 8px; }
+.tip-custom input { flex: 1; min-width: 0; }

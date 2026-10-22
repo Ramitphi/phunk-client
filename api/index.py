@@ -14,6 +14,7 @@ with. Follow, reply and like open Farcaster in the page instead.
 Settings (environment variables, optional):
     PHUNK_NODE   the node to read from (default: the public node)
     PHUNK_RATE   requests per second to that node (default 20)
+    PHUNK_TIP_FID  the account "Buy me a coffee" tips (unset: no button)
 
 Successful reads carry Cache-Control: s-maxage, so Vercel's CDN answers
 repeat lookups without touching the node. See web/README.md to deploy.
@@ -32,7 +33,7 @@ from urllib.parse import parse_qsl, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from phunk.hub import DEFAULT_NODE, Hub  # noqa: E402
-from phunk.ui import PUBLIC_HELP, UI, get_json  # noqa: E402
+from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
 CACHE = {
@@ -60,7 +61,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
                 hub = Hub(os.environ.get("PHUNK_NODE") or DEFAULT_NODE,
                           rate=float(os.environ.get("PHUNK_RATE") or 20))
                 await hub.__aenter__()
-                return UI(hub, public=True)
+                return UI(hub, public=True, tip_fid=tip_fid_from_env())
 
             _ui = asyncio.run_coroutine_threadsafe(make(), loop).result()
             _loop = loop

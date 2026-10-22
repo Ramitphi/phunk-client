@@ -1,9 +1,9 @@
 # phunk.social
 
 The web client from `phunk ui`, hosted and read-only. Type a Farcaster
-username, see that account's people and casts. Follow, Say hi, Like,
-Reply and New cast open Farcaster, because the site holds no keys and
-can't post for anyone. Inside a Farcaster client it runs as a mini app
+username, see that account's people and casts. Follow opens the profile
+in Farcaster, because the site holds no keys and can't act for anyone.
+Casts are read-only; casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
 (see below).
 
 One Vercel project with two [services](https://vercel.com/docs/services)
@@ -45,7 +45,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
    services from `vercel.json`; don't override build settings.
 3. Environment variables (none are secret; never put the signer's key here):
    - Optional: `PHUNK_NODE` (node to read from, default
-     `https://haatz.quilibrium.com`) and `PHUNK_RATE` (requests per second, default 20).
+     `https://haatz.quilibrium.com`), `PHUNK_RATE` (requests per second, default 20)
+     and `PHUNK_TIP_FID` (the fid "Buy me a coffee" tips; unset, there is no button).
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below).
 4. **Deploy**. Open the `*.vercel.app` URL and look someone up.
@@ -80,9 +81,12 @@ the page:
 - loads the mini app SDK (`@farcaster/miniapp-sdk`, pinned, from esm.sh;
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
-- opens profiles, casts and the composer in the client: **Follow** opens
-  the profile, **Say hi** and **Reply** open the composer as a reply,
-  **New cast** opens the composer,
+- opens profiles in the client: **Follow** opens the profile (Say hi,
+  Reply and New cast come back with casting),
+- with `PHUNK_TIP_FID` set, shows **Buy me a coffee**: $1, $37, $69, $420
+  or a custom amount. It calls `sdk.actions.sendToken`, which opens the
+  viewer's own wallet with USDC on Base to that fid filled in; they confirm
+  or change it there. Outside a client the button opens that profile,
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**
@@ -120,9 +124,9 @@ local `phunk ui` never loads it, and it ignores localhost anyway.
 
 - No cookies. Query strings are dropped before sending, so the usernames
   people look up (`?as=dwr`) are never sent.
-- The page also counts actions, by name only: `Look up`, `Follow`,
-  `Say hi`, `Reply`, `Like`, `Recast`, `New cast`, each with
-  `where=web` or `where=miniapp` (inside a Farcaster client).
+- The page also counts actions, by name only, each with `where=web` or
+  `where=miniapp` (inside a Farcaster client): `Look up` and `Follow` now;
+  `Say hi`, `Reply`, `Like`, `Recast` and `New cast` once casting is back.
 - The page's CSP allows `assets.onedollarstats.com` (the script) and
   `collector.onedollarstats.com` (where it sends events), in `vercel.json`.
 

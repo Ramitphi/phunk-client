@@ -39,6 +39,17 @@ dump("cast_channel", await h.makeCastAdd({ text: "gm", embeds: [], embedsDepreca
 dump("cast_remove", await h.makeCastRemove({ targetHash: new Uint8Array(20).fill(0xef) }, opts, signer));
 dump("like", await h.makeReactionAdd({ type: h.ReactionType.LIKE, targetCastId: { fid: 3, hash: new Uint8Array(20).fill(0xab) } }, opts, signer));
 dump("unrecast", await h.makeReactionRemove({ type: h.ReactionType.RECAST, targetCastId: { fid: 3, hash: new Uint8Array(20).fill(0xab) } }, opts, signer));
+// KEY_REMOVE: custody mode (custody EIP-712 over fid, key, nonce, deadline)
+// and self-revocation (the key signs its own removal; inner signature empty).
+const krc = await h.makeKeyRemoveBody({ fid: BigInt(FID), key, nonce: 6, deadline: DEADLINE }, eip);
+if (krc.isErr()) { out.key_remove_custody_error = String(krc.error); } else {
+  out.key_remove_custody_body = { signature: hex(krc.value.signature), signature_type: krc.value.signatureType };
+  dump("key_remove_custody", await h.makeKeyRemove(krc.value, opts, signer));
+}
+const krs = h.makeKeyRemoveBodySelfRevoke({ key, nonce: 3, deadline: DEADLINE });
+if (krs.isErr()) { out.key_remove_self_error = String(krs.error); } else {
+  dump("key_remove_self", await h.makeKeyRemove(krs.value, opts, signer));
+}
 dump("follow", await h.makeLinkAdd({ type: "follow", targetFid: 3 }, opts, signer));
 dump("unfollow", await h.makeLinkRemove({ type: "follow", targetFid: 3 }, opts, signer));
 console.log(JSON.stringify(out, null, 1));
