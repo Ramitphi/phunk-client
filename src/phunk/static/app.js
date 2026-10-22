@@ -199,10 +199,14 @@ async function renderTip() {
   }));
   const slider = h("input", { type: "range", min: "0", max: String(SLIDER.length - 1), step: "1",
     value: String(SLIDER_START), "aria-label": "Amount in USD" });
-  const send = h("button", { type: "submit", class: "cta" });
+  // The button keeps the width of its longest label, so the track never
+  // shifts under the finger while dragging.
+  const label = h("span", {});
+  const send = h("button", { type: "submit", class: "cta" }, label,
+    h("span", { class: "ghost-label", "aria-hidden": "true" }, `Send $${SLIDER[SLIDER.length - 1]}`));
   const show = () => {
     const d = SLIDER[Number(slider.value)];
-    send.textContent = `Send $${d}`;
+    label.textContent = `Send $${d}`;
     slider.setAttribute("aria-valuetext", `$${d}`);
     slider.style.setProperty("--fill", `${(100 * Number(slider.value)) / (SLIDER.length - 1)}%`);
   };

@@ -449,7 +449,9 @@ img.avatar { background: var(--chip); }
 .tip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
 .tip-custom { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; margin-top: 6px; }
-.tip-custom .cta { flex: none; min-width: 112px; font-variant-numeric: tabular-nums; }
+.tip-custom .cta { flex: none; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.tip-custom .cta > span { grid-area: 1 / 1; white-space: nowrap; }
+.tip-custom .cta > .ghost-label { visibility: hidden; }
 .tip-range { flex: 1; min-width: 0; }
 .tip-ends { display: flex; justify-content: space-between; margin-top: 2px; }
 .tip-range input[type="range"] {
