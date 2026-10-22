@@ -168,7 +168,7 @@ function viewProfile(user) {
   openFarcaster(profilePath(user));
 }
 
-// ------------------------------------------------------- buy me a coffee
+// ------------------------------------------------------------ money gun
 // Inside a Farcaster client: open the viewer's own wallet with the send
 // filled in (USDC on Base to the maker's account). Elsewhere there is no
 // wallet to open, so the button opens the maker's profile instead.
@@ -191,7 +191,7 @@ async function sendTip(units, amount) {
   track("Tip tapped", { amount });
   try {
     const r = await miniapp.actions.sendToken({ token: USDC_BASE, amount: units, recipientFid: Number(tip.fid) });
-    if (r && r.success) { track("Tip sent", { amount }); toast("Thank you! ☕"); }
+    if (r && r.success) { track("Tip sent", { amount }); toast("Thank you! 💸"); }
     else if (r && r.reason === "send_failed") {
       track("Tip failed", { amount, reason: "send failed" });
       toast("The send didn't go through. Nothing was sent.");
@@ -206,18 +206,20 @@ async function renderTip() {
   const tip = state.me && state.me.tip;
   const slot = $("#tip");
   const nudges = document.querySelectorAll(".tip-nudge-slot");
-  $('.tabs button[data-tab="coffee"]').hidden = !tip;
+  $('.tabs button[data-tab="tip"]').hidden = !tip;
   if (!tip) { slot.replaceChildren(); for (const n of nudges) n.replaceChildren(); return; }
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
   for (const n of nudges) {
-    const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
+    const go = h("button", { type: "button", class: "cta small" }, "💸 Tip");
     go.addEventListener("click", showTip);
     n.replaceChildren(h("div", { class: "card tip-nudge" },
       h("span", {}, "If you like it, use your money gun 🔫"), go));
   }
   const wallet = await canSendToken();
-  const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-    h("span", { class: "muted small" }, wallet ? "If you like it, use your money gun 🔫"
+  const head = h("div", { class: "tip-head" },
+    h("img", { src: "/static/money-gun.svg", alt: "", class: "tip-art", width: "240", height: "150" }),
+    h("b", {}, "If you like it, use your money gun 🔫"),
+    h("span", { class: "muted small" }, wallet ? `Tips go to ${who} in USDC on Base.`
       : `Like phunk? Tip ${who} on Farcaster.`));
   if (!wallet) {
     // No wallet to open here: the maker's profile instead.
@@ -259,9 +261,9 @@ async function renderTip() {
   slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
 }
 
-// The nudge's button: open the Coffee tab.
+// The nudge's button: open the Tip tab.
 function showTip() {
-  setTab("coffee");
+  setTab("tip");
   window.scrollTo({ top: 0 });
 }
 

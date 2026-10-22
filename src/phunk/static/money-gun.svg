@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 240 150" role="img" aria-label="A money gun firing bills">
+  <title>Money gun</title>
+  <defs>
+    <!-- The gun's outline, drawn twice: once as the offset shadow, once in purple. -->
+    <g id="gun">
+      <path d="M34 58 h132 a8 8 0 0 1 8 8 v4 h12 a4 4 0 0 1 4 4 v12 a4 4 0 0 1 -4 4 h-12 v4 a8 8 0 0 1 -8 8 H92 c-4 0-6 2-6.5 5 L80 138 a6 6 0 0 1 -6 5 H40 a5 5 0 0 1 -4.9-6 L44 102 h-10 a8 8 0 0 1 -8 -8 V66 a8 8 0 0 1 8 -8z"/>
+    </g>
+    <g id="bill">
+      <rect x="-17" y="-10" width="34" height="20" rx="3"/>
+    </g>
+  </defs>
+
+  <!-- Bills flying out of the muzzle. -->
+  <g stroke="#141414" stroke-width="3" stroke-linejoin="round">
+    <g transform="translate(214 40) rotate(-28)">
+      <use xlink:href="#bill" href="#bill" fill="#141414" transform="translate(3 3)"/>
+      <use xlink:href="#bill" href="#bill" fill="#9be89d"/>
+      <circle r="5.5" fill="none" stroke-width="2.5"/>
+    </g>
+    <g transform="translate(222 82) rotate(6)">
+      <use xlink:href="#bill" href="#bill" fill="#141414" transform="translate(3 3)"/>
+      <use xlink:href="#bill" href="#bill" fill="#9be89d"/>
+      <circle r="5.5" fill="none" stroke-width="2.5"/>
+    </g>
+    <g transform="translate(208 122) rotate(32)">
+      <use xlink:href="#bill" href="#bill" fill="#141414" transform="translate(3 3)"/>
+      <use xlink:href="#bill" href="#bill" fill="#9be89d"/>
+      <circle r="5.5" fill="none" stroke-width="2.5"/>
+    </g>
+  </g>
+
+  <!-- Speed lines. -->
+  <g stroke="#141414" stroke-width="3" stroke-linecap="round">
+    <path d="M194 62 l8 -6"/>
+    <path d="M196 80 h9"/>
+    <path d="M194 98 l8 6"/>
+  </g>
+
+  <!-- The stack of cash loaded on top. -->
+  <g stroke="#141414" stroke-width="3" stroke-linejoin="round">
+    <rect x="62" y="20" width="84" height="14" rx="3" fill="#141414" transform="translate(3 3)"/>
+    <rect x="62" y="20" width="84" height="14" rx="3" fill="#9be89d"/>
+    <rect x="58" y="32" width="88" height="14" rx="3" fill="#9be89d"/>
+    <rect x="58" y="44" width="88" height="14" rx="3" fill="#9be89d"/>
+    <rect x="94" y="20" width="18" height="38" fill="#ffd84d"/>
+  </g>
+
+  <!-- The gun. -->
+  <use xlink:href="#gun" href="#gun" fill="#141414" transform="translate(4 4)"/>
+  <use xlink:href="#gun" href="#gun" fill="#7959ff" stroke="#141414" stroke-width="3.5" stroke-linejoin="round"/>
+  <g fill="none" stroke="#141414" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Trigger guard and trigger. -->
+    <path d="M92 110 v8 a14 14 0 0 0 14 14 h12 a6 6 0 0 0 6 -6 v-16"/>
+    <path d="M108 110 c0 6 -2 10 -6 13"/>
+    <!-- A shine along the top. -->
+    <path d="M38 68 h40" stroke="#ccc0ff" stroke-width="4"/>
+  </g>
+  <!-- The "$" on the side. -->
+  <text x="150" y="91" font-family="Arial Rounded MT Bold, Arial, sans-serif" font-weight="700" font-size="28" text-anchor="middle" fill="#ffffff" stroke="#141414" stroke-width="1.5" paint-order="stroke">$</text>
+</svg>

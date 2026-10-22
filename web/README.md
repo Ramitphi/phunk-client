@@ -47,7 +47,7 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
 3. Environment variables (none are secret; never put the signer's key here):
    - Optional: `PHUNK_NODE` (node to read from, default
      `https://haatz.quilibrium.com`), `PHUNK_RATE` (requests per second, default 20)
-     and `PHUNK_TIP_FID` (the fid "Buy me a coffee" tips; unset, there is no button).
+     and `PHUNK_TIP_FID` (the fid the money gun in the Tip tab tips; unset, there is no button).
      `PHUNK_BASE_RPC` (Base JSON-RPC for the "Voted NS" stamp, default
      `https://mainnet.base.org`; `off` hides it).
    - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
@@ -91,7 +91,7 @@ the page:
 - opens profiles and casts in the client: **Follow** opens the profile,
   **Open** opens the cast (Say hi, Reply and New cast come back with
   casting),
-- with `PHUNK_TIP_FID` set, shows **Buy me a coffee** in its own Coffee tab
+- with `PHUNK_TIP_FID` set, shows a **money gun** in its own Tip tab
   (the people list and the You screen end with a small card whose button leads there): $1, $37, $69, $420,
   or $10 to $1000 on a slider (round steps, finer at the low end). It calls `sdk.actions.sendToken`, which opens the
   viewer's own wallet with USDC on Base to that fid filled in; they confirm
@@ -205,7 +205,7 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `New cast` | The composer opens | |
 | `Casting soon` | New cast while casting is off: demand for it | |
 | `Add phunk` | Add phunk, in the mini app (adds it to the viewer's apps) | |
-| `Tip tapped` | A Buy me a coffee amount | `amount` in dollars: a button (`1`, `37`, `69`, `420`) or the slider (`10` to `1000`) |
+| `Tip tapped` | A tip amount (the Tip tab or card) | `amount` in dollars: a button (`1`, `37`, `69`, `420`) or the slider (`10` to `1000`) |
 | `Tip sent` | The wallet confirms | `amount` |
 | `Tip failed` | Cancelled or failed | `amount`, `reason`: `cancelled`, `send failed`, `no wallet` |
 | `Tip profile` | The tip button outside a client (opens the profile) | |
