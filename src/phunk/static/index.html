@@ -34,7 +34,7 @@
         <button type="button" id="lookup-me" class="ghost" hidden>Back to me</button>
       </div>
     </form>
-    <div class="tip-slot"></div>
+    <div class="tip-nudge-slot"></div>
     <p class="foot muted small">MIT licensed · <a href="https://github.com/Ramitphi/phunk-client" target="_blank" rel="noopener noreferrer">phunk-client on GitHub</a></p>
   </section>
 
@@ -44,6 +44,7 @@
     <button type="button" role="tab" data-tab="casts" aria-selected="false">Casts</button>
     <button type="button" role="tab" data-tab="compose" aria-selected="false" aria-label="New cast" class="plus"><span class="plus-label">New cast</span></button>
     <button type="button" role="tab" data-tab="you" aria-selected="false" class="you-tab">You</button>
+    <button type="button" role="tab" data-tab="coffee" aria-selected="false" class="coffee-tab" hidden>Coffee</button>
   </nav>
 
   <section id="people-pane" class="pane" data-pane="people">
@@ -54,7 +55,12 @@
       <span id="people-status"></span>
       <button id="people-refresh" type="button" class="ghost small">Refresh</button>
     </div>
-    <div class="tip-slot"></div>
+    <div class="tip-nudge-slot"></div>
+  </section>
+
+  <!-- Buy me a coffee: the last tab, only when a tip account is set. People ends with a small card that leads here. -->
+  <section id="coffee-pane" class="pane" data-pane="coffee">
+    <div id="tip"></div>
   </section>
 
   <section id="compose-pane" class="pane" data-pane="compose">
