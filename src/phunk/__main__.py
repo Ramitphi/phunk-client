@@ -226,10 +226,12 @@ async def run_feed(hub: Hub, args) -> None:
 
 
 async def run_ui(hub: Hub, args) -> None:
-    from .ui import serve
+    from .ui import serve, tip_fid_from_env
 
+    tip = tip_fid_from_env()
     if args.public:  # what phunk.social serves: no account, no key
-        return await serve(hub, host=args.host, port=args.port, open_browser=args.open, public=True)
+        return await serve(hub, host=args.host, port=args.port, open_browser=args.open, public=True,
+                           tip_fid=tip)
     found = None if args.read_only else find_key()
     fid, key = found if found else (None, None)
     if args.who:
@@ -239,7 +241,8 @@ async def run_ui(hub: Hub, args) -> None:
         fid = browse
     elif fid is None and os.environ.get("PHUNK_FID", "").isdigit():
         fid = int(os.environ["PHUNK_FID"])
-    await serve(hub, host=args.host, port=args.port, fid=fid, key=key, open_browser=args.open)
+    await serve(hub, host=args.host, port=args.port, fid=fid, key=key, open_browser=args.open,
+                casting=args.casting, tip_fid=tip)
 
 
 async def run(args) -> None:
@@ -335,14 +338,17 @@ def main(argv=None) -> None:
 
     u = sub.add_parser("ui", help="local web client: people to connect with, then casts",
                        description="Serve a small web client on this machine. With an app key "
-                                   "(`phunk key add`) it can post, react and follow; without one "
-                                   "it is read-only. It never asks for a seed phrase.")
+                                   "(`phunk key add`) it can follow people; casts are read-only "
+                                   "for now (casting is coming soon). Without a key it is "
+                                   "read-only. It never asks for a seed phrase.")
     u.add_argument("--as", dest="who", metavar="WHO",
                    help="open on this username or fid's people (read-only unless it is your key's fid)")
     u.add_argument("--host", default="127.0.0.1", help="address to bind (default 127.0.0.1, this machine only)")
     u.add_argument("--port", type=int, default=8008, help="port (default 8008)")
     u.add_argument("--open", action="store_true", help="open it in your browser")
     u.add_argument("--read-only", action="store_true", help="ignore any saved app key")
+    u.add_argument("--casting", action="store_true",
+                   help="preview casting, replies and likes in the page (coming soon; off by default)")
     u.add_argument("--public", action="store_true",
                    help="preview the hosted site: read-only, follows and replies open Farcaster")
     try:
