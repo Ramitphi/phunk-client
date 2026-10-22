@@ -174,7 +174,6 @@ class UI:
                  casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None):
         self.hub = hub
         self.vote_rpc = vote_rpc  # Base JSON-RPC for the "voted NS" badge; None: no badge
-        self._voted: dict[int, bool] = {}
         self.tip_fid = tip_fid
         self.fid = fid
         self.public = public
@@ -206,28 +205,23 @@ class UI:
 
     async def voters(self, fids) -> set[int]:
         """Which of `fids` hold the "I voted for Network School Farcaster" NFT
-        in any verified wallet. Cached per fid. If Base can't be reached the
-        badge just doesn't show (and nothing is cached)."""
+        in any verified wallet: a fresh balanceOf check each time, nothing
+        cached. If Base can't be reached the stamp just doesn't show."""
         fids = list(dict.fromkeys(fids))
-        if not self.vote_rpc:
+        if not self.vote_rpc or not fids:
             return set()
-        todo = [f for f in fids if f not in self._voted]
-        if todo:
-            async def addresses(fid):
-                try:
-                    return await self.hub.eth_addresses(fid)
-                except NodeError:
-                    return []
-            found = await asyncio.gather(*(addresses(f) for f in todo))
+
+        async def addresses(fid):
             try:
-                held = await holders(self.hub.session, [a for a_s in found for a in a_s], rpc=self.vote_rpc)
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                held = None
-            if held is not None:
-                for f, a_s in zip(todo, found):
-                    self._voted[f] = any(a in held for a in a_s)
-                _trim(self._voted, MAX_USERS)
-        return {f for f in fids if self._voted.get(f)}
+                return await self.hub.eth_addresses(fid)
+            except NodeError:
+                return []
+        found = await asyncio.gather(*(addresses(f) for f in fids))
+        try:
+            held = await holders(self.hub.session, [a for a_s in found for a in a_s], rpc=self.vote_rpc)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return set()
+        return {f for f, a_s in zip(fids, found) if any(a in held for a in a_s)}
 
     async def names(self, fids) -> dict[int, str | None]:
         fids = list(dict.fromkeys(fids))
@@ -317,15 +311,16 @@ class UI:
                     return dict(self.user_json(u), kind=c.kind, why=c.why, talked=c.talked,
                                 following=c.following, followed_by=len(c.followed_by),
                                 app_now=p.app_now if p else None, app_before=p.app_before if p else None,
-                                latest=latest, ns_vote=c.fid in voted)
-                voted = await self.voters(c.fid for c in feed["cards"])
+                                latest=latest)
                 cards = await asyncio.gather(*(card_json(c) for c in feed["cards"]))
                 return {"summary": feed["summary"], "cards": list(cards)}
             hit = (time.monotonic(), asyncio.ensure_future(load()))
             self._people[fid] = hit
             _trim(self._people, MAX_WINDOWS)
         out = await hit[1]
-        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here) for c in out["cards"]]
+        voted = await self.voters(c["fid"] for c in out["cards"])  # fresh on every load
+        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here, ns_vote=c["fid"] in voted)
+                 for c in out["cards"]]
         return {"summary": out["summary"], "cards": cards}
 
     async def who(self, value: str | None) -> int:

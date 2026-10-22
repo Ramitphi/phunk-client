@@ -97,11 +97,13 @@ async def node(request):
 # erin (50) holds the "I voted for Network School Farcaster" NFT in her second wallet.
 WALLETS = {50: ["0x" + "11" * 20, "0x" + "5e" * 20], 61: ["0x" + "22" * 20]}
 VOTED = {"0x" + "5e" * 20}
+RPC_CALLS = []
 
 
 async def base_rpc(request):
     from test_hub import multicall_reply
     call = await request.json()
+    RPC_CALLS.append(call)
     result = multicall_reply(call["params"][0]["data"], lambda a: 1 if a in VOTED else 0)
     return web.json_response({"jsonrpc": "2.0", "id": call["id"], "result": result})
 
@@ -448,15 +450,19 @@ def test_people_endpoint_cards_lookup_and_follow(key):
 def test_people_cards_stamp_who_voted_for_network_school():
     async def test(client, base, calls, submitted):
         async with client.get(f"{base}/api/people") as r:
-            return await r.json(), calls
+            first = await r.json()
+        async with client.get(f"{base}/api/people") as r:  # the feed is cached, the stamp check isn't
+            return await r.json(), calls, first
 
-    out, calls = run(test, votes=True)
+    RPC_CALLS.clear()
+    out, calls, first = run(test, votes=True)
+    assert len(RPC_CALLS) == 2 and first["cards"] == out["cards"]  # one fresh balanceOf multicall per load
     cards = {c["fid"]: c for c in out["cards"]}
     assert cards[50]["ns_vote"] is True  # any verified wallet counts, not just the primary one
     assert not any(c["ns_vote"] for f, c in cards.items() if f != 50)
     assert any(p == "/v1/verificationsByFid" for p, _ in calls)
 
-    out, calls = run(test)  # no Base RPC configured: no badge, no wallet lookups
+    out, calls, _ = run(test)  # no Base RPC configured: no badge, no wallet lookups
     assert not any(c["ns_vote"] for c in out["cards"])
     assert not any(p == "/v1/verificationsByFid" for p, _ in calls)
 
