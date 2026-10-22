@@ -623,11 +623,17 @@ function setTab(name) {
   if (name === "compose" && isPublic()) { track("New cast"); compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
+  // All panes share one page scroll: keep each tab's own place, so a tab
+  // never opens halfway down because the last one was scrolled.
+  const scroll = state.scroll || (state.scroll = {});
+  const switching = name !== state.tab;
+  if (switching && state.tab) scroll[state.tab] = window.scrollY;
   state.tab = name;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
   if (name === "casts" && !state.feedLoaded) { state.feedLoaded = true; loadFeed(true); }
-  if (name === "compose") $("#compose-text").focus();
+  if (switching) window.scrollTo(0, scroll[name] || 0);
+  if (name === "compose") $("#compose-text").focus({ preventScroll: true });
 }
 
 // Channels seen in casts and people's previews, as one-tap picks in Compose.
@@ -703,7 +709,10 @@ async function init() {
     store.set("theme", theme);
     applyTheme(theme);
   });
-  for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => setTab(b.dataset.tab));
+  for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => {
+    if (b.dataset.tab === state.tab) window.scrollTo({ top: 0, behavior: "smooth" });
+    else setTab(b.dataset.tab);
+  });
 
   try {
     state.me = await api("/api/me");
