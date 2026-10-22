@@ -39,11 +39,11 @@ CHANNEL_PREFIX = "https://warpcast.com/~/channel/"
 # Older channels use the URL of the NFT they started with. A few well-known ones, for display.
 KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e08d8b0": "/dev"}
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-READ_ONLY_HELP = ("Read-only: no app key. To follow people from here, run `phunk key add` in a terminal "
+READ_ONLY_HELP = ("Read-only: no app key. To follow and like from here, run `phunk key add` in a terminal "
                   "(use a test account), then restart `phunk ui`.")
-PUBLIC_HELP = "Read-only. Follow opens in Farcaster."
-# First release: the web client follows people; casts are read-only.
-# Casting, replies, likes and recasts come next (`phunk ui --casting` to try
+PUBLIC_HELP = "Read-only. Follow and Like open in Farcaster."
+# First release: the web client follows people and likes casts; it doesn't
+# cast yet. Casting, replies and recasts come next (`phunk ui --casting` to try
 # them). The CLI already does all of it: `phunk post`, `phunk like`.
 CASTING = False
 
@@ -466,9 +466,10 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     @r.post("/api/react")
     async def react(request):
-        need_casting()
-        w = need_writer()
         d = await body(request)
+        if d.get("action") in ("recast", "unrecast"):
+            need_casting()  # a recast puts the cast in your followers' feeds: comes with casting
+        w = need_writer()
 
         async def go():
             action = d.get("action")

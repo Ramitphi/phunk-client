@@ -2,8 +2,8 @@
 
 The web client from `phunk ui`, hosted and read-only. Type a Farcaster
 username, see that account's people and casts. Follow opens the profile
-in Farcaster, because the site holds no keys and can't act for anyone.
-Casts are read-only; casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
+and Like opens the cast in Farcaster, because the site holds no keys and
+can't act for anyone. Casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
 (see below).
 
 One Vercel project with two [services](https://vercel.com/docs/services)
@@ -81,8 +81,9 @@ the page:
 - loads the mini app SDK (`@farcaster/miniapp-sdk`, pinned, from esm.sh;
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
-- opens profiles in the client: **Follow** opens the profile (Say hi,
-  Reply and New cast come back with casting),
+- opens profiles and casts in the client: **Follow** opens the profile,
+  **Like** opens the cast (Say hi, Reply and New cast come back with
+  casting),
 - with `PHUNK_TIP_FID` set, shows **Buy me a coffee**: $1, $37, $69, $420
   or a custom amount. It calls `sdk.actions.sendToken`, which opens the
   viewer's own wallet with USDC on Base to that fid filled in; they confirm

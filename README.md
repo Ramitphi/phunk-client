@@ -163,14 +163,14 @@ Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card: inside a
 Farcaster client it opens the viewer's wallet with USDC on Base to that
 account filled in.
 
-In this first release the page follows people and casts are read-only.
-Casting, replies and likes in the page are coming soon (`phunk ui
---casting` previews them). The command line does all of it today:
-`phunk post`, `phunk like`.
+In this first release the page follows people and likes casts; it doesn't
+cast yet. Casting, replies and recasts in the page are coming soon (`phunk
+ui --casting` previews them). The command line does all of it today:
+`phunk post`, `phunk recast`.
 
 ```sh
 phunk ui --as dwr      # read-only: look at anyone's people
-phunk ui               # with the key from `phunk key add`: follow people
+phunk ui               # with the key from `phunk key add`: follow and like
 ```
 
 Without a key it is read-only and never asks for a seed phrase. It binds
@@ -178,7 +178,7 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow opens the profile in Farcaster. Inside a Farcaster
+a username, and Follow and Like open Farcaster. Inside a Farcaster
 client it is a mini app that shows your own people right away. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
