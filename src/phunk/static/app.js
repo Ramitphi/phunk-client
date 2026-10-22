@@ -182,7 +182,7 @@ async function renderTip() {
     const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
     go.addEventListener("click", showTip);
     n.replaceChildren(h("div", { class: "card tip-nudge" },
-      h("span", {}, "If you like it, buy me a coffee"), go));
+      h("span", {}, "If you like it, use your money gun 🔫"), go));
   }
   const wallet = await canSendToken();
   const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
