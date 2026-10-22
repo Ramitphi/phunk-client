@@ -10,6 +10,8 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET /api/people?who=dwr
     GET /api/feed?who=dwr&hours=24
     GET /api/suggestions?who=dwr
+    POST /api/webhook         the mini app's signed add / remove events
+    GET /api/cron/digest      the weekly note, from Vercel Cron
 
 Settings (environment variables, optional):
     PHUNK_NODE         the node to read from (default: the public node)
@@ -17,6 +19,13 @@ Settings (environment variables, optional):
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
     PHUNK_TIP_FID      the account "Buy me a coffee" tips (unset: no button)
+
+Mini app notifications (all optional; without a store the webhook still
+answers, it just keeps nobody):
+    KV_REST_API_URL    Upstash Redis, from Vercel's Redis integration. It
+    KV_REST_API_TOKEN  holds each account's notification token.
+    MINIAPP_DOMAIN     where notifications open (default miniapp.phunk.social)
+    CRON_SECRET        Vercel sets this; the weekly digest checks for it
 
 On your own node, raise PHUNK_RATE and PHUNK_CONCURRENCY (for example 150
 and 48): a feed is one request per account followed, so this is what makes
@@ -38,11 +47,13 @@ from urllib.parse import parse_qsl, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from phunk import notify  # noqa: E402
 from phunk.hub import DEFAULT_NODE, Hub  # noqa: E402
 from phunk.onchain import base_rpc_from_env  # noqa: E402
 from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
+MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}/"
 CACHE = {
     "/api/me": "public, max-age=300, s-maxage=3600",
     "/api/people": "public, max-age=60, s-maxage=600, stale-while-revalidate=3600",
@@ -55,10 +66,11 @@ CACHE = {
 _lock = threading.Lock()
 _loop: asyncio.AbstractEventLoop | None = None
 _ui: UI | None = None
+_store: notify.Store | None = None
 
 
 def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
-    global _loop, _ui
+    global _loop, _ui, _store
     with _lock:
         if _loop is None:
             loop = asyncio.new_event_loop()
@@ -73,6 +85,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env())
 
             _ui = asyncio.run_coroutine_threadsafe(make(), loop).result()
+            _store = notify.store_from_env(_ui.hub.session, os.environ)
             _loop = loop
     return _loop, _ui
 
@@ -113,6 +126,57 @@ async def respond_async(target: str) -> tuple[int, dict, str]:
     return status, body, _cache(path, status, query)
 
 
+async def _webhook(body: bytes) -> tuple[int, dict]:
+    """POST /api/webhook: one signed event from a Farcaster client."""
+    loop, ui = await asyncio.to_thread(_start)
+
+    async def run():
+        if _store is None:
+            return 503, {"error": "notifications are not set up on this deployment"}
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        try:
+            event = await notify.handle_event(ui.hub, _store, payload)
+        except notify.BadEvent as e:
+            return 400, {"error": str(e)}
+        await notify.welcome(ui.hub.session, _store, event, target_url=MINIAPP)
+        return 200, {"ok": True, "event": event.event}
+
+    future = asyncio.run_coroutine_threadsafe(run(), loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+
+
+async def _digest(headers: dict) -> tuple[int, dict]:
+    """GET /api/cron/digest: the weekly note. Only Vercel Cron may call it."""
+    secret = os.environ.get("CRON_SECRET")
+    if secret and headers.get("authorization") != f"Bearer {secret}":
+        return 401, {"error": "not allowed"}
+    loop, ui = await asyncio.to_thread(_start)
+
+    async def run():
+        if _store is None:
+            return 503, {"error": "notifications are not set up on this deployment"}
+        async def people(fid: int) -> dict:
+            return await ui.people(fid)
+        out = await notify.send_digests(ui.hub.session, _store, people, target_url=MINIAPP)
+        return 200, {k: len(v) for k, v in out.items()}
+
+    future = asyncio.run_coroutine_threadsafe(run(), loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+
+
+async def _body(receive) -> bytes:
+    """The whole request body, up to 64 KB."""
+    out = b""
+    while True:
+        message = await receive()
+        out += message.get("body") or b""
+        if len(out) > 65536 or not message.get("more_body"):
+            return out[:65536]
+
+
 async def app(scope, receive, send):
     """ASGI entrypoint: GET reads, anything else 405."""
     if scope["type"] == "lifespan":
@@ -125,7 +189,15 @@ async def app(scope, receive, send):
                 return
     if scope["type"] != "http":
         return
-    if scope["method"] in ("GET", "HEAD"):
+    path = scope["path"].rstrip("/")
+    if scope["method"] == "POST" and path == "/api/webhook":
+        status, body = await _webhook(await _body(receive))
+        cache = "no-store"
+    elif scope["method"] in ("GET", "HEAD") and path == "/api/cron/digest":
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+        status, body = await _digest(headers)
+        cache = "no-store"
+    elif scope["method"] in ("GET", "HEAD"):
         target = scope["path"] + ("?" + scope["query_string"].decode("latin-1") if scope.get("query_string") else "")
         status, body, cache = await respond_async(target)
     else:

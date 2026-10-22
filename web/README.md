@@ -26,6 +26,7 @@ signer is a separate Vercel project at `sign.phunk.social`
 | `web/head.html` | Link previews and the Farcaster mini app embed, put into the page at build |
 | `web/public/` | Images and `/.well-known/farcaster.json`, the mini app manifest |
 | `web/make_images.py` | Redraws the images (dev only: Playwright and Pillow) |
+| `web/make_screenshots.py` | Retakes the three store screenshots from the running app (dev only) |
 
 The page and its JS are the same files `phunk ui` serves. When `/api/me`
 says `"public": true`, the page sends actions to Farcaster and remembers the
@@ -53,7 +54,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
      `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
      Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
-     `FARCASTER_SIGNATURE` (below).
+     `FARCASTER_SIGNATURE` (below), and for notifications a connected
+     Upstash Redis (`KV_REST_API_URL`, `KV_REST_API_TOKEN`).
 4. **Deploy**. Open the `*.vercel.app` URL and look someone up.
 
 Vercel deploys `main` to production and every other branch as a preview.
@@ -94,11 +96,43 @@ the page:
   or $10 to $1000 on a slider (round steps, finer at the low end). It calls `sdk.actions.sendToken`, which opens the
   viewer's own wallet with USDC on Base to that fid filled in; they confirm
   or change it there. Outside a client the button opens that profile,
+- once someone's people are on screen, offers **Add phunk**, which keeps it
+  in their apps and turns on the weekly note (asked at most twice, never on
+  the plain site),
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**
 button that opens `miniapp.phunk.social` (the `fc:miniapp` tag in
 `web/head.html`). `MINIAPP_DOMAIN` in `web/build.sh` sets that domain.
+
+### Notifications (optional)
+
+People who add the mini app can get one short note a week: who they talk to
+but don't follow, or who moved to another app. Nothing is sent to anyone
+who hasn't added it.
+
+How it fits together:
+
+| Piece | What |
+|---|---|
+| `webhookUrl` in the manifest | Where a Farcaster client POSTs its signed add / remove events |
+| `POST /api/webhook` | Checks the signature, checks the key is one of that account's live keys on the node, then keeps or drops their token |
+| Upstash Redis | Holds `{fid: {url, token}}` and when each account last got a note |
+| `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`); Vercel sends `CRON_SECRET`, and nothing else may call it |
+| `src/phunk/notify.py` | All of the above, with `tests/test_notify.py` offline |
+
+To turn it on:
+
+1. In the Vercel project: **Storage → Create → Upstash Redis** (the free
+   tier is plenty; one small hash per account). Connect it to the project,
+   which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+2. Redeploy. The manifest already points at `/api/webhook`.
+3. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
+   means it can't see the Redis.
+
+Without the Redis the site works exactly as before; the webhook answers
+503 and no one is subscribed. To stop notifications, remove the Redis, or
+drop `crons` from `vercel.json` to keep subscriptions but send nothing.
 
 ### Sign the manifest (once)
 
@@ -121,6 +155,13 @@ Farcaster app, and the result is public.
 To change the name, text or images, edit `web/public/.well-known/farcaster.json`
 or `web/make_images.py` (then run it). Image sizes: icon 1024×1024 with no
 transparency, splash 200×200, embed 3:2, share image 1200×630.
+
+The three screenshots in the app listing come from the real app:
+
+```sh
+phunk ui --public               # in another terminal
+python web/make_screenshots.py  # -> web/public/img/screen-*.png
+```
 
 ## Analytics
 

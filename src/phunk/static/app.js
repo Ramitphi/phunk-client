@@ -186,7 +186,7 @@ async function renderTip() {
   }
   const wallet = await canSendToken();
   const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-    h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
+    h("span", { class: "muted small" }, wallet ? "If you like it, use your money gun."
       : `Like phunk? Tip ${who} on Farcaster.`));
   if (!wallet) {
     // No wallet to open here: the maker's profile instead.
@@ -231,6 +231,39 @@ async function renderTip() {
 function showTip() {
   setTab("coffee");
   window.scrollTo({ top: 0 });
+}
+
+// ----------------------------------------------------------- add the app
+// Once someone's people are on screen, offer to keep phunk in their apps,
+// which is also what lets it send the weekly note. Asked at most twice.
+
+const ADD_KEY = "add-asked";
+
+async function renderAddApp() {
+  const box = $("#add-app");
+  box.replaceChildren();
+  if (!miniapp || store.get(ADD_KEY, 0) >= 2) return;
+  try {
+    const context = (await miniapp.context) || {};
+    if (context.client && context.client.added) return;
+  } catch (e) { return; }
+  const add = h("button", { type: "button", class: "cta small" }, "Add phunk");
+  const card = h("div", { class: "card tip-nudge" },
+    h("span", {}, "Keep phunk in your apps, get a weekly note about your people"), add);
+  add.addEventListener("click", async () => {
+    store.set(ADD_KEY, 2);
+    track("Add phunk");
+    try {
+      await miniapp.actions.addMiniApp();
+      box.replaceChildren();
+      toast("Added. You'll get one short note a week.");
+    } catch (e) {
+      box.replaceChildren();
+      toast(/rejected/i.test(e.message || "") ? "No problem." : "Couldn't add it here.");
+    }
+  });
+  store.set(ADD_KEY, store.get(ADD_KEY, 0) + 1);
+  box.replaceChildren(card);
 }
 
 function viewCast(c) {
@@ -620,6 +653,7 @@ async function loadPeople(refresh = false) {
     renderChannelPicks();
     renderSummary();
     renderPeople();
+    renderAddApp();
   } catch (e) {
     if (seq !== state.peopleSeq) return;
     box.replaceChildren(h("div", { class: "card empty" }, `Could not load people: ${e.message}`));
