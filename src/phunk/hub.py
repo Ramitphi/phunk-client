@@ -60,6 +60,25 @@ def _refused(path: str, status: int, sent_token: bool) -> str:
     return f"{path}: HTTP {status}: this node wants a token (Hub(..., token=) or PHUNK_NODE_TOKEN)"
 
 
+MAX_CACHED = 5000  # fids kept by each lookup cache below, so a long-running server stays small
+
+
+async def _once(cache: dict, key, load):
+    """`await load()`, shared: callers asking for the same key at the same
+    time wait on one request. A failure isn't cached, so the next call retries."""
+    fut = cache.get(key)
+    if fut is None:
+        cache[key] = fut = asyncio.ensure_future(load())
+        while len(cache) > MAX_CACHED:
+            del cache[next(iter(cache))]
+    try:
+        return await asyncio.shield(fut)  # one caller giving up doesn't cancel it for the rest
+    except Exception:
+        if cache.get(key) is fut:
+            del cache[key]
+        raise
+
+
 class Hub:
     """Read Farcaster from a node.
 
@@ -99,8 +118,10 @@ class Hub:
         self._own_session = session is None
         self.requests = 0
         self.errors = 0
-        self._key_apps: dict[int, dict[str, int | None]] = {}
-        self._app_names: dict[int, str | None] = {}
+        # Lookups shared by everyone reading at once: one request per fid,
+        # however many casts ask for it at the same moment.
+        self._key_apps: dict[int, asyncio.Future] = {}
+        self._app_names: dict[int, asyncio.Future] = {}
 
     async def __aenter__(self) -> "Hub":
         if self.session is None:
@@ -442,9 +463,9 @@ class Hub:
 
     async def key_apps(self, fid: int) -> dict[str, int | None]:
         """{key: app fid} for every key `fid` has added. Cached per fid."""
-        if fid not in self._key_apps:
-            self._key_apps[fid] = {k.key: k.app_fid for k in await self.keys(fid) if k.event == "add"}
-        return self._key_apps[fid]
+        async def load():
+            return {k.key: k.app_fid for k in await self.keys(fid) if k.event == "add"}
+        return await _once(self._key_apps, fid, load)
 
     async def app_of(self, message: Cast | Reaction | Follow | dict) -> int | None:
         """The fid of the app that signed a message, or None if unknown.
@@ -460,9 +481,9 @@ class Hub:
 
     async def app_name(self, app_fid: int) -> str | None:
         """An app's username (apps are accounts too). Cached."""
-        if app_fid not in self._app_names:
+        async def load():
             try:
-                self._app_names[app_fid] = (await self.user(app_fid)).username
+                return (await self.user(app_fid)).username
             except NotFound:
-                self._app_names[app_fid] = None
-        return self._app_names[app_fid]
+                return None
+        return await _once(self._app_names, app_fid, load)
