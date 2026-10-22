@@ -12,7 +12,7 @@
           "headers": [
             {
               "key": "Content-Security-Policy",
-              "value": "default-src 'self'; script-src 'self' https://esm.sh https://assets.onedollarstats.com; connect-src 'self' https://collector.onedollarstats.com; img-src 'self' https: data:; base-uri 'none'; form-action 'self'"
+              "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh https://assets.onedollarstats.com; connect-src 'self' https://collector.onedollarstats.com https://*.vercel-insights.com; img-src 'self' https: data:; base-uri 'none'; form-action 'self'"
             },
             {
               "key": "X-Content-Type-Options",
