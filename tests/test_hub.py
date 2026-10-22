@@ -191,6 +191,61 @@ def test_which_app_signed():
     assert n_key_calls == 4  # keys() once, then key_apps() once; cached after that
 
 
+def test_app_lookups_shared_by_concurrent_casts():
+    # A feed asks "which app?" for every cast at once; one author's keys and
+    # one app's name should each be read once, not once per cast.
+    async def events(request):
+        await asyncio.sleep(0.05)  # slow enough that every caller arrives before the answer
+        return web.json_response({"events": [
+            {"blockTimestamp": 1_700_000_000, "signerEventBody": {
+                "key": "0xk1", "eventType": "SIGNER_EVENT_TYPE_ADD", "metadata": metadata(9152)}}]})
+
+    async def signers(request):
+        return web.json_response({"signers": []})
+
+    async def user_data(request):
+        await asyncio.sleep(0.05)
+        return web.json_response({"messages": [
+            msg("u", fid=9152, userDataBody={"type": "USER_DATA_TYPE_USERNAME", "value": "someapp"})]})
+
+    async def test(hub, calls):
+        casts = [{"data": {"fid": 1}, "signer": "0xk1"}] * 20
+        apps = await asyncio.gather(*(hub.app_of(c) for c in casts))
+        names = await asyncio.gather(*(hub.app_name(a) for a in apps))
+        return apps, names, [p for p, _ in calls]
+
+    apps, names, paths = run({"/v1/onChainEventsByFid": events, "/v1/signersByFid": signers,
+                              "/v1/userDataByFid": user_data}, test)
+    assert apps == [9152] * 20
+    assert names == ["someapp"] * 20
+    assert sorted(paths) == ["/v1/onChainEventsByFid", "/v1/signersByFid", "/v1/userDataByFid"]
+
+
+def test_failed_app_lookup_is_retried():
+    tries = []
+
+    async def events(request):
+        tries.append(1)
+        if len(tries) <= 3:  # the Hub's 3 tries all fail: the first lookup raises
+            return web.json_response({"error": "down"}, status=500)
+        return web.json_response({"events": [
+            {"blockTimestamp": 1_700_000_000, "signerEventBody": {
+                "key": "0xk1", "eventType": "SIGNER_EVENT_TYPE_ADD", "metadata": metadata(9152)}}]})
+
+    async def signers(request):
+        return web.json_response({"signers": []})
+
+    async def test(hub, calls):
+        cast = {"data": {"fid": 1}, "signer": "0xk1"}
+        try:
+            await hub.app_of(cast)
+        except NodeError:
+            pass
+        return await hub.app_of(cast)
+
+    assert run({"/v1/onChainEventsByFid": events, "/v1/signersByFid": signers}, test) == 9152
+
+
 def test_feed_merges_followed_accounts_newest_first_and_skips_future():
     from phunk.timeutil import from_datetime
     import datetime as dt
