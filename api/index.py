@@ -18,7 +18,7 @@ Settings (environment variables, optional):
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
-    PHUNK_TIP_FID      the account "Buy me a coffee" tips (unset: no button)
+    PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Mini app notifications (all optional; without a store the webhook still
 answers, it just keeps nobody):

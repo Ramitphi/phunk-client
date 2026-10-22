@@ -4,8 +4,8 @@
     python web/make_screenshots.py
 
 Three portrait screenshots, 1284 x 2778 as Farcaster asks: People, Casts and
-Coffee, as a phone shows them inside a Farcaster client. They show dwr's
-people (a public account). Coffee shows the wallet view, which needs a
+Tip, as a phone shows them inside a Farcaster client. They show dwr's
+people (a public account). Tip shows the wallet view, which needs a
 Farcaster client, so the page is told it has one; nothing is sent.
 
 Needs Playwright with a Chromium and Pillow (dev only; not a dependency).
@@ -44,7 +44,7 @@ async def main() -> None:
         await page.goto(f"{UI}/?as={WHO}")
         await page.wait_for_selector(".person", timeout=180_000)
         await page.wait_for_load_state("networkidle")
-        shots = {"screen-people.png": "people", "screen-casts.png": "casts", "screen-coffee.png": "coffee"}
+        shots = {"screen-people.png": "people", "screen-casts.png": "casts", "screen-tip.png": "tip"}
         for name, tab in shots.items():
             await page.click(f'.tabs button[data-tab="{tab}"]')
             if tab == "casts":

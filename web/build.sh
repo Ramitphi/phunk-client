@@ -33,10 +33,15 @@ TMP="$OUT.tmp"
 rm -rf "$TMP"
 mkdir -p "$TMP/static"
 cp -R web/public/. "$TMP/"
-cp src/phunk/static/app.css src/phunk/static/app.js "$TMP/static/"
+cp src/phunk/static/app.css src/phunk/static/app.js src/phunk/static/*.svg "$TMP/static/"
+# A version on the CSS and JS links (a checksum of both), so a phone that
+# kept an old copy fetches the new one after each deploy.
+VERSION=$(cat src/phunk/static/app.css src/phunk/static/app.js | cksum | cut -d ' ' -f 1)
 fill < web/head.html > "$TMP/head.tmp"
 awk -v head="$TMP/head.tmp" '/<\/head>/ { while ((getline line < head) > 0) print line } { print }' \
-    src/phunk/static/index.html > "$TMP/index.html"
+    src/phunk/static/index.html |
+  sed -e "s|/static/app\.css\"|/static/app.css?v=$VERSION\"|" \
+      -e "s|/static/app\.js\"|/static/app.js?v=$VERSION\"|" > "$TMP/index.html"
 rm "$TMP/head.tmp"
 fill < web/public/.well-known/farcaster.json > "$TMP/.well-known/farcaster.json"
 mkdir -p "$OUT"
