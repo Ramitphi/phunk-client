@@ -399,10 +399,16 @@ class Hub:
         out.sort(key=lambda k: k.timestamp)
         return out
 
-    async def signers(self, fid: int) -> dict:
+    async def signers(self, fid: int, requester_fids: list[int] | None = None) -> dict:
         """Raw /v1/signersByFid for one page: the account's active keys, plus
-        `currentUserNonce`, which a new KEY_ADD must exceed."""
-        return await self.get("/v1/signersByFid", {"fid": fid})
+        `currentUserNonce`, which a new KEY_ADD (or a custody KEY_REMOVE) must
+        exceed. With `requester_fids`, newer nodes also return
+        `requesterFidNonces` ({"<fid>": n}): each app's nonce, which a
+        self-revoking KEY_REMOVE must exceed."""
+        params: dict = {"fid": fid}
+        for i, f in enumerate(requester_fids or []):
+            params[f"requesterFids[{i}]"] = f  # the node parses arrays as key[i]=v
+        return await self.get("/v1/signersByFid", params)
 
     async def key_apps(self, fid: int) -> dict[str, int | None]:
         """{key: app fid} for every key `fid` has added. Cached per fid."""

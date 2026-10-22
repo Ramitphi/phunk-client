@@ -55,7 +55,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
 | `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
-| `signers(fid)` | `/v1/signersByFid` | active keys and `currentUserNonce` |
+| `signers(fid, requester_fids=)` | `/v1/signersByFid` | active keys, `currentUserNonce`, and each app's nonce (`requesterFidNonces`) |
 | `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
 | `info()` | `/v1/info` | node stats |
 | `get(path, params)`, `pages(...)`, `collect(...)` | any | raw JSON, for endpoints not wrapped here |
@@ -94,6 +94,10 @@ async with Hub("http://localhost:3381") as hub:
 | `follow(fid)`, `unfollow(fid)` | `LINK_ADD` / `LINK_REMOVE` |
 | `set_profile(display=, bio=, pfp=, url=, username=)` | `USER_DATA_ADD` |
 
+`revoke_key(hub, fid, key)` revokes a gasless key with the key itself (no
+seed phrase); `revoke_key_with_custody(hub, custody, public_key)` revokes any
+gasless key on the account. Both send `KEY_REMOVE`; casts already signed stay.
+
 `add_app_key(..., app_signer=URL)` registers the key under an app account
 through that app's signing service, so other clients show "Sent from
 <app>". `signer/` is a ready-to-deploy service; see `signer/README.md`.
@@ -131,6 +135,8 @@ phunk --node http://localhost:3381 info
 
 # writing (pip install 'phunk-client[write]')
 phunk key add                      # seed phrase in (hidden), app key saved to ~/.config/phunk
+phunk key list                     # the account's keys and the app behind each
+phunk key revoke                   # the saved key revokes itself; no seed phrase
 phunk post "hello" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<hash>
 phunk follow dwr

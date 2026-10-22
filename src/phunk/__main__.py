@@ -6,6 +6,8 @@
     phunk --node http://localhost:3381 info
 
     phunk key add                # seed phrase in (hidden), app key out
+    phunk key list               # the account's keys and which app asked for each
+    phunk key revoke             # the saved key removes itself; no seed phrase
     phunk post "hello from my own node"
     phunk feed --hide warpcast   # who you follow, minus one app
     phunk follow dwr
@@ -92,21 +94,76 @@ async def _app_label(hub: Hub, cast) -> str:
     return await hub.app_name(app) or f"fid {app}"
 
 
-async def run_key(hub: Hub, args) -> None:
-    from .write import DEFAULT_SCOPES, Custody, add_app_key
+def _confirm(question: str) -> None:
+    if input(f"{question} [y/N] ").strip().lower() != "y":
+        sys.exit("cancelled")
 
-    if args.key_cmd == "show":
-        fid, key = _load_key()
-        print(f"fid         {fid}\npublic key  {key.public_hex}\nkey file    {KEY_FILE}")
-        return
+
+async def _custody(hub: Hub):
+    """Read the seed phrase (hidden) and return (Custody, fid)."""
+    from .write import Custody
+
     print(SEED_WARNING)
     phrase = getpass.getpass("Seed phrase (hidden, not saved): ")
     custody = Custody.from_mnemonic(phrase)
     del phrase
     fid = await hub.fid_by_address(custody.address)
     print(f"custody address {custody.address} owns fid {fid}")
-    if input(f"Add a new app key to fid {fid}? [y/N] ").strip().lower() != "y":
-        sys.exit("cancelled")
+    return custody, fid
+
+
+async def run_key_list(hub: Hub, args) -> None:
+    found = find_key()
+    fid = await _fid(hub, args.who) if args.who else _load_key()[0]
+    mine = found[1].public_hex if found and found[0] == fid else None
+    live: dict[str, object] = {}
+    for k in await hub.keys(fid):
+        if k.event == "add":
+            live[k.key] = k
+        else:
+            live.pop(k.key, None)
+    for k in live.values():
+        app = "own key" if k.self_requested else (await hub.app_name(k.app_fid) if k.app_fid else None)
+        app = app or (f"fid {k.app_fid}" if k.app_fid else "unknown app")
+        kind = "on-chain" if k.onchain else "gasless"
+        here = "  <- saved here" if k.key == mine else ""
+        print(f"{k.time:%Y-%m-%d}  {kind:8}  {k.key}  {app}{here}")
+
+
+async def run_key_revoke(hub: Hub, args) -> None:
+    from .write import revoke_key, revoke_key_with_custody
+
+    if args.key:  # any key on the account: needs the custody key
+        custody, fid = await _custody(hub)
+        _confirm(f"Revoke key {args.key} of fid {fid}? Apps using it stop working.")
+        await revoke_key_with_custody(hub, custody, args.key, fid=fid)
+        del custody
+        print(f"revoked {args.key}. Casts it signed stay up.")
+        return
+    fid, key = _load_key()
+    _confirm(f"Revoke this machine's app key {key.public_hex} (fid {fid})?")
+    await revoke_key(hub, fid, key)
+    print(f"revoked {key.public_hex}. Casts it signed stay up.")
+    if os.environ.get("PHUNK_APP_KEY"):
+        print("unset PHUNK_APP_KEY and PHUNK_FID: that key no longer works.")
+    elif KEY_FILE.exists():
+        KEY_FILE.unlink()
+        print(f"deleted {KEY_FILE}")
+
+
+async def run_key(hub: Hub, args) -> None:
+    from .write import DEFAULT_SCOPES, add_app_key
+
+    if args.key_cmd == "show":
+        fid, key = _load_key()
+        print(f"fid         {fid}\npublic key  {key.public_hex}\nkey file    {KEY_FILE}")
+        return
+    if args.key_cmd == "list":
+        return await run_key_list(hub, args)
+    if args.key_cmd == "revoke":
+        return await run_key_revoke(hub, args)
+    custody, fid = await _custody(hub)
+    _confirm(f"Add a new app key to fid {fid}?")
     signer = args.app_signer or os.environ.get("PHUNK_APP_SIGNER")
     if signer:
         print(f"asking the app's signer to approve the new key: {signer}")
@@ -244,6 +301,13 @@ def main(argv=None) -> None:
                     help="an app's signing service, so casts show 'Sent from <app>' "
                          "(default: $PHUNK_APP_SIGNER; without one the account is its own app)")
     ksub.add_parser("show", help="which fid and key are saved")
+    kl = ksub.add_parser("list", help="an account's active keys and the app behind each")
+    kl.add_argument("who", nargs="?", help="username or fid (default: your saved key's fid)")
+    kr = ksub.add_parser("revoke", help="revoke a gasless app key (casts it signed stay)",
+                         description="Without --key, the saved key signs its own removal: no seed "
+                                     "phrase. With --key, revoke any gasless key on the account; "
+                                     "that needs the seed phrase.")
+    kr.add_argument("--key", metavar="0x...", help="public key to revoke (see `phunk key list`)")
 
     s = sub.add_parser("post", help="post a cast")
     s.add_argument("text")

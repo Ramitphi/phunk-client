@@ -755,11 +755,55 @@ To set the app account's username, add a key to the app account itself
 PHUNK_KEY_FILE=~/.config/phunk/app-account.json phunk profile --username yourapp
 ```
 
-### When you're done
+### When you're done: revoke the key
 
-You don't have to revoke a key you stop using: its TTL runs out. To revoke
-it sooner, send a `KEY_REMOVE` signed by the custody key (or by the key
-itself); see the Snapchain guide on writing messages.
+You don't have to revoke a key you stop using: its TTL runs out. Revoke it
+sooner if a laptop is lost, a key file leaks, or you stop using an app.
+The key stops working at once. Casts it already signed stay up.
+
+See which keys an account has, and which app asked for each:
+
+```sh
+phunk key list dwr
+# 2023-11-07  on-chain  0xc887f5bf...  warpcast
+# 2026-01-24  on-chain  0x27386405...  neynar
+```
+
+Revoke the key saved on this machine. The key signs its own removal, so no
+seed phrase is needed:
+
+```sh
+phunk key revoke
+```
+
+Revoke some other gasless key on the account, one you no longer hold. This
+needs the custody key, so it asks for the seed phrase (test account only):
+
+```sh
+phunk key revoke --key 0x<public key from key list>
+```
+
+Both send a `KEY_REMOVE` message to `/v1/submitMessage`:
+
+- **Self** (`signatureType: 2`): signed by the key being removed. Its nonce
+  must beat the nonce of the app that asked for the key:
+  `GET /v1/signersByFid?fid=...&requesterFids[0]=<app fid>` returns it in
+  `requesterFidNonces`. Nodes that don't report it yet answer a wrong nonce
+  with "not greater than stored nonce N"; phunk then retries once with N + 1.
+- **Custody** (`signatureType: 1`): carries an EIP-712 `KeyRemove`
+  `{fid, key, nonce, deadline}` signed by the custody key, on the same
+  domain as `KeyAdd`. Its nonce must beat `currentUserNonce`.
+
+```python
+from phunk.write import revoke_key, revoke_key_with_custody
+
+async with Hub("http://localhost:3381") as hub:
+    await revoke_key(hub, fid, key)                       # the saved AppKey
+    await revoke_key_with_custody(hub, custody, "0x...")  # any gasless key
+```
+
+Only gasless keys can be removed this way. On-chain keys, like the ones
+in the list above, need a transaction to the Key Registry contract.
 
 ---
 

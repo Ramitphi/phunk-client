@@ -17,7 +17,10 @@ pytest.importorskip("eth_account")
 from aiohttp import web  # noqa: E402
 
 from phunk import Hub, NodeError, decode_key_request, proto  # noqa: E402
-from phunk.write import AppKey, Custody, Writer, add_app_key, build_key_add, proto_data  # noqa: E402
+from phunk.write import (  # noqa: E402
+    AppKey, Custody, Writer, add_app_key, build_key_add, build_key_remove_custody, build_key_remove_self,
+    proto_data, revoke_key, revoke_key_with_custody,
+)
 
 V = json.loads((Path(__file__).parent / "vectors" / "write.json").read_text())
 FID, TS = 1234, 183000000
@@ -65,6 +68,17 @@ def test_key_add_matches_reference():
     msg = build_key_add(CUSTODY, FID, KEY, nonce=kb["nonce"], deadline=kb["deadline"],
                         scopes=kb["scopes"], ttl=kb["ttl"], timestamp=TS)
     assert msg.hex() == V["key_add"]["message"]
+
+
+def test_key_remove_matches_reference():
+    deadline = V["key_add_body"]["deadline"]
+    sig = CUSTODY.sign_key_remove(FID, KEY.public_key, 6, deadline)
+    assert sig.hex() == V["key_remove_custody_body"]["signature"]
+    msg = build_key_remove_custody(CUSTODY, FID, KEY.public_key, nonce=6, deadline=deadline,
+                                   envelope_key=KEY, timestamp=TS)
+    assert msg.hex() == V["key_remove_custody"]["message"]
+    msg = build_key_remove_self(KEY, FID, nonce=3, deadline=deadline, timestamp=TS)
+    assert msg.hex() == V["key_remove_self"]["message"]
 
 
 def test_key_add_rejects_bad_scopes_and_ttl():
@@ -306,3 +320,104 @@ def test_add_app_key_with_app_signer_registers_under_the_app():
     # A signer whose key isn't the app's custody key on-chain is refused before submitting.
     key, err, submitted, approvals = asyncio.run(go(CUSTODY.address.lower()))
     assert err and "custody address" in err and submitted == []
+
+
+# ------------------------------------------------------------ revoking keys
+
+
+async def with_key_node(test, *, gasless=(), app_nonces=None, user_nonce=4, stored=None):
+    """A fake node for KEY_REMOVE. `gasless` is [(key hex, request fid)].
+    `app_nonces` None mimics a node that doesn't report them; `stored` makes
+    the first submit fail like a node whose stored nonce is higher."""
+    submitted, queries = [], []
+    app = web.Application()
+
+    async def signers(request):
+        queries.append(dict(request.query))
+        out = {"signers": [{"source": "SIGNER_SOURCE_OFFCHAIN", "key": k, "fid": FID, "requestFid": rf,
+                            "addedAt": 1760000000} for k, rf in gasless],
+               "currentUserNonce": user_nonce}
+        asked = [int(v) for k, v in request.query.items() if k.startswith("requesterFids[")]
+        if app_nonces is not None and asked:
+            out["requesterFidNonces"] = {str(f): app_nonces.get(f, 0) for f in asked}
+        return web.json_response(out)
+
+    async def events(request):
+        return web.json_response({"events": []})
+
+    async def by_address(request):
+        return web.json_response({"fid": FID, "idRegisterEventBody": {"to": request.query["address"]}})
+
+    async def submit(request):
+        body = await request.read()
+        submitted.append(body)
+        if stored is not None and len(submitted) == 1:
+            return web.json_response({"errCode": "bad_request.conflict", "details":
+                                      f"gasless-key nonce 1 is not greater than stored nonce {stored}"}, status=400)
+        return web.json_response({"hash": "0x" + "aa" * 20})
+
+    app.router.add_get("/v1/signersByFid", signers)
+    app.router.add_get("/v1/onChainEventsByFid", events)
+    app.router.add_get("/v1/onChainIdRegistryEventByAddress", by_address)
+    app.router.add_post("/v1/submitMessage", submit)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        async with Hub(f"http://127.0.0.1:{port}", rate=1000, retries=2) as hub:
+            await test(hub)
+    finally:
+        await runner.cleanup()
+    return submitted, queries
+
+
+def _key_remove(msg):
+    data = decode_fields(proto_data(msg))
+    assert data[1] == [proto.KEY_REMOVE] and data[2] == [FID]
+    return decode_fields(data[20][0]), decode_fields(msg)[6][0]  # body, envelope signer
+
+
+def test_revoke_key_signs_its_own_removal_with_the_app_nonce():
+    async def test(hub):
+        await revoke_key(hub, FID, KEY)
+
+    submitted, queries = asyncio.run(with_key_node(test, gasless=[(KEY.public_hex, 777)], app_nonces={777: 2}))
+    assert any(q.get("requesterFids[0]") == "777" for q in queries)
+    (msg,) = submitted
+    body, signer = _key_remove(msg)
+    assert body[1] == [KEY.public_key] and signer == KEY.public_key
+    assert body[3] == [proto.REMOVE_BY_SELF] and body[5] == [3]  # app nonce 2 -> 3
+    assert 2 not in body  # no inner signature
+
+
+def test_revoke_key_retries_once_with_the_stored_nonce():
+    async def test(hub):
+        await revoke_key(hub, FID, KEY)
+
+    submitted, _ = asyncio.run(with_key_node(test, gasless=[(KEY.public_hex, FID)], stored=4))
+    assert [_key_remove(m)[0][5] for m in submitted] == [[1], [5]]
+
+
+def test_revoke_key_refuses_a_key_that_is_not_active():
+    async def test(hub):
+        with pytest.raises(ValueError, match="not an active gasless key"):
+            await revoke_key(hub, FID, KEY)
+
+    submitted, _ = asyncio.run(with_key_node(test, gasless=[("0x" + "99" * 32, FID)]))
+    assert submitted == []
+
+
+def test_revoke_key_with_custody_uses_the_user_nonce():
+    other = AppKey(b"\x44" * 32).public_hex
+
+    async def test(hub):
+        assert await revoke_key_with_custody(hub, CUSTODY, other) == FID
+
+    submitted, _ = asyncio.run(with_key_node(test, gasless=[(other, FID)], user_nonce=4))
+    (msg,) = submitted
+    body, signer = _key_remove(msg)
+    assert body[1] == [bytes.fromhex(other[2:])] and signer != body[1][0]
+    assert body[3] == [proto.REMOVE_BY_CUSTODY] and body[5] == [5]
+    assert body[2] == [CUSTODY.sign_key_remove(FID, body[1][0], 5, body[4][0])]
