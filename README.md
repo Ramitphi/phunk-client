@@ -164,7 +164,7 @@ The **Casts** tab has the classic feed with the app that signed each cast
 and a filter by app. Anyone's people feed can be looked up by name.
 
 Set `PHUNK_TIP_FID` to an fid to show a **money gun** in its own **Tip**
-tab (the last one), with a small "If you like it, use your money gun 🔫"
+tab (the last one), with a small "If you like it, use your money gun"
 card at the end of the people list and on the You screen that leads to it. Pick $1, $37,
 $69, $420, or any amount from $10 to $1000 on a slider. Inside a Farcaster client it opens
 the viewer's wallet with USDC on Base to that account filled in.

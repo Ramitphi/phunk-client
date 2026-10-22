@@ -8,7 +8,8 @@
   --muted: #5e5a54;
   --line: #d5ccbe;
   --edge: #141414;
-  --shadow: 3px 3px 0 var(--edge);
+  --shadow-color: var(--edge);
+  --shadow: 3px 3px 0 var(--shadow-color);
   --cta: #7959ff;
   --cta-deep: #5d42d6;
   --cta-text: #ffffff;
@@ -39,7 +40,7 @@
     --muted: #b5aea4;
     --line: #3a3631;
     --edge: #cfc8bd;
-    --shadow: 3px 3px 0 #866aff;
+    --shadow-color: #866aff;
     --cta: #866aff;
     --cta-deep: #6b52e6;
     --tint: #2a2342;
@@ -65,7 +66,7 @@
   --muted: #b5aea4;
   --line: #3a3631;
   --edge: #cfc8bd;
-  --shadow: 3px 3px 0 #866aff;
+  --shadow-color: #866aff;
   --cta: #866aff;
   --cta-deep: #6b52e6;
   --tint: #2a2342;
@@ -426,8 +427,6 @@ img.avatar { background: var(--chip); }
   .tabs [data-tab="you"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21a8 8 0 0 1 16 0'/%3E%3C/svg%3E"); }
   .tabs [data-tab="compose"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
   .tabs [data-tab="people"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3C/svg%3E"); }
-  /* A money gun: a stack of cash on top, two bills flying out. */
-  .tabs [data-tab="tip"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 10.5h12.5v4H8.5l-1.5 6H3.5l1.5-6H2.5z'/%3E%3Crect x='5' y='5' width='8' height='5.5' rx='.6'/%3E%3Cpath d='M9 7.75h0'/%3E%3Crect x='17' y='6' width='5' height='3' rx='.5' transform='rotate(-25 19.5 7.5)'/%3E%3Crect x='17' y='14.5' width='5' height='3' rx='.5' transform='rotate(25 19.5 16)'/%3E%3C/svg%3E"); }
   .tabs button[aria-selected="true"] { color: var(--tint-text); font-weight: 700; }
   .tabs .plus, .tabs .plus[aria-selected="true"] {
     flex: 0 0 56px; height: 56px; min-height: 56px; margin: 0 8px; padding: 0; align-self: center;
@@ -440,6 +439,7 @@ img.avatar { background: var(--chip); }
   .actions .reply { font-size: 0; width: 40px; padding: 0; }
   .toast { bottom: 96px; }
   .pane-title { font-size: 28px; }
+  .tip-hero h1 { font-size: 32px; }
   .person { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
   .person .avatar { width: 40px; height: 40px; font-size: 18px; }
   .banner { margin: 10px 12px 0; }
@@ -448,13 +448,37 @@ img.avatar { background: var(--chip); }
 /* First release: casting is coming soon. */
 .tabs .plus.soon { opacity: 0.55; }
 
-/* The money gun: its picture, 2x2 amounts, the custom amount across both columns. */
-.tip .tip-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
-.tip .tip-head b { font-size: 18px; }
-.tip-art {
-  display: block; width: 100%; max-width: 320px; height: auto; margin: 0 auto 10px; padding: 12px 8px 4px;
-  box-sizing: border-box; background: #ece8ff; border: 1.5px solid var(--edge); border-radius: 16px;
+/* The money gun (Tip tab): the You screen's hero with the gun as its sticker,
+   then the amounts. The gun takes the theme like the logo does (purple, ink
+   edge, the theme's shadow); the cash and its band keep their colours in both
+   themes, like the .hl sticker. */
+#tip-pane { max-width: 480px; margin: 0 auto; }
+.tip-hero { padding-top: 4px; }
+.tip-hero h1 { text-wrap: balance; }
+.money-gun {
+  display: block; width: 100%; max-width: 300px; height: auto; margin-bottom: 4px; overflow: visible;
+  fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round;
 }
+.money-gun .mg-shade { fill: var(--shadow-color); stroke: none; }
+.money-gun .mg-gun { fill: var(--cta); stroke: var(--edge); }
+.money-gun .mg-cash { fill: #bfefc0; stroke: var(--edge); }
+.money-gun .mg-band { fill: #f7d15f; stroke: var(--edge); }
+.money-gun .mg-mark { stroke: #141414; stroke-width: 2; }
+.money-gun .mg-line { stroke: var(--edge); }
+.money-gun .mg-shine { stroke: var(--hl); stroke-width: 5; }
+.money-gun .mg-glyph { fill: #fff; stroke: none; font: 800 30px var(--display); text-anchor: middle; }
+/* Each time the tab opens, the bills fly out of the nose. */
+.money-gun .mg-bill { transform-box: fill-box; transform-origin: center; animation: mg-fire .45s cubic-bezier(.2, .9, .3, 1.25) both; }
+.money-gun .mg-bill:nth-child(2) { animation-delay: .07s; }
+.money-gun .mg-bill:nth-child(3) { animation-delay: .14s; }
+.money-gun .mg-fly .mg-line { animation: mg-flash .3s .2s both; }
+@keyframes mg-fire { from { opacity: 0; transform: translate(-34px, 0) scale(.3) rotate(-30deg); } }
+@keyframes mg-flash { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .money-gun .mg-bill, .money-gun .mg-fly .mg-line { animation: none; }
+}
+.tip { box-shadow: var(--shadow); }
+.tip-open { display: flex; justify-content: center; margin: 4px 0 14px; }
 .tip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
 .tip-custom { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; margin-top: 6px; }
@@ -484,5 +508,15 @@ img.avatar { background: var(--chip); }
   border: 2px solid var(--edge); box-shadow: 2px 2px 0 var(--edge);
 }
 .tip-range input[type="range"]:focus-visible { outline: 2px solid var(--cta); outline-offset: 4px; border-radius: 8px; }
-.tip-nudge { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; margin: 16px 0 14px; font-weight: 600; }
-.tip-nudge .cta { flex: none; }
+/* Small cards at the end of a screen (the money gun's nudge, Add phunk): a
+   round sticker like the logo, one line, one button. */
+.tip-nudge { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 12px; margin: 16px 0 14px; font-weight: 600; }
+.tip-nudge .nudge-text { flex: 1; min-width: 0; }
+.tip-nudge .logo, .tip-nudge .cta { flex: none; }
+/* The money gun icon (a pistol firing bills): the Tip tab on phones and the nudge's sticker. */
+.tabs [data-tab="tip"], .gun-badge { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 14 3.5 20.5h4L9 14'/%3E%3Crect x='2' y='9' width='14' height='5' rx='2'/%3E%3Crect x='17.5' y='4.5' width='5' height='3.2' rx='.6' transform='rotate(-25 20 6.1)'/%3E%3Crect x='17.5' y='16.3' width='5' height='3.2' rx='.6' transform='rotate(25 20 17.9)'/%3E%3Cpath d='M18.5 11.5h3.5'/%3E%3C/svg%3E"); }
+.gun-badge::before {
+  content: ""; width: 22px; height: 22px; background: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}

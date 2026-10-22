@@ -33,7 +33,7 @@ TMP="$OUT.tmp"
 rm -rf "$TMP"
 mkdir -p "$TMP/static"
 cp -R web/public/. "$TMP/"
-cp src/phunk/static/app.css src/phunk/static/app.js src/phunk/static/*.svg "$TMP/static/"
+cp src/phunk/static/app.css src/phunk/static/app.js "$TMP/static/"
 # A version on the CSS and JS links (a checksum of both), so a phone that
 # kept an old copy fetches the new one after each deploy.
 VERSION=$(cat src/phunk/static/app.css src/phunk/static/app.js | cksum | cut -d ' ' -f 1)
