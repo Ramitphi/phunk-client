@@ -173,36 +173,48 @@ async function sendTip(units) {
 
 async function renderTip() {
   const tip = state.me && state.me.tip;
-  const slots = document.querySelectorAll(".tip-slot");
-  if (!tip) { for (const s of slots) s.replaceChildren(); return; }
+  const slot = $("#tip");
+  const nudge = $("#tip-nudge");
+  if (!tip) { slot.replaceChildren(); nudge.replaceChildren(); return; }
   const who = tip.username ? `@${tip.username}` : `fid ${tip.fid}`;
+  const go = h("button", { type: "button", class: "cta small" }, "☕ Tip");
+  go.addEventListener("click", showTip);
+  nudge.replaceChildren(h("div", { class: "card tip-nudge" },
+    h("span", {}, "If you like it, buy me a coffee"), go));
   const wallet = await canSendToken();
-  for (const slot of slots) {
-    if (!wallet) {
-      // No wallet to open here: one quiet line, not a card.
-      const link = h("button", { type: "button", class: "link" }, `tip ${who} on Farcaster`);
-      link.addEventListener("click", () => viewProfile(tip));
-      slot.replaceChildren(h("p", { class: "tip-line muted small" }, "☕ Like phunk? ", link));
-      continue;
-    }
-    const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
-      h("span", { class: "muted small" }, `Like phunk? Send ${who} USDC on Base from your wallet.`));
-    const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
-      const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
-      b.addEventListener("click", () => sendTip(String(d * 1000000)));
-      return b;
-    }));
-    const input = h("input", { inputmode: "decimal", placeholder: "Custom amount, e.g. 5", "aria-label": "Custom amount in USD" });
-    const form = h("form", { class: "tip-custom" }, input, h("button", { type: "submit", class: "cta" }, "Send"));
-    form.addEventListener("submit", (ev) => {
-      ev.preventDefault();
-      const units = usdcUnits(input.value);
-      if (!units) { toast("Type an amount, like 5 or 2.50."); return; }
-      sendTip(units);
-    });
-    grid.append(form);
-    slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+  const head = h("div", { class: "tip-head" }, h("b", {}, "☕ Buy me a coffee"),
+    h("span", { class: "muted small" }, wallet ? `Like phunk? Send ${who} USDC on Base from your wallet.`
+      : `Like phunk? Tip ${who} on Farcaster.`));
+  if (!wallet) {
+    // No wallet to open here: the maker's profile instead.
+    const open = h("button", { type: "button", class: "ghost" }, `Open ${who} in Farcaster`);
+    open.addEventListener("click", () => viewProfile(tip));
+    slot.replaceChildren(h("div", { class: "card tip" }, head, open));
+    return;
   }
+  const grid = h("div", { class: "tip-grid" }, TIPS.map((d) => {
+    const b = h("button", { type: "button", class: "ghost" }, `$${d}`);
+    b.addEventListener("click", () => sendTip(String(d * 1000000)));
+    return b;
+  }));
+  const input = h("input", { inputmode: "decimal", placeholder: "Custom amount, e.g. 5", "aria-label": "Custom amount in USD" });
+  const form = h("form", { class: "tip-custom" }, input, h("button", { type: "submit", class: "cta" }, "Send"));
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const units = usdcUnits(input.value);
+    if (!units) { toast("Type an amount, like 5 or 2.50."); return; }
+    sendTip(units);
+  });
+  grid.append(form);
+  slot.replaceChildren(h("div", { class: "card tip" }, head, grid));
+}
+
+// The nudge's button: open the You screen (phones) or reveal the card under
+// the lookup (wide screens, where You shows only the lookup), then scroll to it.
+function showTip() {
+  document.documentElement.classList.add("show-tip");
+  if (narrow()) setTab("you");
+  $("#tip").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 function viewCast(c) {

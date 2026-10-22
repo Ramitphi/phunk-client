@@ -246,6 +246,7 @@ code { font-family: var(--mono); font-size: 13px; }
 @media (min-width: 801px) {
   #you-pane { display: block; }
   #you-pane .hero, #you-pane .account, #you-pane .foot, #you-pane .tip-slot { display: none; }
+  .show-tip #you-pane .tip-slot { display: block; }
 }
 .layout { max-width: 720px; margin: 0 auto; padding: 16px 16px 32px; }
 
@@ -448,9 +449,5 @@ img.avatar { background: var(--chip); }
 .tip-grid > button { width: 100%; font-variant-numeric: tabular-nums; }
 .tip-custom { grid-column: 1 / -1; display: flex; gap: 8px; }
 .tip-custom input { flex: 1; min-width: 0; }
-.tip-line { text-align: center; margin: 28px 0 8px; }
-button.link {
-  display: inline; background: none; border: 0; padding: 0; min-height: 0; border-radius: 0;
-  color: var(--blue-text); font-weight: 600; text-decoration: underline; text-underline-offset: 3px;
-  box-shadow: none; transform: none;
-}
+.tip-nudge { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; margin-top: 16px; font-weight: 600; }
+.tip-nudge .cta { flex: none; }
