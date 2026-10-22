@@ -369,10 +369,16 @@ function castCard(c) {
   }));
 
   const toggle = (kind) => {
-    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false",
-      title: isPublic() ? "Open this cast in Farcaster" : null }, kind === "like" ? "Like" : "Recast");
+    // The hosted site holds no keys, so it can't like: the button opens the
+    // cast in Farcaster instead, and says so.
+    if (isPublic()) {
+      const open = h("button", { type: "button", class: "ghost open", title: "Open this cast in Farcaster" }, "Open");
+      open.addEventListener("click", () => { track("Open"); viewCast(c); });
+      return open;
+    }
+    const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" },
+      kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (isPublic()) { track(kind === "like" ? "Like" : "Recast"); return viewCast(c); }
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;

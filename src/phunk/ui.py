@@ -43,7 +43,7 @@ KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e0
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 READ_ONLY_HELP = ("Read-only: no app key. To follow and like from here, run `phunk key add` in a terminal "
                   "(use a test account), then restart `phunk ui`.")
-PUBLIC_HELP = "Read-only. Follow and Like open in Farcaster."
+PUBLIC_HELP = "Read-only. Follow and Open take you to Farcaster."
 # First release: the web client follows people and likes casts; it doesn't
 # cast yet. Casting, replies and recasts come next (`phunk ui --casting` to try
 # them). The CLI already does all of it: `phunk post`, `phunk like`.

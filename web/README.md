@@ -2,7 +2,7 @@
 
 The web client from `phunk ui`, hosted and read-only. Type a Farcaster
 username, see that account's people and casts. Follow opens the profile
-and Like opens the cast in Farcaster, because the site holds no keys and
+and Open opens the cast in Farcaster, because the site holds no keys and
 can't act for anyone. Casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
 (see below).
 
@@ -89,7 +89,7 @@ the page:
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
 - opens profiles and casts in the client: **Follow** opens the profile,
-  **Like** opens the cast (Say hi, Reply and New cast come back with
+  **Open** opens the cast (Say hi, Reply and New cast come back with
   casting),
 - with `PHUNK_TIP_FID` set, shows **Buy me a coffee** in its own Coffee tab
   (the people list and the You screen end with a small card whose button leads there): $1, $37, $69, $420,
@@ -173,7 +173,7 @@ local `phunk ui` never loads it, and it ignores localhost anyway.
 - No cookies. Query strings are dropped before sending, so the usernames
   people look up (`?as=dwr`) are never sent.
 - The page also counts actions, by name only, each with `where=web` or
-  `where=miniapp` (inside a Farcaster client): `Look up` and `Follow` now;
+  `where=miniapp` (inside a Farcaster client): `Look up`, `Follow` and `Open` now;
   `Say hi`, `Reply`, `Like`, `Recast` and `New cast` once casting is back.
 - The page's CSP allows `assets.onedollarstats.com` (the script) and
   `collector.onedollarstats.com` (where it sends events), in `vercel.json`.
