@@ -431,3 +431,6 @@ img.avatar { background: var(--chip); }
   .person .avatar { width: 40px; height: 40px; font-size: 18px; }
   .banner { margin: 10px 12px 0; }
 }
+
+/* First release: casting is coming soon. */
+.tabs .plus.soon { opacity: 0.55; }

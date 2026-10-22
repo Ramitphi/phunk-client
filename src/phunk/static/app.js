@@ -183,6 +183,15 @@ function composePath(text, channel) {
   return `/~/compose${qs ? "?" + qs : ""}`;
 }
 
+// First release: follow only. Casting, replies and likes are coming soon.
+const canCast = () => !!(state.me && state.me.can_cast);
+
+const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow") : "read-only");
+
+function soon() {
+  toast("Casting is coming soon. Follow people for now.", 5000);
+}
+
 function needKey() {
   if (state.me && state.me.can_write && !viewingSelf()) {
     toast("You're viewing someone else's people, read-only. Press \"Back to me\" to act.", 6000);
@@ -257,7 +266,7 @@ function castCard(c) {
     body.querySelector(".actions").after(form);
     ta.focus();
   });
-  body.append(h("div", { class: "actions" }, replyBtn, toggle("like"), toggle("recast")));
+  if (canCast()) body.append(h("div", { class: "actions" }, replyBtn, toggle("like"), toggle("recast")));
   return h("article", { class: "card cast" }, avatar(c.author), body);
 }
 
@@ -440,7 +449,7 @@ function personCard(p) {
     p.bio ? h("div", { class: "bio" }, p.bio.length > 160 ? p.bio.slice(0, 160) + "…" : p.bio) : null,
     why,
     previews.length ? h("div", { class: "previews" }, previews) : h("div", { class: "muted small" }, "No recent casts."),
-    h("div", { class: "pactions" }, follow, hi, nope));
+    h("div", { class: "pactions" }, follow, canCast() ? hi : null, nope));
   return h("article", { class: `card person ${p.kind}` }, avatar(p), body);
 }
 
@@ -521,6 +530,7 @@ function setHours(v) {
 const narrow = () => matchMedia("(max-width: 800px)").matches;
 
 function setTab(name) {
+  if (name === "compose" && !canCast()) { soon(); return; }
   if (name === "compose" && isPublic()) { compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
@@ -556,7 +566,7 @@ function renderAccount() {
     rows.push(h("div", { class: "person-row" }, avatar(me.user), h("div", {},
       h("div", { class: "name" }, me.user.display_name || handle(me.user)),
       h("div", { class: "muted mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
-      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, me.can_write ? "can post" : "read-only")));
+      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, power(me))));
   }
   if (!viewingSelf()) {
     rows.push(h("p", { class: "muted small" },
@@ -575,7 +585,7 @@ function renderWho() {
   } else if (!self) {
     who.textContent = `viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")} · read-only`;
   } else if (me.user) {
-    who.textContent = `${handle(me.user)} · ${me.can_write ? "can post" : "read-only"}`;
+    who.textContent = `${handle(me.user)} · ${power(me)}`;
   } else who.textContent = "read-only";
   $("#lookup-me").hidden = self || !me.user;
   if (!(me.can_write && self) && state.tab === "compose") setTab(state.lastTab);
@@ -633,6 +643,13 @@ async function init() {
     const banner = $("#banner");
     banner.replaceChildren(...codeify(state.me.help || "Read-only. Run `phunk key add`, then restart `phunk ui`."));
     banner.hidden = false;
+  }
+  if (!canCast()) {
+    const tab = $('.tabs button[data-tab="compose"]');
+    tab.setAttribute("aria-label", "New cast: coming soon");
+    tab.title = "Casting is coming soon";
+    tab.classList.add("soon");
+    tab.querySelector(".plus-label").textContent = "New cast · soon";
   }
   $("#lookup-name").value = state.who;
   renderWho();

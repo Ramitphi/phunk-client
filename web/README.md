@@ -1,9 +1,9 @@
 # phunk.social
 
 The web client from `phunk ui`, hosted and read-only. Type a Farcaster
-username, see that account's people and casts. Follow, Say hi, Like,
-Reply and New cast open Farcaster, because the site holds no keys and
-can't post for anyone. Inside a Farcaster client it runs as a mini app
+username, see that account's people and casts. Follow opens the profile
+in Farcaster, because the site holds no keys and can't act for anyone.
+Casts are read-only; casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
 (see below).
 
 One Vercel project with two [services](https://vercel.com/docs/services)
@@ -76,9 +76,8 @@ Opened inside a Farcaster client, the page:
 - loads the mini app SDK (`@farcaster/miniapp-sdk`, pinned, from esm.sh;
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
-- opens profiles, casts and the composer in the client: **Follow** opens
-  the profile, **Say hi** and **Reply** open the composer as a reply,
-  **New cast** opens the composer,
+- opens profiles in the client: **Follow** opens the profile (Say hi,
+  Reply and New cast come back with casting),
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**

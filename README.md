@@ -142,7 +142,7 @@ phunk ui                           # local web client: people to connect with, t
 
 `phunk ui` serves a small web client on `http://127.0.0.1:8008`. Its main
 screen is a feed of **people**, not posts: who to connect with, one plain
-reason each, their latest casts, and Follow / Say hi / Not now.
+reason each, their latest casts, and Follow / Not now.
 
 * **Reconnect**: people you talked to who moved to another app, went quiet,
   or whom you never followed.
@@ -150,13 +150,17 @@ reason each, their latest casts, and Follow / Say hi / Not now.
 * **Bridge**: a few mutual follows, but posting from another app or in
   channels you don't use.
 
-The **Casts** tab has the classic feed with the app that signed each cast,
-a filter by app, and a **New cast** button. Anyone's people feed can be
-looked up by name, read-only.
+The **Casts** tab has the classic feed with the app that signed each cast
+and a filter by app. Anyone's people feed can be looked up by name.
+
+In this first release the page follows people and casts are read-only.
+Casting, replies and likes in the page are coming soon (`phunk ui
+--casting` previews them). The command line does all of it today:
+`phunk post`, `phunk like`.
 
 ```sh
 phunk ui --as dwr      # read-only: look at anyone's people
-phunk ui               # with the key from `phunk key add`: follow, say hi, post
+phunk ui               # with the key from `phunk key add`: follow people
 ```
 
 Without a key it is read-only and never asks for a seed phrase. It binds
@@ -164,9 +168,8 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow, Say hi and Reply open Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away and replies
-in the client's composer. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+a username, and Follow opens the profile in Farcaster. Inside a Farcaster
+client it is a mini app that shows your own people right away. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node

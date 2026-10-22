@@ -38,9 +38,14 @@ CHANNEL_PREFIX = "https://warpcast.com/~/channel/"
 # Older channels use the URL of the NFT they started with. A few well-known ones, for display.
 KNOWN_CHANNELS = {"chain://eip155:1/erc721:0x7dd4e31f1530ac682c8ea4d8016e95773e08d8b0": "/dev"}
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-READ_ONLY_HELP = ("Read-only: no app key. To post, like and follow, run `phunk key add` in a terminal "
+READ_ONLY_HELP = ("Read-only: no app key. To follow people from here, run `phunk key add` in a terminal "
                   "(use a test account), then restart `phunk ui`.")
-PUBLIC_HELP = "Read-only. Follow, reply and like open in Farcaster."
+PUBLIC_HELP = "Read-only. Follow opens in Farcaster."
+# First release: the web client follows people; casts are read-only.
+# Casting, replies, likes and recasts come next (`phunk ui --casting` to try
+# them). The CLI already does all of it: `phunk post`, `phunk like`.
+CASTING = False
+CASTING_SOON = "Casting from phunk is coming soon. For now: `phunk post` in a terminal."
 FEED_TTL = 300  # seconds a feed window stays cached
 SUGGEST_TTL = 600
 PAGE = 30
@@ -154,10 +159,12 @@ class UI:
     its own, and the page sends follows, replies and likes to Farcaster.
     """
 
-    def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False):
+    def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False,
+                 casting: bool = CASTING):
         self.hub = hub
         self.fid = fid
         self.public = public
+        self.casting = casting
         self.writer = None
         if key is not None and fid is not None and not public:
             from .write import Writer
@@ -296,8 +303,8 @@ class UI:
 
     async def me_json(self, q) -> dict:
         hint = PUBLIC_HELP if self.public else (None if self.writer else READ_ONLY_HELP)
-        out = {"fid": self.fid, "can_write": self.writer is not None, "node": self.hub.url,
-               "public": self.public, "help": hint}
+        out = {"fid": self.fid, "can_write": self.writer is not None, "can_cast": self.casting,
+               "node": self.hub.url, "public": self.public, "help": hint}
         if self.fid is not None:
             out["user"] = self.user_json(await self.user(self.fid))
         return out
@@ -396,6 +403,11 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
                                     content_type="application/json")
         return ui.writer
 
+    def need_casting():
+        if not ui.casting:
+            raise web.HTTPForbidden(text=_dumps({"error": CASTING_SOON, "coming_soon": True}),
+                                    content_type="application/json")
+
     async def body(request) -> dict:
         try:
             data = await request.json()
@@ -423,6 +435,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     @r.post("/api/cast")
     async def cast(request):
+        need_casting()
         w = need_writer()
         d = await body(request)
 
@@ -438,6 +451,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
 
     @r.post("/api/react")
     async def react(request):
+        need_casting()
         w = need_writer()
         d = await body(request)
 
@@ -488,9 +502,10 @@ def is_loopback(host: str) -> bool:
 
 
 async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
-                key=None, open_browser: bool = False, public: bool = False) -> None:
+                key=None, open_browser: bool = False, public: bool = False,
+                casting: bool = CASTING) -> None:
     """Run the UI until interrupted. `public=True` previews the hosted, read-only site."""
-    ui = UI(hub, fid=fid, key=key, public=public)
+    ui = UI(hub, fid=fid, key=key, public=public, casting=casting)
     app = make_app(ui, check_host=is_loopback(host))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -498,7 +513,7 @@ async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int
     await site.start()
     shown = f"[{host}]" if ":" in host else host
     url = f"http://{shown}:{port}/"
-    mode = f"as fid {fid}, can post" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
+    mode = f"as fid {fid}, {'can post' if casting else 'can follow'}" if ui.writer else (f"as fid {fid}, read-only" if fid else "read-only")
     if public:
         mode = "public preview, read-only"
     print(f"phunk ui on {url} ({mode}, node {hub.url})")

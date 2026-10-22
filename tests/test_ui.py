@@ -90,7 +90,7 @@ async def node(request):
     return web.Response(status=404)
 
 
-async def with_ui(test, *, fid=9, key=None, public=False):
+async def with_ui(test, *, fid=9, key=None, public=False, casting=False):
     """Start the fake node and the UI against it; run `test(client, base, calls, submitted)`."""
     calls, submitted = [], []
     nodeapp = web.Application()
@@ -118,7 +118,7 @@ async def with_ui(test, *, fid=9, key=None, public=False):
     try:
         node_port = await start(nodeapp)
         async with Hub(f"http://127.0.0.1:{node_port}", rate=1000, retries=2) as hub:
-            ui = UI(hub, fid=fid, key=key, public=public)
+            ui = UI(hub, fid=fid, key=key, public=public, casting=casting)
             port = await start(make_app(ui))
             async with aiohttp.ClientSession() as client:
                 return await test(client, f"http://127.0.0.1:{port}", calls, submitted)
@@ -274,7 +274,7 @@ def test_read_only_write_endpoints_explain_key_add():
                await post(client, f"{base}/api/follow", {"fid": 50})]
         return me, out, submitted
 
-    me, out, submitted = run(test)
+    me, out, submitted = run(test, casting=True)
     assert me["can_write"] is False and "phunk key add" in me["help"]
     for status, body in out:
         assert status == 403 and body["read_only"] and "phunk key add" in body["error"]
@@ -314,6 +314,22 @@ def _varint(buf, i):
         if not b & 0x80:
             return n, i
 
+def test_first_release_follows_but_casting_is_coming_soon(key):
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/me") as r:
+            me = await r.json()
+        out = [await post(client, f"{base}/api/cast", {"text": "hi"}),
+               await post(client, f"{base}/api/react", {"action": "like", "cast": "1:0x" + "ab" * 20})]
+        follow = await post(client, f"{base}/api/follow", {"fid": 50})
+        return me, out, follow, submitted
+
+    me, out, follow, submitted = run(test, key=key)
+    assert me["can_write"] is True and me["can_cast"] is False
+    for status, body in out:
+        assert status == 403 and body["coming_soon"] and "coming soon" in body["error"]
+    assert follow[0] == 200 and len(submitted) == 1  # only the follow went out
+
+
 
 def test_keyed_writes_submit_signed_messages(key):
     from phunk.write import proto_data
@@ -338,7 +354,7 @@ def test_keyed_writes_submit_signed_messages(key):
                await post(client, f"{base}/api/follow", {"fid": "dwr"})]
         return me_text, before, results, after, bad, submitted
 
-    me_text, before, results, after, bad, submitted = run(test, key=key)
+    me_text, before, results, after, bad, submitted = run(test, key=key, casting=True)
     assert '"can_write": true' in me_text
     assert key.private_hex[2:] not in me_text  # the key never leaves the server
     assert all(status == 200 and body["hash"].startswith("0x") for status, body in results)
@@ -355,14 +371,14 @@ def test_keyed_writes_submit_signed_messages(key):
 
 def test_cross_origin_and_non_json_posts_are_refused(key):
     async def test(client, base, calls, submitted):
-        out = [await post(client, f"{base}/api/cast", {"text": "hi"}, Origin="http://evil.example"),
-               await post(client, f"{base}/api/cast", {"text": "hi"}, **{"Sec-Fetch-Site": "cross-site"})]
-        async with client.post(f"{base}/api/cast", data="text=hi",
+        out = [await post(client, f"{base}/api/follow", {"fid": 50}, Origin="http://evil.example"),
+               await post(client, f"{base}/api/follow", {"fid": 50}, **{"Sec-Fetch-Site": "cross-site"})]
+        async with client.post(f"{base}/api/follow", data="fid=50",
                                headers={"Content-Type": "application/x-www-form-urlencoded"}) as r:
             out.append((r.status, await r.json()))
         async with client.get(f"{base}/api/me", headers={"Host": "evil.example"}) as r:
             out.append((r.status, await r.json()))
-        same = await post(client, f"{base}/api/cast", {"text": "ok"}, Origin=base)
+        same = await post(client, f"{base}/api/follow", {"fid": 50}, Origin=base)
         return out, same, submitted
 
     out, same, submitted = run(test, key=key)
