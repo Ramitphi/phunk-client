@@ -125,6 +125,12 @@ const MINIAPP_SDK = "https://esm.sh/@farcaster/miniapp-sdk@0.3.0";
 const isPublic = () => !!(state.me && state.me.public);
 let miniapp = null; // the mini app SDK, when running inside a Farcaster client
 
+// Count an action on the hosted site's analytics (onedollarstats, loaded by
+// web/head.html only). Names and where it ran, never who: no usernames.
+function track(name) {
+  try { if (window.stonks) window.stonks.event(name, { where: miniapp ? "miniapp" : "web" }); } catch { /* blocked */ }
+}
+
 function openFarcaster(path) {
   if (miniapp) { miniapp.actions.openUrl(FARCASTER + path); return; }
   window.open(FARCASTER + path, "_blank", "noopener,noreferrer");
@@ -293,7 +299,7 @@ function castCard(c) {
   const toggle = (kind) => {
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" }, kind === "like" ? "Like" : "Recast");
     btn.addEventListener("click", async () => {
-      if (isPublic()) return viewCast(c);
+      if (isPublic()) { track(kind === "like" ? "Like" : "Recast"); return viewCast(c); }
       if (!(state.me.can_write && viewingSelf())) return needKey();
       const on = btn.classList.contains("on");
       btn.disabled = true;
@@ -310,7 +316,7 @@ function castCard(c) {
   const body = h("div", {}, meta, replyTo, c.text ? h("div", { class: "text" }, c.text) : null, embeds);
   const replyBtn = h("button", { type: "button", class: "ghost reply" }, "Reply");
   replyBtn.addEventListener("click", () => {
-    if (isPublic()) return replyTo(c);
+    if (isPublic()) { track("Reply"); return replyTo(c); }
     if (!(state.me.can_write && viewingSelf())) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -448,7 +454,7 @@ function personCard(p) {
   if (p.following) follow.disabled = true;
   if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
-    if (isPublic()) return viewProfile(p);
+    if (isPublic()) { track("Follow"); return viewProfile(p); }
     if (!canAct) return needKey();
     follow.disabled = true;
     try {
@@ -466,7 +472,10 @@ function personCard(p) {
   const body = h("div", { class: "pbody" });
 
   hi.addEventListener("click", () => {
-    if (isPublic()) return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
+    if (isPublic()) {
+      track("Say hi");
+      return latest ? replyTo(latest) : compose(p.username ? `@${p.username} ` : "");
+    }
     if (!canAct) return needKey();
     const open = body.querySelector(".reply-box");
     if (open) { open.remove(); return; }
@@ -595,7 +604,7 @@ const narrow = () => matchMedia("(max-width: 800px)").matches;
 
 function setTab(name) {
   if (name === "compose" && !canCast()) { soon(); return; }
-  if (name === "compose" && isPublic()) { compose(); return; }
+  if (name === "compose" && isPublic()) { track("New cast"); compose(); return; }
   if (name === "compose" && state.me && !(state.me.can_write && viewingSelf())) { needKey(); return; }
   if (name !== "compose") state.lastTab = name;
   state.tab = name;
@@ -719,7 +728,11 @@ async function init() {
   $("#lookup-name").value = state.who;
   renderWho();
 
-  $("#lookup").addEventListener("submit", (ev) => { ev.preventDefault(); lookUp($("#lookup-name").value); });
+  $("#lookup").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    if (isPublic()) track("Look up");
+    lookUp($("#lookup-name").value);
+  });
   $("#lookup-me").addEventListener("click", () => lookUp(""));
 
   $("#compose-close").addEventListener("click", () => setTab(state.lastTab));

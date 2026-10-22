@@ -56,7 +56,8 @@ Vercel deploys `main` to production and every other branch as a preview.
 ## Point phunk.social at it
 
 1. In the project: **Settings → Domains → Add** `phunk.social`, then
-   `www.phunk.social` (let Vercel redirect `www` to the bare domain).
+   `www.phunk.social` (let Vercel redirect `www` to the bare domain), then
+   `miniapp.phunk.social` (the mini app; same site, its own domain).
 2. Vercel shows the DNS records to add. Add them where you bought the
    domain, usually:
 
@@ -64,6 +65,7 @@ Vercel deploys `main` to production and every other branch as a preview.
    |---|---|---|
    | A | `@` | `76.76.21.21` |
    | CNAME | `www` | `cname.vercel-dns.com` |
+   | CNAME | `miniapp` | `cname.vercel-dns.com` |
 
    Use the values Vercel shows if they differ. Remove any other A or AAAA
    record on `@`.
@@ -71,8 +73,10 @@ Vercel deploys `main` to production and every other branch as a preview.
 
 ## The mini app
 
-phunk.social is also a [Farcaster mini app](https://miniapps.farcaster.xyz/).
-Opened inside a Farcaster client, the page:
+The same site is also a [Farcaster mini app](https://miniapps.farcaster.xyz/)
+at `miniapp.phunk.social`. It gets its own domain so its traffic shows
+apart from the website's in analytics. Opened inside a Farcaster client,
+the page:
 
 - loads the mini app SDK (`@farcaster/miniapp-sdk`, pinned, from esm.sh;
   only inside a client, never on the plain site),
@@ -86,7 +90,8 @@ Opened inside a Farcaster client, the page:
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**
-button (the `fc:miniapp` tag in `web/head.html`).
+button that opens `miniapp.phunk.social` (the `fc:miniapp` tag in
+`web/head.html`). `MINIAPP_DOMAIN` in `web/build.sh` sets that domain.
 
 ### Sign the manifest (once)
 
@@ -94,21 +99,36 @@ Clients trust `/.well-known/farcaster.json` only when a Farcaster account
 signs it for the domain. Nothing secret is involved: you sign in the
 Farcaster app, and the result is public.
 
-1. Deploy, with phunk.social pointing at Vercel (above).
+1. Deploy, with `miniapp.phunk.social` pointing at Vercel (above).
 2. Open Farcaster's manifest tool, https://farcaster.xyz/~/developers/new,
-   and enter `phunk.social` (exactly; `www.phunk.social` is a different app).
+   and enter `miniapp.phunk.social` (exactly; every domain is a different app).
 3. Sign with the account that should own the app, for example the app
    account behind `signer/`. It gives you `header`, `payload` and
    `signature`.
 4. In Vercel → **Settings → Environment Variables**, add them as
    `FARCASTER_HEADER`, `FARCASTER_PAYLOAD` and `FARCASTER_SIGNATURE`, then
    redeploy. `web/build.sh` puts them into the manifest.
-5. Check `https://phunk.social/.well-known/farcaster.json`, then preview the
+5. Check `https://miniapp.phunk.social/.well-known/farcaster.json`, then preview the
    app in Farcaster's developer tools.
 
 To change the name, text or images, edit `web/public/.well-known/farcaster.json`
 or `web/make_images.py` (then run it). Image sizes: icon 1024×1024 with no
 transparency, splash 200×200, embed 3:2, share image 1200×630.
+
+## Analytics
+
+[OneDollarStats](https://onedollarstats.com) counts visits, one dashboard
+per domain: `phunk.social` and `miniapp.phunk.social` (add both as sites
+there). `web/head.html` loads its script on the hosted site only; the
+local `phunk ui` never loads it, and it ignores localhost anyway.
+
+- No cookies. Query strings are dropped before sending, so the usernames
+  people look up (`?as=dwr`) are never sent.
+- The page also counts actions, by name only, each with `where=web` or
+  `where=miniapp` (inside a Farcaster client): `Look up` and `Follow` now;
+  `Say hi`, `Reply`, `Like`, `Recast` and `New cast` once casting is back.
+- The page's CSP allows `assets.onedollarstats.com` (the script) and
+  `collector.onedollarstats.com` (where it sends events), in `vercel.json`.
 
 ## How it holds up
 
