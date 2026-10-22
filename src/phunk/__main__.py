@@ -226,12 +226,13 @@ async def run_feed(hub: Hub, args) -> None:
 
 
 async def run_ui(hub: Hub, args) -> None:
+    from .onchain import base_rpc_from_env
     from .ui import serve, tip_fid_from_env
 
-    tip = tip_fid_from_env()
+    tip, rpc = tip_fid_from_env(), base_rpc_from_env()
     if args.public:  # what phunk.social serves: no account, no key
         return await serve(hub, host=args.host, port=args.port, open_browser=args.open, public=True,
-                           tip_fid=tip)
+                           tip_fid=tip, vote_rpc=rpc)
     found = None if args.read_only else find_key()
     fid, key = found if found else (None, None)
     if args.who:
@@ -242,7 +243,7 @@ async def run_ui(hub: Hub, args) -> None:
     elif fid is None and os.environ.get("PHUNK_FID", "").isdigit():
         fid = int(os.environ["PHUNK_FID"])
     await serve(hub, host=args.host, port=args.port, fid=fid, key=key, open_browser=args.open,
-                casting=args.casting, tip_fid=tip)
+                casting=args.casting, tip_fid=tip, vote_rpc=rpc)
 
 
 async def run(args) -> None:

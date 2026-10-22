@@ -101,6 +101,17 @@ The fields are `username`, `display_name`, `pfp`, `bio`, `url`, `location`,
 `twitter`, `github`, `banner`, `eth_address` and `sol_address`. Any field the
 person never set is `None`.
 
+`eth_address` is the one address the person picked as primary. They can
+verify more, and a token they hold may sit in any of them:
+
+```sh
+curl -s "https://haatz.quilibrium.com/v1/verificationsByFid?fid=3"
+```
+
+```python
+print(await hub.eth_addresses(3))       # ['0x187c...', '0x6ce0...'], lowercase
+```
+
 ## 3. Casts, and Farcaster time
 
 ```sh
@@ -887,7 +898,10 @@ async with Hub() as hub:
 ```
 
 The first load reads about 150 things from the node, roughly ten seconds
-on a public one. The ranking itself, `people.build()`, is a pure function
+on a public one. `phunk ui` also stamps the people who voted for Network
+School Farcaster: it reads each card's verified addresses
+(`hub.eth_addresses`) and asks Base which hold the vote NFT, in one call
+(`phunk.onchain.holders`). The ranking itself, `people.build()`, is a pure function
 you can test without a node.
 
 ### People to follow

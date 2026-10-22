@@ -55,6 +55,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
 | `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
+| `eth_addresses(fid)` | `/v1/verificationsByFid` | every Ethereum address the account verified (the primary one is just one of them) |
 | `signers(fid, requester_fids=)` | `/v1/signersByFid` | active keys, `currentUserNonce`, and each app's nonce (`requesterFidNonces`) |
 | `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
 | `info()` | `/v1/info` | node stats |
@@ -162,6 +163,11 @@ and a filter by app. Anyone's people feed can be looked up by name.
 Set `PHUNK_TIP_FID` to an fid to show a **Buy me a coffee** card: inside a
 Farcaster client it opens the viewer's wallet with USDC on Base to that
 account filled in.
+
+A card gets a small **Voted NS** stamp when the person holds the "I voted
+for Network School Farcaster" NFT on Base in any wallet they verified. The
+check is one `eth_call` to Base (`PHUNK_BASE_RPC`, default
+`https://mainnet.base.org`; `off` hides the stamp).
 
 In this first release the page follows people and likes casts; it doesn't
 cast yet. Casting, replies and recasts in the page are coming soon (`phunk

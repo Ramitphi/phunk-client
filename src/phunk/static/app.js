@@ -228,12 +228,23 @@ function compose(text, channel) {
 
 // Load the SDK only where a Farcaster client could be the host: in a frame
 // or a phone app's web view. Same check the SDK itself starts with.
+let framedSdk = null; // the SDK, loaded in a frame or web view, host or not
 async function startMiniApp() {
   if (!(window.ReactNativeWebView || window.parent !== window)) return null;
   try {
     const { sdk } = await import(MINIAPP_SDK);
-    return (await sdk.isInMiniApp()) ? sdk : null;
+    framedSdk = sdk;
+    // The SDK's default wait for the host is 1s; some hosts answer slower.
+    return (await sdk.isInMiniApp(5000)) ? sdk : null;
   } catch { return null; }
+}
+
+// Hide the host's splash screen. Called in any frame, even when the host
+// didn't answer in time: a host left on its splash shows a blank app, and
+// outside a host the message goes nowhere. Not awaited: with no host it
+// never resolves.
+function hostReady() {
+  if (framedSdk) framedSdk.actions.ready().catch(() => {});
 }
 
 function profilePath(user) {
@@ -512,6 +523,7 @@ function personCard(p) {
   const head = h("div", { class: "meta" },
     h("span", { class: "name" }, p.display_name || handle(p)),
     p.username && p.display_name ? h("span", { class: "muted" }, handle(p)) : null,
+    p.ns_vote ? h("span", { class: "stamp", title: "Holds the \u201cI voted for Network School Farcaster\u201d NFT" }, "voted NS") : null,
     app);
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
     h("span", {}, p.why.join(" ")));
@@ -694,7 +706,7 @@ async function init() {
     state.me = await api("/api/me");
   } catch (e) {
     $("#people").replaceChildren(h("div", { class: "card empty" }, `Could not reach the server: ${e.message}`));
-    startMiniApp().then((sdk) => sdk && sdk.actions.ready()); // never leave a host on its splash
+    startMiniApp().then(hostReady); // never leave a host on its splash
     return;
   }
   if (isPublic()) {
@@ -781,7 +793,7 @@ async function init() {
 
   setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
-  if (miniapp) miniapp.actions.ready(); // hide the host's splash screen
+  hostReady();
 }
 
 init();

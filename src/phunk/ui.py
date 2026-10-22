@@ -26,10 +26,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from .hub import Hub, NodeError, NotFound
 from .models import Cast, User
+from .onchain import holders
 from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
@@ -169,8 +171,9 @@ class UI:
     """
 
     def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False,
-                 casting: bool = CASTING, tip_fid: int | None = None):
+                 casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None):
         self.hub = hub
+        self.vote_rpc = vote_rpc  # Base JSON-RPC for the "voted NS" badge; None: no badge
         self.tip_fid = tip_fid
         self.fid = fid
         self.public = public
@@ -199,6 +202,26 @@ class UI:
             _trim(self._users, MAX_USERS)
             return await fut
         return await self._users[fid]
+
+    async def voters(self, fids) -> set[int]:
+        """Which of `fids` hold the "I voted for Network School Farcaster" NFT
+        in any verified wallet: a fresh balanceOf check each time, nothing
+        cached. If Base can't be reached the stamp just doesn't show."""
+        fids = list(dict.fromkeys(fids))
+        if not self.vote_rpc or not fids:
+            return set()
+
+        async def addresses(fid):
+            try:
+                return await self.hub.eth_addresses(fid)
+            except NodeError:
+                return []
+        found = await asyncio.gather(*(addresses(f) for f in fids))
+        try:
+            held = await holders(self.hub.session, [a for a_s in found for a in a_s], rpc=self.vote_rpc)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            return set()
+        return {f for f, a_s in zip(fids, found) if any(a in held for a in a_s)}
 
     async def names(self, fids) -> dict[int, str | None]:
         fids = list(dict.fromkeys(fids))
@@ -295,7 +318,9 @@ class UI:
             self._people[fid] = hit
             _trim(self._people, MAX_WINDOWS)
         out = await hit[1]
-        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here) for c in out["cards"]]
+        voted = await self.voters(c["fid"] for c in out["cards"])  # fresh on every load
+        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here, ns_vote=c["fid"] in voted)
+                 for c in out["cards"]]
         return {"summary": out["summary"], "cards": cards}
 
     async def who(self, value: str | None) -> int:
@@ -519,9 +544,9 @@ def is_loopback(host: str) -> bool:
 
 async def serve(hub: Hub, *, host: str = "127.0.0.1", port: int = 8008, fid: int | None = None,
                 key=None, open_browser: bool = False, public: bool = False,
-                casting: bool = CASTING, tip_fid: int | None = None) -> None:
+                casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None) -> None:
     """Run the UI until interrupted. `public=True` previews the hosted, read-only site."""
-    ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid)
+    ui = UI(hub, fid=fid, key=key, public=public, casting=casting, tip_fid=tip_fid, vote_rpc=vote_rpc)
     app = make_app(ui, check_host=is_loopback(host))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
