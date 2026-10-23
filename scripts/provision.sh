@@ -37,6 +37,8 @@ SSH_PORT="${SSH_PORT:-22}"
 NODE_SH_URL="${NODE_SH_URL:-https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/node.sh}"
 
 export DEBIAN_FRONTEND=noninteractive
+# Restart services after upgrades without asking (needrestart on 22.04).
+export NEEDRESTART_MODE=a
 
 say()  { printf '\n==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -67,7 +69,9 @@ update_packages() {
     say "Updating packages"
     apt_get update
     apt_get upgrade
-    apt_get install ca-certificates curl gnupg jq ufw cron sudo
+    # git and pip for step 2 (pip install phunk-client from GitHub); Ubuntu
+    # server images ship python3 but not pip.
+    apt_get install ca-certificates curl gnupg jq ufw cron sudo git python3-pip
 }
 
 install_docker() {
@@ -118,6 +122,10 @@ create_user() {
 
     home="$(getent passwd "$NODE_USER" | cut -d: -f6)"
     copy_ssh_keys "$home"
+
+    # pip installs the phunk command into ~/.local/bin. Ubuntu's ~/.profile
+    # puts that on PATH only if it exists at login, so make it now.
+    install -d -m 0755 -o "$NODE_USER" -g "$NODE_USER" "$home/.local" "$home/.local/bin"
 }
 
 # Give the new user the SSH keys of root and of whoever ran sudo. Only the key
