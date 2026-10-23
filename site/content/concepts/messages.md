@@ -60,7 +60,7 @@ Each `_REMOVE` undoes its `_ADD`. Deleting a cast leaves a small tombstone in it
 
 `timestamp` counts seconds from the **Farcaster epoch**, 2021-01-01 00:00 UTC. Add 1609459200 to get Unix time. A recent epoch keeps the numbers, and so the messages, small.
 
-The author sets the timestamp, and nobody checks it. It can be backdated, like a blog post. It cannot be more than 15 minutes in the future; the network rejects those.
+The author sets the timestamp, and nobody checks it. It can be backdated, like a blog post. It cannot be more than 10 minutes in the future; the network rejects those.
 
 On-chain events (registrations, key adds on the old path, storage rent) use the chain's block time, which is ordinary Unix time.
 

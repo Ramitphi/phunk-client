@@ -20,12 +20,13 @@
 #      and copy root's SSH keys to it
 #   4. turn on the ufw firewall: SSH, 3381/tcp (HTTP API), 3382/udp (gossip),
 #      3383/tcp (gRPC)
-#   5. put node.sh in the new user's home and print the next command
+#   5. put node.sh and gateway.sh in the new user's home and print the next command
 #
 # Settings (environment variables):
 #   NODE_USER   user to create          (default: snapchain)
 #   SSH_PORT    SSH port to keep open   (default: 22)
-#   NODE_SH_URL where to fetch node.sh  (default: this repo on GitHub)
+#   NODE_SH_URL where to fetch node.sh; gateway.sh comes from the same folder
+#               (default: this repo on GitHub)
 #
 # Note: ports that Docker publishes skip ufw. node.sh binds Grafana and statsd
 # to 127.0.0.1 so only 3381-3383 face the internet.
@@ -167,28 +168,31 @@ setup_firewall() {
     fi
 }
 
-install_node_sh() {
+# Put node.sh and gateway.sh in the node user's home. Use the copies next to
+# this file when run from a clone. Under "curl | bash" there is no file, so
+# download them from the same place as NODE_SH_URL.
+install_scripts() {
+    local home src dir name url target
     home="$(getent passwd "$NODE_USER" | cut -d: -f6)"
-    target="$home/node.sh"
-    # Use the node.sh next to this file when run from a clone. Under
-    # "curl | bash" there is no file, so download it.
     src="${BASH_SOURCE[0]:-}"
-    local_copy=""
-    if [ -n "$src" ] && [ -f "$src" ]; then
-        local_copy="$(dirname "$src")/node.sh"
-    fi
+    dir=""
+    if [ -n "$src" ] && [ -f "$src" ]; then dir="$(dirname "$src")"; fi
 
-    if [ -n "$local_copy" ] && [ -f "$local_copy" ]; then
-        install -m 0755 -o "$NODE_USER" -g "$NODE_USER" "$local_copy" "$target"
-    elif curl -fsSL "$NODE_SH_URL" -o "$target.tmp"; then
-        install -m 0755 -o "$NODE_USER" -g "$NODE_USER" "$target.tmp" "$target"
-        rm -f "$target.tmp"
-    else
-        rm -f "$target.tmp"
-        warn "could not download node.sh from $NODE_SH_URL"
-        return 0
-    fi
-    say "Installed $target"
+    for name in node.sh gateway.sh; do
+        url="${NODE_SH_URL%/*}/$name"
+        target="$home/$name"
+        if [ -n "$dir" ] && [ -f "$dir/$name" ]; then
+            install -m 0755 -o "$NODE_USER" -g "$NODE_USER" "$dir/$name" "$target"
+        elif curl -fsSL "$url" -o "$target.tmp"; then
+            install -m 0755 -o "$NODE_USER" -g "$NODE_USER" "$target.tmp" "$target"
+            rm -f "$target.tmp"
+        else
+            rm -f "$target.tmp"
+            warn "could not download $name from $url"
+            continue
+        fi
+        say "Installed $target"
+    done
 }
 
 print_next() {
@@ -214,5 +218,5 @@ update_packages
 install_docker
 create_user
 setup_firewall
-install_node_sh
+install_scripts
 print_next

@@ -4,16 +4,22 @@ Read and write Farcaster straight from a Snapchain / Hypersnap node. No API
 key, no Neynar, no indexer: just the node's HTTP API, with the paging quirks
 handled for you, and gasless app keys for posting.
 
-## Quickstart (3 commands)
+## Try it (public node)
 
 Any machine with Python 3.10+. No API key and no node of your own: it reads
-from a public node by default.
+from a public node by default. To run your own node, the
+[microsite quickstart](https://ramitphi.github.io/phunk-client/) does it in
+three commands: rent a server, start the node, read from it.
 
 ```sh
 pip install git+https://github.com/Ramitphi/phunk-client
 phunk whois dwr                   # a profile
 phunk feed dwr --hide warpcast    # last 24h from everyone dwr follows, minus one app
 ```
+
+If `pip` says "externally-managed-environment" (macOS with Homebrew, Ubuntu
+24.04, Debian 12), make a virtual environment first:
+`python3 -m venv ~/.phunk && . ~/.phunk/bin/activate`.
 
 ```
 $ phunk whois dwr
@@ -108,15 +114,20 @@ on-chain events some other way.
 signature. No transaction, no gas.
 
 ```python
+import asyncio, getpass
+from phunk import Hub
 from phunk.write import Custody, Writer, add_app_key
 
-custody = Custody.from_mnemonic(phrase)          # test account; never saved
-async with Hub("http://localhost:3381") as hub:
-    fid, key = await add_app_key(hub, custody)   # key.private_hex: keep it secret
-    me = Writer(hub, fid, key)
-    h = await me.cast("hello from my own node")
-    await me.like(3, "0x...")
-    await me.follow(3)
+async def main():
+    custody = Custody.from_mnemonic(getpass.getpass("seed phrase (test account): "))
+    async with Hub("http://localhost:3381") as hub:
+        fid, key = await add_app_key(hub, custody)   # key.private_hex: keep it secret
+        await asyncio.sleep(5)                       # let the KEY_ADD land in a block
+        me = Writer(hub, fid, key)
+        h = await me.cast("hello from my own node")
+        await me.follow(3)
+
+asyncio.run(main())
 ```
 
 | `Writer` method | Message |

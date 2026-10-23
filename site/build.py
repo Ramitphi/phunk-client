@@ -348,14 +348,14 @@ def collect_pages() -> list[Page]:
         # Steps 1-8 only, so the site title drops "and writing".
         out="tutorial.html", source=src, meta={**common, "lede": "no"}, body_md=reading_md,
         title="Reading Farcaster through a node",
-        summary="From one curl to working out which app signed each cast. Eight short steps.",
+        summary="From one curl to working out which app signed each cast, then running your own node.",
     ))
     pages.append(Page(
         # A made-up source path keeps the two pages apart in the link map.
         out="writing.html", source=src.with_name("TUTORIAL.md#writing"), meta=dict(common),
         body_md=writing_md, title="Writing to the network",
         summary="Add a gasless app key, then post, like and follow through your own node. "
-                "Step 9 of the tutorial.",
+                "Step 10 of the tutorial.",
     ))
 
     pages.append(read_page(CONTENT / "concepts" / "index.md", "concepts/index.html"))

@@ -10,7 +10,9 @@ used to sign each cast, and then to posting through a node with your own
 app key. Each step shows the raw endpoint first, then the same
 thing with `phunk-client`.
 
-**You'll need:** Python 3.10+ and a terminal. Allow about 30 minutes.
+**You'll need:** Python 3.10+ and a terminal. Reading takes about 30
+minutes. Running your own node (step 9) adds a few hours of waiting while
+it syncs.
 
 1. [Talk to a node](#1-talk-to-a-node)
 2. [Names, fids and profiles](#2-names-fids-and-profiles)
@@ -50,6 +52,10 @@ Install the client:
 ```sh
 pip install git+https://github.com/Ramitphi/phunk-client
 ```
+
+If `pip` says "externally-managed-environment" (macOS with Homebrew, Ubuntu
+24.04, Debian 12), make a virtual environment first and run `pip` inside it:
+`python3 -m venv ~/.phunk && . ~/.phunk/bin/activate`.
 
 ```python
 import asyncio
@@ -284,7 +290,7 @@ async for like in hub.reactions(3, "like", limit=10):
 
 ## 7. Which app signed this?
 
-This is the part most APIs hide. Every message carries a `signer`, the
+Every message carries a `signer`, the
 ed25519 public key that signed it. People don't sign with their wallet.
 Each app they log into asks them to add a new key for that app, and the
 key's add record names **which app asked**. There are two ways to add one:
@@ -368,9 +374,9 @@ removals. Some things to know when reading it:
 - **Key providers.** Some fids, like `neynar` and `privy`, request keys on
   behalf of many different apps, so their name tells you the provider, not
   the app.
-- **Removing a key deletes everything it signed.** If someone signs out of an
-  app that way, the node drops that app's messages for them, so the history
-  you see is what's still signed by a live key.
+- **Removing a key keeps what it signed.** Since Snapchain's engine
+  version 14 (October 2025), messages signed by a removed key stay. Older
+  removals did delete them, so some early history is gone.
 
 [`examples/which_app.py`](../examples/which_app.py) prints someone's full key
 history and which app signed their recent casts, likes and follows:
@@ -436,7 +442,7 @@ the same HTTP API. It needs no API key and no account with anyone.
 | CPU | 4 cores |
 | RAM | 16 GB |
 | Disk | 2 TB SSD or NVMe |
-| Network | a public IP, ports 3381–3383 open |
+| Network | a public IP; UDP 3382 open (gossip, to sync). TCP 3381 and 3383 only if others read from it |
 
 The database is 500–800 GB today and grows, so don't skimp on disk. Any
 provider works. Rough monthly prices (check before you rent):
@@ -512,7 +518,9 @@ things:
 
 - To agree that you get no rewards for running a node. Type `Yes`.
 - Your FID or username. It only picks the weekday for weekly auto-upgrades.
-  Press Enter to skip; auto-upgrade is then off.
+  Press Enter to skip; auto-upgrade is then off, and you run
+  `./node.sh upgrade` yourself. Do that when a new release comes out: a
+  node too old for a protocol change stops following the chain.
 
 To run it without questions, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` and
 `SNAPCHAIN_OPERATOR_FID=<fid>` first.
@@ -703,10 +711,6 @@ and resubmit if not. This is the path `phunk post`, `like` and `follow`
 take in [step 10](#10-writing-app-keys-casts-follows): your client sends to
 your own node, and your node passes it on.
 
-That's the whole stack: a node, an HTTP API, and a few traps to avoid.
-Everything else (feeds, search, recommendations, graph analysis) is
-something you can build on top.
-
 ---
 
 ## 10. Writing: app keys, casts, follows
@@ -741,6 +745,12 @@ already posts has it.
 > lines: `src/phunk/write.py`). Apps that can should ask a wallet to sign
 > the authorization instead, so the phrase never leaves it.
 
+**Getting a test account.** It needs storage, and you need its recovery
+(seed) phrase. The simplest way: create a second account in the Farcaster
+app, then copy that account's recovery phrase from the app's settings. A
+new account in the app comes with storage. Keep using your main account
+for everything else.
+
 Install the writing extras (Ed25519, BLAKE3 and Ethereum signing):
 
 ```sh
@@ -749,11 +759,14 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 
 ### Add an app key
 
-From the command line. The phrase is read hidden, used once in memory, and
-dropped. Only the new app key is saved, readable by you alone:
+From the command line. Point `phunk` at your node once, so every command
+below reads from it and submits through it. The phrase is read hidden, used
+once in memory, and dropped. Only the new app key is saved, readable by you
+alone:
 
 ```sh
-phunk --node http://<your-node>:3381 key add
+export PHUNK_NODE=http://<your-node>:3381   # or http://localhost:3381 on the node
+phunk key add
 ```
 
 In Python:
@@ -791,11 +804,19 @@ Afterwards the key shows up in `GET /v1/signersByFid` with
 ### Post, like, follow
 
 ```sh
-phunk post "hello from my own node"
+phunk post "hello from my own node"       # prints the cast as FID:HASH
 phunk post "gm" --channel https://warpcast.com/~/channel/politics
-phunk like 3:0x<cast hash>
 phunk follow dwr
+phunk feed                                # your feed; each cast's FID:HASH is on the line below it
+phunk like <FID:HASH>                     # paste one from the feed
+phunk feed --hide warpcast                # leave out casts from one app
+phunk feed --only fireflyapp              # or show only one app's casts
 ```
+
+`post` also prints a URL to check that the cast arrived. Open it after a
+few seconds. If it says not found, the gossip to the validators was lost;
+post again. App names come from the app's own Farcaster name, as `phunk
+feed` shows them in brackets.
 
 ```python
 from phunk.write import AppKey, Writer
@@ -962,8 +983,7 @@ phunk ui --public          # what phunk.social runs: read-only, actions open Far
 Then visit `http://127.0.0.1:8008`.
 
 Its main screen is a feed of **people**, not posts. As people spread across
-clients, the risk isn't that the network dies, it's that it splits into
-islands and you lose the people you used to talk to. So each card is one
+clients, it's easy to lose the people you used to talk to. So each card is one
 person to connect with: who they are, which app they post from now, one
 plain reason, their latest casts, and **Follow** and **Not now**. There
 are three kinds:
@@ -986,6 +1006,7 @@ The **Casts** tab has the classic feed:
   signed it. Pick a window (6 hours to 7 days) and load more.
 * **An app filter**: a checkbox for every app seen, plus "own key" and
   "unknown". Untick one to hide its casts.
+
 In this first release the page follows and likes, but doesn't cast.
 **New cast** says "coming soon"; replies and recasts in the page come with
 it. To post now,

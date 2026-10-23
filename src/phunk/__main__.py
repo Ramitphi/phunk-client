@@ -201,7 +201,12 @@ async def run_write(hub: Hub, args) -> None:
         if not fields:
             sys.exit("nothing to change: pass --username, --display, --bio, --pfp or --url")
         h = ", ".join(await me.set_profile(**fields))
-    print(f"submitted {h}")
+    if args.cmd == "post":
+        # FID:HASH is what like/recast take; the URL shows whether it landed.
+        print(f"posted {fid}:{h}")
+        print(f"check:  {hub.url}/v1/castById?fid={fid}&hash={h}")
+    else:
+        print(f"submitted {h}")
 
 
 async def run_feed(hub: Hub, args) -> None:
