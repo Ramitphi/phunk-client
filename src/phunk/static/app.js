@@ -95,30 +95,48 @@ function codeify(text) {
 // bills out of the money gun. "Reduce motion" turns the movement off.
 // Each cue has a haptic too: the Farcaster client's, where it has them,
 // else the phone's vibration on the plain site (Android browsers).
+// Cues fire on the tap itself, not when the network answers (see `sent`).
 
 const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // The same feel as a vibration pattern, in ms.
 const VIBRATE = { tap: 8, heavy: 24, pick: 5, success: [12, 60, 20], warning: [20, 60, 20], error: [30, 50, 30, 50, 30] };
-let hostHaptics = null; // a promise: can this client do haptics? asked once
+let hapticsOk = null; // can this client do haptics? null until it answers
+let hapticsAsk = null;
+let tapTimer = 0;
 
-// "tap" (light), "heavy", "pick" (a selection tick), or a notification:
-// "success", "warning", "error".
-function buzz(kind) {
+// Ask the host once, early, so the first buzz doesn't wait on a round trip.
+function hapticsReady() {
+  if (!miniapp || hapticsAsk) return hapticsAsk;
+  hapticsAsk = Promise.resolve(miniapp.getCapabilities())
+    .then((c) => c.some((x) => x.startsWith("haptics."))).catch(() => false)
+    .then((ok) => { hapticsOk = ok; return ok; });
+  return hapticsAsk;
+}
+
+function buzzNow(kind) {
   if (!miniapp) {
     try { if (navigator.vibrate) navigator.vibrate(VIBRATE[kind] || 8); } catch { /* not here */ }
     return;
   }
-  hostHaptics = hostHaptics || Promise.resolve(miniapp.getCapabilities())
-    .then((c) => c.some((x) => x.startsWith("haptics."))).catch(() => false);
-  hostHaptics.then((ok) => {
-    if (!ok) return;
+  const go = () => {
     const hx = miniapp.haptics;
     const p = kind === "tap" ? hx.impactOccurred("light")
       : kind === "heavy" ? hx.impactOccurred("heavy")
       : kind === "pick" ? hx.selectionChanged() : hx.notificationOccurred(kind);
-    return p;
-  }).catch(() => {});
+    Promise.resolve(p).catch(() => {});
+  };
+  if (hapticsOk) go();
+  else if (hapticsOk === null) hapticsReady().then((ok) => ok && go());
+}
+
+// "tap" (light), "heavy", "pick" (a selection tick), or a notification:
+// "success", "warning", "error". A tap waits one tick: if the same tap also
+// cheers, only the "success" plays, so the two don't blur into one.
+function buzz(kind) {
+  clearTimeout(tapTimer);
+  if (kind === "tap") tapTimer = setTimeout(() => buzzNow("tap"), 0);
+  else buzzNow(kind);
 }
 
 // A ring that grows and fades where the finger was (or mid-button, from a keyboard).
@@ -129,13 +147,20 @@ function ripple(ev, el) {
   const ring = h("span", { class: "fx-ripple", "aria-hidden": "true" });
   ring.style.left = `${pointer ? ev.clientX : r.left + r.width / 2}px`;
   ring.style.top = `${pointer ? ev.clientY : r.top + r.height / 2}px`;
+  ring.addEventListener("animationend", () => ring.remove());
   document.body.append(ring);
   setTimeout(() => ring.remove(), 700);
 }
 
-// Spring into a new state.
+// Spring into a new state. Web Animations where there are some: no reflow to restart it.
+const POP = [
+  { transform: "scale(.6)", easing: "cubic-bezier(.3, 1.6, .5, 1)" },
+  { transform: "scale(1.12)", offset: 0.55, easing: "cubic-bezier(.3, 1.6, .5, 1)" },
+  { transform: "scale(1)" },
+];
 function pop(el) {
   if (calm() || !el) return;
+  if (el.animate) { el.animate(POP, { duration: 400 }); return; }
   el.classList.remove("fx-pop");
   el.getBoundingClientRect(); // restart the animation
   el.classList.add("fx-pop");
@@ -149,9 +174,124 @@ function cheer(el, kind = "confetti") {
   buzz("success");
 }
 
-// Particles on one canvas over the page, only while there are some.
+// Let the cue get its first frames on screen before the heavy work (signing,
+// the request) starts. A hidden page has no frames, so the timer is the floor.
+const settle = () => new Promise((r) => {
+  requestAnimationFrame(() => requestAnimationFrame(r));
+  setTimeout(r, 80);
+});
+
+// Send after the cue has started. On failure: an error buzz, the message, false.
+async function sent(send) {
+  try {
+    await settle();
+    await send();
+    return true;
+  } catch (e) {
+    buzz("error");
+    toast(e.message);
+    return false;
+  }
+}
+
+// Particles on one canvas over the page, only while there are some. Each
+// piece is drawn once into a small sprite and then just moved, turned and
+// faded per frame: no text or path work while it flies.
 let fxLayer = null;
+let fxRunning = false;
+let fxPalette = null; // theme colors, read once per theme
 const fxParts = [];
+const fxSprites = new Map();
+const fxDpr = () => Math.min(2, window.devicePixelRatio || 1);
+
+function palette() {
+  if (fxPalette) return fxPalette;
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  const edge = v("--edge");
+  fxPalette = {
+    edge, red: v("--red"), font: v("--display"),
+    colors: [v("--cta"), edge, v("--hl"), "#fff4cc", "#28d02c", "#fffdf9", v("--red"), "#8ccbff"],
+  };
+  return fxPalette;
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { fxPalette = null; });
+
+// A sprite of w x h CSS px (plus a margin for the outline), drawn centered.
+function sprite(key, w, ht, draw) {
+  let s = fxSprites.get(key);
+  if (s) return s;
+  const scale = 2, pad = 3;
+  const c = document.createElement("canvas");
+  c.width = Math.ceil((w + pad * 2) * scale);
+  c.height = Math.ceil((ht + pad * 2) * scale);
+  const g = c.getContext("2d");
+  g.scale(scale, scale);
+  g.translate(w / 2 + pad, ht / 2 + pad);
+  g.lineJoin = "round";
+  draw(g);
+  s = { img: c, w: w + pad * 2, h: ht + pad * 2 };
+  // The φ waits for the display font; don't keep a fallback-font copy.
+  if (!key.startsWith("phi") || !document.fonts || document.fonts.status === "loaded") fxSprites.set(key, s);
+  return s;
+}
+
+const CONFETTI = 16; // sprite size; pieces scale from it
+function confettiSprite(shape, color, pal) {
+  const s = CONFETTI;
+  return sprite(`${shape === 2 ? "phi" : "c"}${shape}|${color}|${pal.edge}|${pal.font}`, s * 2.2, s * 2.2, (g) => {
+    g.fillStyle = color;
+    g.strokeStyle = pal.edge;
+    g.lineWidth = 1.5;
+    if (shape === 0) { g.fillRect(-s / 2, -s / 4, s, s / 2); g.strokeRect(-s / 2, -s / 4, s, s / 2); }
+    else if (shape === 1) { g.beginPath(); g.arc(0, 0, s / 2.4, 0, Math.PI * 2); g.fill(); g.stroke(); }
+    else {
+      g.font = `800 ${Math.round(s * 1.6)}px ${pal.font}`;
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.lineWidth = 2;
+      g.strokeText("φ", 0, 0);
+      g.fillText("φ", 0, 0);
+    }
+  });
+}
+
+const HEART = 20;
+function heartSprite(pal) {
+  const s = HEART;
+  return sprite(`heart|${pal.red}|${pal.edge}`, s * 2, s * 2, (g) => {
+    g.beginPath();
+    g.moveTo(0, s * 0.35);
+    g.bezierCurveTo(-s * 0.9, -s * 0.25, -s * 0.45, -s * 0.95, 0, -s * 0.45);
+    g.bezierCurveTo(s * 0.45, -s * 0.95, s * 0.9, -s * 0.25, 0, s * 0.35);
+    g.closePath();
+    g.fillStyle = pal.red;
+    g.fill();
+    g.strokeStyle = pal.edge;
+    g.lineWidth = 2;
+    g.stroke();
+  });
+}
+
+const BILL = 1.4; // sprite scale; bills are 40 x 22 at scale 1
+function billSprite(pal) {
+  const bw = 40 * BILL, bh = 22 * BILL;
+  return sprite(`bill|${pal.edge}`, bw, bh, (g) => {
+    g.lineWidth = 2;
+    g.strokeStyle = pal.edge;
+    g.fillStyle = "#bfefc0";
+    g.beginPath();
+    if (g.roundRect) g.roundRect(-bw / 2, -bh / 2, bw, bh, 4); else g.rect(-bw / 2, -bh / 2, bw, bh);
+    g.fill();
+    g.stroke();
+    g.fillStyle = "#f7d15f";
+    g.fillRect(-bw * 0.32, -bh / 2 + 1, bw * 0.1, bh - 2);
+    g.strokeStyle = "#141414";
+    g.beginPath();
+    g.arc(0, 0, bh * 0.24, 0, Math.PI * 2);
+    g.stroke();
+  });
+}
 
 // kind: "confetti", "hearts" or "bills"; from: an element or { x, y } on screen.
 function burst(kind, from, n) {
@@ -163,109 +303,78 @@ function burst(kind, from, n) {
     x = r.left + r.width / 2;
     y = r.top + r.height / 2;
   }
-  const css = getComputedStyle(document.documentElement);
-  const v = (name) => css.getPropertyValue(name).trim();
-  const edge = v("--edge");
-  const colors = [v("--cta"), edge, v("--hl"), "#fff4cc", "#28d02c", "#fffdf9", v("--red"), "#8ccbff"];
-  const font = v("--display");
-  const now = performance.now();
+  const pal = palette();
   for (let i = 0; i < n; i++) {
     const R = Math.random;
-    const p = { kind, x, y, edge, font, t0: now, rot: R() * 6, seed: R() };
+    // t0 is set on the first frame that draws it, so a slow frame never makes it jump.
+    const p = { kind, x, y, t0: null, wait: 0, rot: R() * 6, spin: 0 };
     if (kind === "confetti") {
-      const a = R() * Math.PI * 2, sp = 140 + R() * 380;
+      const a = R() * Math.PI * 2, sp = 140 + R() * 380, shape = i % 3;
       Object.assign(p, { life: 1.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 240, spin: (R() - 0.5) * 16,
-        size: 7 + R() * 8, color: colors[i % colors.length], shape: i % 3 });
+        k: (7 + R() * 8) / CONFETTI, img: confettiSprite(shape, pal.colors[i % pal.colors.length], pal) });
     } else if (kind === "hearts") {
-      Object.assign(p, { life: 1.3, vx: (R() - 0.5) * 220, vy: -230 - R() * 230, size: 12 + R() * 8,
-        color: v("--red"), rot: (R() - 0.5) * 0.8 });
+      Object.assign(p, { life: 1.3, vx: (R() - 0.5) * 220, vy: -230 - R() * 230, k: (12 + R() * 8) / HEART,
+        rot: (R() - 0.5) * 0.8, img: heartSprite(pal) });
     } else {
       const a = -1.15 + R() * 1.3, sp = 380 + R() * 380;
-      Object.assign(p, { life: 1.8, t0: now + i * 55, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: a,
-        spin: (R() - 0.5) * 9, size: 0.8 + R() * 0.6 });
+      Object.assign(p, { life: 1.8, wait: i * 55, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: a,
+        spin: (R() - 0.5) * 9, k: (0.8 + R() * 0.6) / BILL, img: billSprite(pal) });
     }
     fxParts.push(p);
   }
   if (!fxLayer) {
     fxLayer = h("canvas", { class: "fx-layer", "aria-hidden": "true" });
     document.body.append(fxLayer);
-    requestAnimationFrame(fxFrame);
   }
+  fxLayer.hidden = false;
+  if (!fxRunning) { fxRunning = true; requestAnimationFrame(fxFrame); }
 }
 
 function fxFrame(now) {
-  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, ht = window.innerHeight;
-  if (fxLayer.width !== Math.round(w * dpr) || fxLayer.height !== Math.round(ht * dpr)) {
-    fxLayer.width = Math.round(w * dpr);
-    fxLayer.height = Math.round(ht * dpr);
-  }
+  const dpr = fxDpr(), w = window.innerWidth, ht = window.innerHeight;
+  const cw = Math.round(w * dpr), ch = Math.round(ht * dpr);
+  if (fxLayer.width !== cw || fxLayer.height !== ch) { fxLayer.width = cw; fxLayer.height = ch; }
   const ctx = fxLayer.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, ht);
-  for (let i = fxParts.length - 1; i >= 0; i--) {
-    const p = fxParts[i], dt = (now - p.t0) / 1000;
-    if (dt > p.life) { fxParts.splice(i, 1); continue; }
-    if (dt >= 0) drawPart(ctx, p, dt);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  let i = 0;
+  for (let j = 0; j < fxParts.length; j++) {
+    const p = fxParts[j];
+    if (p.t0 === null) p.t0 = now + p.wait;
+    const dt = (now - p.t0) / 1000;
+    if (dt > p.life) continue;
+    fxParts[i++] = p;
+    if (dt >= 0) drawPart(ctx, p, dt, dpr);
   }
-  if (fxParts.length) requestAnimationFrame(fxFrame);
-  else { fxLayer.remove(); fxLayer = null; }
+  fxParts.length = i;
+  ctx.globalAlpha = 1;
+  if (i) requestAnimationFrame(fxFrame);
+  else { fxRunning = false; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cw, ch); fxLayer.hidden = true; }
 }
 
-function drawPart(ctx, p, dt) {
-  ctx.save();
-  ctx.strokeStyle = p.edge;
-  ctx.lineJoin = "round";
+function drawPart(ctx, p, dt, dpr) {
+  let px, py, rot, alpha;
   if (p.kind === "confetti") {
     const d = (1 - Math.exp(-2.6 * dt)) / 2.6; // air slows them down
-    ctx.translate(p.x + p.vx * d, p.y + p.vy * d + 380 * dt * dt);
-    ctx.rotate(p.rot + p.spin * dt);
-    ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.5);
-    ctx.fillStyle = p.color;
-    ctx.lineWidth = 1.5;
-    const s = p.size;
-    if (p.shape === 0) { ctx.fillRect(-s / 2, -s / 4, s, s / 2); ctx.strokeRect(-s / 2, -s / 4, s, s / 2); }
-    else if (p.shape === 1) { ctx.beginPath(); ctx.arc(0, 0, s / 2.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-    else {
-      ctx.font = `800 ${Math.round(s * 1.6)}px ${p.font}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.lineWidth = 2;
-      ctx.strokeText("φ", 0, 0);
-      ctx.fillText("φ", 0, 0);
-    }
+    px = p.x + p.vx * d;
+    py = p.y + p.vy * d + 380 * dt * dt;
+    rot = p.rot + p.spin * dt;
+    alpha = Math.min(1, (p.life - dt) / 0.5);
   } else if (p.kind === "hearts") {
-    const s = p.size;
-    ctx.translate(p.x + p.vx * dt, p.y - 16 + p.vy * dt + 60 * dt * dt);
-    ctx.rotate(p.rot);
-    ctx.globalAlpha = Math.max(0, Math.min(1, 1.3 - dt));
-    ctx.beginPath();
-    ctx.moveTo(0, s * 0.35);
-    ctx.bezierCurveTo(-s * 0.9, -s * 0.25, -s * 0.45, -s * 0.95, 0, -s * 0.45);
-    ctx.bezierCurveTo(s * 0.45, -s * 0.95, s * 0.9, -s * 0.25, 0, s * 0.35);
-    ctx.closePath();
-    ctx.fillStyle = p.color;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    px = p.x + p.vx * dt;
+    py = p.y - 16 + p.vy * dt + 60 * dt * dt;
+    rot = p.rot;
+    alpha = Math.max(0, Math.min(1, 1.3 - dt));
   } else {
-    const bw = 40 * p.size, bh = 22 * p.size;
-    ctx.translate(p.x + p.vx * dt, p.y + p.vy * dt + 700 * dt * dt);
-    ctx.rotate(p.rot + p.spin * dt);
-    ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.4);
-    ctx.lineWidth = 2;
-    ctx.fillStyle = "#bfefc0";
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 4); else ctx.rect(-bw / 2, -bh / 2, bw, bh);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#f7d15f";
-    ctx.fillRect(-bw * 0.32, -bh / 2 + 1, bw * 0.1, bh - 2);
-    ctx.strokeStyle = "#141414";
-    ctx.beginPath();
-    ctx.arc(0, 0, bh * 0.24, 0, Math.PI * 2);
-    ctx.stroke();
+    px = p.x + p.vx * dt;
+    py = p.y + p.vy * dt + 700 * dt * dt;
+    rot = p.rot + p.spin * dt;
+    alpha = Math.min(1, (p.life - dt) / 0.4);
   }
-  ctx.restore();
+  const k = p.k * dpr, cos = Math.cos(rot) * k, sin = Math.sin(rot) * k, s = p.img;
+  ctx.setTransform(cos, sin, -sin, cos, px * dpr, py * dpr);
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(s.img, -s.w / 2, -s.h / 2, s.w, s.h);
 }
 
 function ago(ts) {
@@ -537,6 +646,13 @@ function savedKey() {
 }
 const connected = () => { const k = savedKey(); return !!(k && k.state === "completed"); };
 
+// Load the signing libraries ahead of the first follow or like, when the page is idle.
+function warmLibs() {
+  if (cryptoLibs || !(canConnect() && connected())) return;
+  const go = () => libs().catch(() => {});
+  if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 3000 }); else setTimeout(go, 1500);
+}
+
 // Sign one follow / unfollow / like / unlike and send it. args: the target.
 async function act(kind, ...args) {
   const k = savedKey();
@@ -749,34 +865,45 @@ function castCard(c) {
       const id = `${c.fid}:${c.hash}`;
       const like = h("button", { type: "button", class: `ghost like${liked.has(id) ? " on" : ""}`, "aria-pressed": String(liked.has(id)) },
         liked.has(id) ? "Liked" : "Like");
+      const show = (v) => {
+        if (v) liked.add(id); else liked.delete(id);
+        store.sset("liked", [...liked]);
+        like.classList.toggle("on", v);
+        like.setAttribute("aria-pressed", String(v));
+        like.textContent = v ? "Liked" : "Like";
+      };
+      let busy = false;
       like.addEventListener("click", () => withKey(async () => {
+        if (busy) return;
+        busy = true;
         const on = liked.has(id);
-        like.disabled = true;
-        try {
-          await act(on ? "unlike" : "like", c.fid, c.hash);
-          on ? liked.delete(id) : liked.add(id);
-          store.sset("liked", [...liked]);
-          like.classList.toggle("on", !on);
-          like.setAttribute("aria-pressed", String(!on));
-          like.textContent = on ? "Like" : "Liked";
-          if (on) { track("Unliked"); pop(like); } else { track("Liked"); cheer(like, "hearts"); }
-        } catch (e) { buzz("error"); toast(e.message); } finally { like.disabled = false; }
+        // The new state and its cue on the tap; put it back if the send fails.
+        show(!on);
+        if (on) pop(like); else cheer(like, "hearts");
+        if (!(await sent(() => act(on ? "unlike" : "like", c.fid, c.hash)))) show(on);
+        else if (on) track("Unliked");
+        else track("Liked");
+        busy = false;
       }));
       return [like, open];
     }
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" },
       kind === "like" ? "Like" : "Recast");
+    const show = (v) => {
+      btn.classList.toggle("on", v);
+      btn.setAttribute("aria-pressed", String(v));
+      btn.textContent = v ? (kind === "like" ? "Liked" : "Recasted") : (kind === "like" ? "Like" : "Recast");
+    };
+    let busy = false;
     btn.addEventListener("click", async () => {
       if (!(state.me.can_write && viewingSelf())) return needKey();
+      if (busy) return;
+      busy = true;
       const on = btn.classList.contains("on");
-      btn.disabled = true;
-      try {
-        await api("/api/react", { action: on ? `un${kind}` : kind, cast: ref });
-        btn.classList.toggle("on", !on);
-        btn.setAttribute("aria-pressed", String(!on));
-        btn.textContent = !on ? (kind === "like" ? "Liked" : "Recasted") : (kind === "like" ? "Like" : "Recast");
-        if (on) pop(btn); else cheer(btn, kind === "like" ? "hearts" : "confetti");
-      } catch (e) { buzz("error"); toast(e.message); } finally { btn.disabled = false; }
+      show(!on);
+      if (on) pop(btn); else cheer(btn, kind === "like" ? "hearts" : "confetti");
+      if (!(await sent(() => api("/api/react", { action: on ? `un${kind}` : kind, cast: ref })))) show(on);
+      busy = false;
     });
     return btn;
   };
@@ -929,33 +1056,32 @@ function personCard(p, i = 0) {
   const follow = h("button", { type: "button", class: p.following ? "following" : null }, p.following ? "Following" : "Follow");
   if (p.following) follow.disabled = true;
   if (isPublic() && !canConnect()) follow.title = `Open ${handle(p)} in Farcaster`;
+  const showFollowing = (on) => {
+    p.following = on;
+    follow.textContent = on ? "Following" : "Follow";
+    follow.classList.toggle("following", on);
+    follow.disabled = on;
+  };
+  // "Following" and its confetti on the tap; back to "Follow" if the send fails.
+  const doFollow = async (send) => {
+    showFollowing(true);
+    cheer(follow);
+    toast(`Following ${handle(p)}.`);
+    const ok = await sent(send);
+    if (!ok) showFollowing(false);
+    return ok;
+  };
   follow.addEventListener("click", async () => {
     if (isPublic() && canConnect()) {
       track("Follow", card);
       return withKey(async () => {
-        follow.disabled = true;
-        try {
-          await act("follow", p.fid);
-          p.following = true;
-          follow.textContent = "Following";
-          follow.classList.add("following");
-          cheer(follow);
-          track("Followed", card);
-          toast(`Following ${handle(p)}.`);
-        } catch (e) { buzz("error"); toast(e.message); follow.disabled = false; }
+        const ok = await doFollow(() => act("follow", p.fid));
+        if (ok) track("Followed", card);
       });
     }
     if (isPublic()) { track("Follow", card); return viewProfile(p); }
     if (!canAct) return needKey();
-    follow.disabled = true;
-    try {
-      await api("/api/follow", { fid: p.fid, action: "follow" });
-      p.following = true;
-      follow.textContent = "Following";
-      follow.classList.add("following");
-      cheer(follow);
-      toast(`Following ${handle(p)}.`);
-    } catch (e) { buzz("error"); toast(e.message); follow.disabled = false; }
+    await doFollow(() => api("/api/follow", { fid: p.fid, action: "follow" }));
   });
 
   const latest = p.latest && p.latest[0];
@@ -1087,6 +1213,7 @@ async function loadPeople(refresh = false) {
 // ------------------------------------------------------------------ setup
 
 function applyTheme(t) {
+  fxPalette = null;
   if (t === "auto") document.documentElement.removeAttribute("data-theme");
   else document.documentElement.setAttribute("data-theme", t);
   $("#theme").textContent = `Theme: ${t}`;
@@ -1162,6 +1289,7 @@ function renderAccount() {
       h("div", { class: "muted mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
       h("span", { class: me.can_write || connected() ? "chip ok" : "chip warn" }, power(me))));
   }
+  warmLibs();
   if (canConnect() && connected()) {
     const forget = h("button", { type: "button", class: "ghost small" }, "Forget");
     forget.addEventListener("click", forgetKey);
@@ -1332,6 +1460,7 @@ async function init() {
   setTab(!canBrowse() && narrow() ? "you" : "people");
   loadPeople();
   hostReady();
+  hapticsReady();
 }
 
 init();
