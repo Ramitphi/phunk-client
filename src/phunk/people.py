@@ -118,7 +118,7 @@ def build(
     now: int | None = None,
     dismissed: set[int] = frozenset(),
     limit: int = 15,
-    max_reconnect: int = 5,
+    max_reconnect: int = 10,
 ) -> list[Card]:
     """Rank people into cards. No network.
 
