@@ -356,6 +356,7 @@ def connect_site(fake_node, fake_farcaster, monkeypatch):
     spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.SIGNER_URL = f"{base}/sign"  # the site pauses it; these tests check the flow itself
     yield mod, got
     if mod._loop is not None:
         asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
@@ -373,6 +374,17 @@ def test_connect_is_off_without_a_signer(site):
     assert status == 503 and "not set up" in body["error"] and headers["cache-control"] == "no-store"
     assert _post(site.app, "/api/submit", {"message": V["like"]["message"]})[0] == 503
     assert SUBMITTED == []
+
+
+def test_connect_is_paused_even_with_a_signer(fake_node, monkeypatch):
+    monkeypatch.setenv("PHUNK_SIGNER_URL", "https://sign.example/api/sign-key-request")
+    monkeypatch.setenv("PHUNK_NODE", fake_node)
+    spec = importlib.util.spec_from_file_location("phunk_site_paused", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.SIGNER_URL is None
+    assert _post(mod.app, "/api/connect", {"key": "0x" + "22" * 32})[0] == 503
+    assert _post(mod.app, "/api/submit", {"message": V["like"]["message"]})[0] == 503
 
 
 def test_connect_opens_a_signed_key_request_for_the_app(connect_site):

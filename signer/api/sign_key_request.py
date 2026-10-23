@@ -130,7 +130,14 @@ def sign(raw: bytes) -> tuple[int, dict]:
     try:
         if not isinstance(data, dict):
             data = {}
-        return 200, approve(data.get("key"), app_fid, account, onchain=data.get("onchain") is True)
+        # Paused: on-chain approvals (the Farcaster app's approval screen) are
+        # off for now, so no one can open an approval link in phunk's name.
+        # The gasless KEY_ADD (`phunk key add`) still works: it needs the
+        # person's own custody key. To turn them back on, restore this line:
+        # return 200, approve(data.get("key"), app_fid, account, onchain=data.get("onchain") is True)
+        if data.get("onchain") is True:
+            return 403, {"error": "on-chain approvals are paused"}
+        return 200, approve(data.get("key"), app_fid, account)
     except ValueError as e:
         return 400, {"error": str(e)}
 
