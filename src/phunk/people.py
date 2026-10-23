@@ -30,6 +30,8 @@ from .timeutil import from_datetime
 
 TALK_DAYS = 90  # how far back "you talked" looks
 MOVED_AFTER_DAYS = 14  # casts older than this show which app someone used before
+PROFILE_CASTS = 100  # casts read per person: enough to reach back past a recent move
+NOW_CASTS = 5  # the app someone uses now: the most common on their newest casts
 QUIET_DAYS = 14
 CIRCLE_MIN = 4  # mutual follows for a "circle" card; 2-3 can be a "bridge"
 MIN_TALKS = 2
@@ -206,10 +208,39 @@ async def app_label(hub: Hub, cast: Cast) -> str:
         return f"fid {app}"
 
 
-async def profile(hub: Hub, fid: int, *, casts: int = 30, now: int | None = None) -> Profile:
+def _most_common(labels: list[str]) -> str | None:
+    """The most used app, ignoring "unknown" when anything else is there.
+    Ties go to the newest (labels are newest first)."""
+    known = [x for x in labels if x != "unknown"] or labels
+    if not known:
+        return None
+    counts = collections.Counter(known)
+    top = max(counts.values())
+    return next(x for x in known if counts[x] == top)
+
+
+def apps_now_and_before(casts: list[Cast], labels: list[str], now: int) -> tuple[str | None, str | None]:
+    """(app now, app before) from someone's casts, newest first.
+
+    Now is the most used app on the newest few casts. Before is the most
+    used app on casts older than `MOVED_AFTER_DAYS`. Someone who posts a lot
+    may have no casts that old in what we read; then the oldest third of
+    their casts stands in for "before", so a move a few days ago still shows."""
+    if not casts:
+        return None, None
+    app_now = _most_common(labels[:NOW_CASTS])
+    rest = list(zip(casts, labels))[NOW_CASTS:]
+    older = [x for c, x in rest if now - c.timestamp > MOVED_AFTER_DAYS * 86400]
+    if len(older) < NOW_CASTS and len(rest) >= NOW_CASTS:
+        older = [x for _, x in rest[-max(NOW_CASTS, len(casts) // 3):]]
+    return app_now, _most_common(older)
+
+
+async def profile(hub: Hub, fid: int, *, casts: int = PROFILE_CASTS, now: int | None = None) -> Profile:
     """Someone's recent posting: latest casts, current app, earlier app, channels.
 
-    One request for casts, plus the key lookup that `app_of` caches per fid."""
+    One request for casts, plus the key lookup that `app_of` caches per fid
+    (so naming the app of every cast costs no more requests)."""
     now = from_datetime(dt.datetime.now(dt.timezone.utc)) if now is None else now
     try:
         recent = [c async for c in hub.casts(fid, limit=casts)]
@@ -221,11 +252,8 @@ async def profile(hub: Hub, fid: int, *, casts: int = 30, now: int | None = None
         return p
     p.latest = recent[:2]
     p.last_ts = recent[0].timestamp
-    p.app_now = await app_label(hub, recent[0])
-    older = [c for c in recent if now - c.timestamp > MOVED_AFTER_DAYS * 86400][:10]
-    if older:
-        labels = await asyncio.gather(*(app_label(hub, c) for c in older))
-        p.app_before = collections.Counter(labels).most_common(1)[0][0]
+    labels = list(await asyncio.gather(*(app_label(hub, c) for c in recent)))
+    p.app_now, p.app_before = apps_now_and_before(recent, labels, now)
     chans = collections.Counter(c.parent_url for c in recent if is_channel(c.parent_url) and not c.is_reply)
     p.channels = [u for u, _ in chans.most_common(3)]
     return p

@@ -2,7 +2,7 @@
 import collections
 
 from phunk.models import Cast, Reaction
-from phunk.people import CIRCLE_MIN, Profile, build, is_channel, talked_to
+from phunk.people import CIRCLE_MIN, Profile, apps_now_and_before, build, is_channel, talked_to
 from phunk.recommend import Suggestion
 
 NOW = 200_000_000
@@ -110,3 +110,21 @@ def test_is_channel():
     assert is_channel("chain://eip155:1/erc721:0xabc")
     assert not is_channel("https://en.wikipedia.org/wiki/Anything")
     assert not is_channel(None)
+
+
+def test_apps_now_and_before():
+    def apps(labels, gap=3600):
+        casts = [cast(1, ts=NOW - i * gap) for i in range(len(labels))]
+        return apps_now_and_before(casts, labels, NOW)
+
+    # Old casts (over two weeks) say which app came before.
+    assert apps(["b"] * 5 + ["a"] * 10, gap=2 * DAY) == ("b", "a")
+    # Posts a lot: nothing two weeks old, so the oldest third stands in.
+    assert apps(["b"] * 30 + ["a"] * 30) == ("b", "a")
+    # One cast from another app is not a move.
+    assert apps(["a"] + ["b"] * 40) == ("b", "b")
+    # "unknown" (a key we can't place) doesn't outvote a known app.
+    assert apps(["unknown", "unknown", "b", "b"] + ["a"] * 20) == ("b", "a")
+    # Too few casts to say what came before.
+    assert apps(["b", "b"]) == ("b", None)
+    assert apps([]) == (None, None)
