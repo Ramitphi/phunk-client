@@ -76,6 +76,10 @@ async def node(request):
     if p == "/v1/userNameProofByName":
         fid = {v: k for k, v in NAMES.items()}.get(q["name"])
         return web.json_response({"fid": fid}) if fid else web.Response(status=404)
+    if p == "/v1/onChainEventsByFid" and q.get("event_type") == "EVENT_TYPE_ID_REGISTER":
+        return web.json_response({"events": [
+            {"blockNumber": 1, "logIndex": 0, "idRegisterEventBody": {"to": "0x" + "AB" * 20}},
+            {"blockNumber": 9, "logIndex": 0, "idRegisterEventBody": {"to": "0x" + "CD" * 20}}]})
     if p == "/v1/onChainEventsByFid":
         return web.json_response({"events": [
             {"blockTimestamp": 1, "signerEventBody": {"key": k, "eventType": "SIGNER_EVENT_TYPE_ADD",
@@ -86,7 +90,7 @@ async def node(request):
             return web.json_response({"messages": []})
         return web.json_response({"messages": REACTIONS.get(int(q["fid"]), [])})
     if p == "/v1/signersByFid":
-        return web.json_response({"signers": []})
+        return web.json_response({"signers": [], "currentUserNonce": 4})
     if p == "/v1/verificationsByFid":
         return web.json_response({"messages": [
             msg(f"v{i}", int(q["fid"]), verificationAddAddressBody={"address": a, "protocol": "PROTOCOL_ETHEREUM"})
@@ -275,6 +279,19 @@ def test_channel_url():
     assert channel_url("chain://eip155:1/erc721:0xabc") == "chain://eip155:1/erc721:0xabc"
     assert channel_name(ART) == "/art" and channel_name(DEV) == "/dev"
     assert channel_name("https://farcaster.xyz/~/channel/x") == "/x"
+
+
+def test_owner_gives_the_latest_custody_address_and_key_nonce():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/owner?fid=50") as r:
+            ok = (r.status, await r.json())
+        async with client.get(f"{base}/api/owner?fid=-1") as r:
+            return ok, r.status
+
+    (status, body), bad = run(test)
+    # The latest register or transfer wins; lowercase like the wallet compares it.
+    assert status == 200 and body == {"fid": 50, "custody": "0x" + "cd" * 20, "nonce": 4}
+    assert bad == 400
 
 
 # ------------------------------------------------------------------ writing

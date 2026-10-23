@@ -390,8 +390,20 @@ class UI:
         return dict(await self.people(fid, refresh=q.get("refresh") == "1"), fid=fid)
 
 
+    async def owner_json(self, q) -> dict:
+        """Who owns an account and its key nonce: what a wallet needs to
+        authorize a gasless KEY_ADD (the mini app's in-app approval test)."""
+        fid = int(q.get("fid", 0))
+        if fid <= 0:
+            raise ValueError("fid must be a positive number")
+        custody = await self.hub.custody_address(fid)
+        signers = await self.hub.signers(fid)
+        return {"fid": fid, "custody": custody, "nonce": int(signers.get("currentUserNonce") or 0)}
+
+
 GET_ROUTES = {"/api/me": UI.me_json, "/api/feed": UI.feed_json,
-              "/api/suggestions": UI.suggestions_json, "/api/people": UI.people_json}
+              "/api/suggestions": UI.suggestions_json, "/api/people": UI.people_json,
+              "/api/owner": UI.owner_json}
 
 
 async def answer(coro) -> tuple[int, dict]:
