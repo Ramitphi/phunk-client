@@ -159,14 +159,6 @@ To turn it on:
    on a phone, tap Follow on someone, approve, and look for the follow in
    Farcaster.
 
-**In-app approval test.** In the mini app, the account the money gun tips
-(or anyone, with `?probe=1`) sees **Test in-app approval** on the You
-screen. It checks whether the client's wallet is the account's owner
-(custody) address and will sign a gasless `KEY_ADD` authorization, so a
-future version could approve phunk without leaving the mini app. It signs
-for a throwaway key, checks the signer, and sends nothing. `GET
-/api/owner?fid=` gives the owner address and key nonce it compares against.
-
 Without `PHUNK_SIGNER_URL` the site works as before: `/api/connect` and
 `/api/submit` answer 503, and Follow opens the profile.
 

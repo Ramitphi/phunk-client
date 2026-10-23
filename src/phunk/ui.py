@@ -391,8 +391,8 @@ class UI:
 
 
     async def owner_json(self, q) -> dict:
-        """Who owns an account and its key nonce: what a wallet needs to
-        authorize a gasless KEY_ADD (the mini app's in-app approval test)."""
+        """Who owns an account (custody address) and its key nonce: what
+        authorizing a gasless KEY_ADD needs."""
         fid = int(q.get("fid", 0))
         if fid <= 0:
             raise ValueError("fid must be a positive number")

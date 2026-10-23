@@ -568,8 +568,3 @@ img.avatar { background: var(--chip); }
   .pactions button:active:not(:disabled), .actions button:active:not(:disabled), .tip-grid button:active { transform: none; }
 }
 
-/* In-app approval test (app.js: runProbe) */
-.probe { display: grid; gap: 4px; margin-top: 8px; }
-.probe:empty { display: none; }
-.probe-line { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-.probe-line code { overflow-wrap: anywhere; text-align: right; font-size: 12px; }
