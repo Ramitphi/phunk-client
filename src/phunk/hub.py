@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import datetime as dt
 import random
 import time
@@ -52,6 +54,38 @@ def _since(since: dt.datetime | int | None) -> int | None:
     if since is None or isinstance(since, int):
         return since
     return from_datetime(since)
+
+
+def _hex(h: str) -> str:
+    """A hash as 0x hex. Message bodies carry hashes in base64."""
+    if h.startswith("0x"):
+        return h.lower()
+    try:
+        return "0x" + base64.b64decode(h, validate=True).hex()
+    except (binascii.Error, ValueError):
+        return h
+
+
+def _cast_adds() -> Callable[[dict], bool]:
+    """A `keep` for `Hub.pages`: only casts that are still there.
+
+    castsByFid also returns CAST_REMOVE messages (a deleted cast). Those are
+    never casts, and an add whose remove came first (newest first) is
+    dropped too.
+    """
+    removed: set[str] = set()
+
+    def keep(m: dict) -> bool:
+        d = m.get("data") or {}
+        kind = d.get("type") or "MESSAGE_TYPE_CAST_ADD"
+        if kind == "MESSAGE_TYPE_CAST_REMOVE":
+            target = (d.get("castRemoveBody") or {}).get("targetHash")
+            if target:
+                removed.add(_hex(target))
+            return False
+        return kind == "MESSAGE_TYPE_CAST_ADD" and _hex(m.get("hash") or "") not in removed
+
+    return keep
 
 
 def _refused(path: str, status: int, sent_token: bool) -> str:
@@ -234,6 +268,7 @@ class Hub:
         limit: int | None = None,
         max_pages: int | None = None,
         stop: Callable[[dict], bool] | None = None,
+        keep: Callable[[dict], bool] | None = None,
     ) -> AsyncIterator[dict]:
         """Yield every item of a paged endpoint, without repeats.
 
@@ -251,6 +286,10 @@ class Hub:
         with reverse=true). Those items are skipped, and paging ends after a
         page in which every new item is past the cutoff. Each shard's part of
         a page is sorted, so this is safe across shards too.
+
+        `keep(item)` filters items (for example only CAST_ADD). Items it
+        drops don't count towards `limit`, but still count as new, so a page
+        of only dropped items doesn't end paging.
         """
         page_size = MAX_PAGE if limit is None else max(1, min(MAX_PAGE, limit))
         token = None
@@ -276,6 +315,8 @@ class Hub:
                 if stop and stop(item):
                     continue
                 kept += 1
+                if keep and not keep(item):
+                    continue
                 yield item
                 n_out += 1
                 if limit is not None and n_out >= limit:
@@ -364,7 +405,7 @@ class Hub:
                     limit: int | None = None) -> AsyncIterator[Cast]:
         """Casts by `fid`, newest first. `since` is a datetime or Farcaster time."""
         async for m in self.pages("/v1/castsByFid", {"fid": fid, "reverse": "true"},
-                                  limit=limit, stop=self._newer_than(since)):
+                                  limit=limit, stop=self._newer_than(since), keep=_cast_adds()):
             yield Cast.from_message(m)
 
     async def feed(self, fid: int, *, since: dt.datetime | int | None = None, per_account: int = 10,
@@ -400,7 +441,8 @@ class Hub:
 
     async def replies(self, fid: int, hash: str, *, limit: int | None = None) -> AsyncIterator[Cast]:
         """Direct replies to a cast."""
-        async for m in self.pages("/v1/castsByParent", {"fid": fid, "hash": hash}, limit=limit):
+        async for m in self.pages("/v1/castsByParent", {"fid": fid, "hash": hash}, limit=limit,
+                                  keep=_cast_adds()):
             yield Cast.from_message(m)
 
     async def channel(self, url: str, *, since: dt.datetime | int | None = None,
@@ -412,12 +454,13 @@ class Hub:
         channels. Spans shards, so the order is only roughly newest first.
         """
         async for m in self.pages("/v1/castsByParent", {"url": url, "reverse": "true"},
-                                  limit=limit, stop=self._newer_than(since)):
+                                  limit=limit, stop=self._newer_than(since), keep=_cast_adds()):
             yield Cast.from_message(m)
 
     async def mentions(self, fid: int, *, limit: int | None = None) -> AsyncIterator[Cast]:
         """Casts that mention `fid`."""
-        async for m in self.pages("/v1/castsByMention", {"fid": fid, "reverse": "true"}, limit=limit):
+        async for m in self.pages("/v1/castsByMention", {"fid": fid, "reverse": "true"}, limit=limit,
+                                  keep=_cast_adds()):
             yield Cast.from_message(m)
 
     # ---------------------------------------------------------- reactions
