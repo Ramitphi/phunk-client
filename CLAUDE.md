@@ -25,6 +25,7 @@ licensed, public.
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `signer/` | The app's signing service, its own Vercel project at sign.phunk.social (ASGI `app`, entrypoint in `signer/pyproject.toml`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only, kept out of the phunk.social project |
+| `video/` | The launch video, made from code: `launch.html` (every frame a function of time, the real client in the phone), `capture.py`, `render.py` (Chromium at 2x, ffmpeg), `sound.py` (the soundtrack); dev-only tools; see `video/README.md` |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py` run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only); `tests/js/fc_test.mjs` checks `fc.js` against the vectors (run by `test_web.py` when `node` is there) |

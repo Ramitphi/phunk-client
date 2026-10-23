@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>phunk launch</title>
+<link rel="icon" href="data:,">
+<!--
+  The phunk launch video: 32 s, 1080 x 1080, 120 BPM (a beat is 0.5 s, a bar 2 s).
+  Every frame is a pure function of time: seek(t) puts each element where it is
+  at t, so render.py can step through it frame by frame. The phone shows the
+  real web client (_build/app.html from capture.py), live, as text.
+  Open it through a local server (see README.md) to preview it in real time.
+-->
+<link rel="stylesheet" href="_build/fonts/fonts.css">
+<style>
+:root {
+  --cream: #f5f1ea; --card: #fffdf9; --ink: #141414; --muted: #5e5a54;
+  --purple: #7959ff; --deep: #5d42d6; --lilac: #ccc0ff; --tint: #ece8ff;
+  --green: #28d02c; --red: #dc3412; --warn-bg: #fff4cc; --warn-text: #4a3200; --warn-edge: #b86200;
+  --blue-bg: #e1f1ff; --blue-text: #0a64a8;
+  --display: "Bricolage Grotesque", Inter, sans-serif;
+}
+html, body { margin: 0; background: #0b0b0b; }
+body { display: grid; place-items: center; min-height: 100vh; overflow: hidden; }
+.render body, html.render body { display: block; min-height: 0; }
+#stage {
+  position: relative; width: 1080px; height: 1080px; overflow: hidden; flex: none;
+  font-family: var(--display); color: var(--ink); font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+  transform-origin: 0 0;
+}
+#stage * { box-sizing: border-box; }
+.abs { position: absolute; }
+.hide { visibility: hidden; }
+
+/* Backgrounds: a base and a second colour that wipes in over it. */
+.bg { position: absolute; inset: 0; }
+.bg.cream { background-color: var(--cream); background-image: radial-gradient(rgba(20,20,20,.12) 1.7px, transparent 2.1px); background-size: 34px 34px; background-position: 17px 17px; }
+.bg.dark { background-color: #141414; background-image: radial-gradient(rgba(245,241,234,.07) 1.7px, transparent 2.1px); background-size: 34px 34px; background-position: 17px 17px; }
+.bg.purple { background-color: var(--purple); background-image: radial-gradient(rgba(20,20,20,.13) 1.7px, transparent 2.1px); background-size: 34px 34px; background-position: 17px 17px; }
+canvas.fx { position: absolute; left: 0; top: 0; width: 1080px; height: 1080px; pointer-events: none; }
+#fxBack { z-index: 2; }
+#fxStage { z-index: 23; }
+
+/* Type */
+.hd { margin: 0; font-weight: 800; font-size: 84px; line-height: 1; letter-spacing: -0.045em; white-space: nowrap; }
+.hd.cream { color: var(--cream); }
+.m { display: inline-block; overflow: hidden; vertical-align: top; padding: .08em .03em .24em; margin: -.08em -.03em -.24em; }
+.w { display: inline-block; }
+.stk {
+  display: inline-block; padding: .03em .17em .1em; border: 5px solid var(--ink); border-radius: .2em;
+  box-shadow: 7px 7px 0 var(--ink); line-height: 1; vertical-align: baseline;
+}
+.stk.purple { background: var(--purple); color: #fff; }
+.stk.lilac { background: var(--lilac); color: var(--ink); }
+.stk.card { background: var(--card); color: var(--ink); }
+.stk.ink { background: var(--ink); color: var(--cream); border-color: var(--ink); box-shadow: 7px 7px 0 var(--cream); }
+.hl { display: inline-block; padding: 0 .14em .06em; border-radius: .16em; line-height: 1.02; }
+.hl.purple { background: var(--purple); color: #fff; }
+.hl.lilac { background: var(--lilac); color: var(--ink); }
+
+/* Scene 1 and the end card: logo and wordmark */
+.logo {
+  position: absolute; border-radius: 50%; display: grid; place-items: center;
+  border: 6px solid var(--ink); box-shadow: 9px 9px 0 var(--ink);
+  font-family: Inter, sans-serif; font-weight: 700; line-height: 1;
+}
+.logo span { display: block; transform: translateY(-5%); }
+.logo.purple { background: var(--purple); color: #fff; }
+.logo.cream { background: var(--cream); color: var(--purple); }
+.word { position: absolute; left: 0; right: 0; text-align: center; font-weight: 800; letter-spacing: -0.05em; line-height: 1; white-space: nowrap; }
+.word .l { display: inline-block; }
+.center { position: absolute; left: 0; right: 0; text-align: center; }
+
+/* Scene 2: apps people move between */
+.pill {
+  position: absolute; left: 0; top: 0; padding: 10px 26px 13px; border-radius: 999px;
+  background: #eae3d7; color: var(--ink); font-weight: 800; font-size: 40px; letter-spacing: -0.03em; line-height: 1;
+  white-space: nowrap;
+}
+
+/* The phone */
+#phone { position: absolute; left: 88px; top: 98px; width: 426px; height: 884px; z-index: 22; }
+#phone .body {
+  position: absolute; inset: 0; border-radius: 66px; background: #141414;
+  box-shadow: 18px 18px 0 var(--sh, var(--purple)), inset 0 0 0 2px #2a2724;
+}
+#phone .btn { position: absolute; width: 5px; background: #141414; border-radius: 3px; }
+#phone .screen {
+  position: absolute; left: 18px; top: 18px; width: 390px; height: 848px; border-radius: 50px;
+  overflow: hidden; background: var(--cream); isolation: isolate;
+}
+#phone .status {
+  position: absolute; left: 0; top: 0; right: 0; height: 46px; display: flex; align-items: center;
+  justify-content: space-between; padding: 6px 30px 0 40px; font: 600 16px/1 Inter, sans-serif; color: var(--ink);
+  background: var(--cream); z-index: 2;
+}
+#phone .island { position: absolute; left: 50%; top: 10px; width: 118px; height: 33px; margin-left: -59px; border-radius: 20px; background: #050505; z-index: 3; }
+#phone iframe { position: absolute; left: 0; top: 46px; width: 390px; height: 802px; border: 0; background: var(--cream); }
+#phone .homebar { position: absolute; left: 50%; bottom: 8px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: #141414; z-index: 4; }
+#phone canvas { position: absolute; left: 0; top: 0; width: 390px; height: 848px; z-index: 5; pointer-events: none; }
+.ring { position: absolute; border: 3.5px solid var(--purple); border-radius: 12px; z-index: 6; box-shadow: 0 0 0 3px rgba(121, 89, 255, .18); }
+#finger {
+  position: absolute; left: 0; top: 0; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; z-index: 7;
+  background: rgba(255, 255, 255, .55); border: 3px solid var(--ink); box-shadow: 0 6px 16px rgba(0, 0, 0, .22);
+}
+
+/* Right-hand column next to the phone */
+.col { position: absolute; left: 586px; width: 450px; z-index: 24; }
+.feat {
+  position: absolute; left: 0; width: 446px; background: var(--card); border: 4px solid var(--ink); border-radius: 22px;
+  box-shadow: 8px 8px 0 var(--ink); padding: 18px 24px 22px;
+}
+.feat p { margin: 12px 0 0; font-weight: 800; font-size: 39px; line-height: 1.02; letter-spacing: -0.04em; }
+.kind {
+  display: inline-block; font-weight: 800; font-size: 21px; line-height: 1; letter-spacing: .06em; text-transform: uppercase;
+  padding: 7px 13px 7px; border-radius: 999px; border: 3px solid; transform: rotate(-2deg);
+}
+.kind.reconnect { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-edge); }
+.kind.circle { background: var(--tint); color: var(--deep); border-color: var(--deep); }
+.kind.bridge { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue-text); }
+.kind.ns { background: var(--card); color: var(--deep); border-color: var(--ink); transform: rotate(-4deg); }
+.feat.ns { background: var(--purple); color: #fff; }
+
+.rowx { position: absolute; left: 0; display: flex; align-items: center; gap: 26px; white-space: nowrap; }
+.box {
+  width: 68px; height: 68px; flex: none; border: 5px solid var(--ink); border-radius: 17px; background: var(--card);
+  box-shadow: 5px 5px 0 var(--ink); display: grid; place-items: center; position: relative;
+}
+.box svg { width: 46px; height: 46px; overflow: visible; }
+.box path { fill: none; stroke: var(--ink); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+.box.p path { stroke: #fff; }
+.box .dots { font-weight: 800; font-size: 40px; line-height: 0; transform: translateY(-9px); letter-spacing: .02em; }
+.lbl { font-weight: 800; font-size: 80px; letter-spacing: -0.045em; line-height: 1; }
+.lbl.sm { font-size: 50px; }
+.soon {
+  display: inline-block; font-weight: 800; font-size: 36px; padding: 6px 16px 9px; border-radius: 14px; line-height: 1;
+  background: var(--warn-bg); color: var(--warn-text); border: 4px solid var(--warn-edge); transform: rotate(-4deg);
+}
+.strike { position: absolute; left: -6px; height: 6px; top: 52%; background: var(--ink); border-radius: 3px; }
+.small { font-family: Inter, sans-serif; font-weight: 600; font-size: 31px; line-height: 1.3; letter-spacing: -0.01em; }
+.mono { font-family: "JetBrains Mono", monospace; font-weight: 600; font-size: 25px; letter-spacing: 0; }
+
+/* Preview controls (hidden when rendering) */
+#ui { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 10px 14px; background: rgba(0,0,0,.7); color: #eee; font: 13px system-ui; z-index: 99; }
+#ui input { flex: 1; }
+html.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bgA" class="bg cream"></div>
+  <div id="bgB" class="bg purple"></div>
+  <canvas id="fxBack" class="fx"></canvas>
+
+  <!-- 1. Logo, then the tagline (0-4 s) -->
+  <div id="s1" class="abs" style="inset:0; z-index:20">
+    <div id="s1-logo" class="logo purple" style="left:440px; top:224px; width:200px; height:200px; font-size:132px"><span>φ</span></div>
+    <div id="s1-word" class="word" style="top:478px; font-size:236px"><span class="l">p</span><span class="l">h</span><span class="l">u</span><span class="l">n</span><span class="l">k</span></div>
+    <div class="center" style="top:742px"><span id="s1-tag" class="stk card" style="font-weight:800; font-size:56px; letter-spacing:-0.035em">find your people on Farcaster</span></div>
+  </div>
+
+  <!-- 2. The problem (4-8 s) -->
+  <div id="s2" class="abs" style="inset:0; z-index:20">
+    <div id="pills"></div>
+    <div id="s2a" class="center hd cream" style="top:418px; font-size:104px; line-height:1.12">
+      <div><span class="m"><span class="w">people</span></span> <span class="m"><span class="w">are</span></span></div>
+      <div><span id="s2a-box" class="hl purple" style="padding:0 .16em .08em"><span class="m"><span class="w">switching</span></span> <span class="m"><span class="w">apps.</span></span></span></div>
+    </div>
+    <div id="s2b" class="center hd cream" style="top:418px; font-size:104px; line-height:1.12">
+      <div><span class="m"><span class="w">don't</span></span> <span class="m"><span class="w">lose</span></span></div>
+      <div><span class="m"><span class="w">your</span></span> <span id="s2b-box" class="hl lilac" style="padding:0 .16em .08em"><span class="m"><span class="w">people.</span></span></span></div>
+    </div>
+  </div>
+
+  <!-- 3-6. The phone with the real client in it (8-26 s) -->
+  <div id="panel" class="abs" style="inset:0; z-index:21">
+    <div id="bgP" class="bg cream"></div>
+  </div>
+  <div id="phone">
+    <div class="body"></div>
+    <div class="btn" style="left:-4px; top:170px; height:34px"></div>
+    <div class="btn" style="left:-4px; top:226px; height:62px"></div>
+    <div class="btn" style="left:-4px; top:302px; height:62px"></div>
+    <div class="btn" style="right:-4px; top:250px; height:96px"></div>
+    <div class="screen">
+      <div class="status"><span>9:41</span>
+        <svg width="78" height="14" viewBox="0 0 78 14" aria-hidden="true">
+          <g fill="#141414"><rect x="0" y="9" width="3.5" height="5" rx="1"/><rect x="5.5" y="6.5" width="3.5" height="7.5" rx="1"/><rect x="11" y="4" width="3.5" height="10" rx="1"/><rect x="16.5" y="1" width="3.5" height="13" rx="1"/></g>
+          <path d="M33 4.3a10 10 0 0 1 13.8 0M35.5 7.3a6 6 0 0 1 8.8 0M38.2 10.3a2.2 2.2 0 0 1 3.4 0" fill="none" stroke="#141414" stroke-width="2" stroke-linecap="round"/>
+          <rect x="52" y="1.5" width="22" height="11" rx="3.4" fill="none" stroke="#141414" stroke-opacity=".45" stroke-width="1.4"/>
+          <rect x="54" y="3.5" width="16" height="7" rx="1.8" fill="#141414"/><path d="M75.8 5.2v3.6" stroke="#141414" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="island"></div>
+      <iframe id="app" src="_build/app.html" title="phunk"></iframe>
+      <div class="homebar"></div>
+      <div id="rings"></div>
+      <canvas id="fxPhone"></canvas>
+      <div id="finger"></div>
+    </div>
+  </div>
+
+  <!-- 3. meet phunk -->
+  <div id="s3" class="col" style="top:84px; height:960px">
+    <h2 class="hd" id="s3-hd" style="font-size:80px"><span class="m"><span class="w">meet</span></span> <span id="s3-stk" class="stk purple">phunk.</span></h2>
+    <div class="feat" id="f1" style="top:142px"><span class="kind reconnect">Reconnect</span><p>people you talked to, now on other apps</p></div>
+    <div class="feat" id="f2" style="top:336px"><span class="kind circle">Your circle</span><p>friends of your friends</p></div>
+    <div class="feat" id="f3" style="top:489px"><span class="kind bridge">Bridge</span><p>people outside your bubble</p></div>
+    <div class="feat ns" id="f4" style="top:683px"><span class="kind ns">Voted NS</span><p>see who voted for Network School</p></div>
+  </div>
+
+  <!-- 4. one tap -->
+  <div id="s4" class="col" style="top:150px">
+    <h2 class="hd" style="font-size:96px"><span class="m"><span class="w">one</span></span> <span id="s4-stk" class="stk purple">tap.</span></h2>
+    <div class="rowx" id="r1" style="top:236px"><span class="box"><svg viewBox="0 0 46 46"><path d="M9 24l9 9 19-21"/></svg></span><span class="lbl">follow</span></div>
+    <div class="rowx" id="r2" style="top:370px"><span class="box"><svg viewBox="0 0 46 46"><path d="M9 24l9 9 19-21"/></svg></span><span class="lbl">like</span></div>
+    <div class="rowx" id="r3" style="top:504px"><span class="box" style="background:var(--warn-bg)"><span class="dots">...</span></span><span class="lbl">cast</span><span class="soon">soon</span></div>
+  </div>
+
+  <!-- 5. every cast shows the app -->
+  <div id="s5" class="col" style="top:96px">
+    <h2 class="hd" style="font-size:66px; line-height:1.08">
+      <div><span class="m"><span class="w">every</span></span> <span class="m"><span class="w">cast</span></span> <span class="m"><span class="w">shows</span></span></div>
+      <div><span class="m"><span class="w">the</span></span> <span id="s5-stk" class="stk purple" style="padding:.0em .14em .07em; margin:.08em 0">app</span> <span class="m"><span class="w">that</span></span></div>
+      <div><span class="m"><span class="w">sent</span></span> <span class="m"><span class="w">it.</span></span></div>
+    </h2>
+    <h3 class="hd" id="s5-sub" style="position:absolute; top:330px; font-size:60px">filter by app:</h3>
+    <div class="rowx" id="a1" style="top:430px; gap:22px"><span class="box p" style="width:52px;height:52px;border-radius:13px;border-width:4px;box-shadow:4px 4px 0 var(--ink)"><svg viewBox="0 0 46 46" style="width:34px;height:34px"><path d="M9 24l9 9 19-21"/></svg></span><span class="lbl sm">warpcast</span></div>
+    <div class="rowx" id="a2" style="top:530px; gap:22px"><span class="box p" style="width:52px;height:52px;border-radius:13px;border-width:4px;box-shadow:4px 4px 0 var(--ink)"><svg viewBox="0 0 46 46" style="width:34px;height:34px"><path d="M9 24l9 9 19-21"/></svg></span><span class="lbl sm" style="position:relative">own key<span class="strike"></span></span></div>
+    <div class="rowx" id="a3" style="top:630px; gap:22px"><span class="box p" style="width:52px;height:52px;border-radius:13px;border-width:4px;box-shadow:4px 4px 0 var(--ink)"><svg viewBox="0 0 46 46" style="width:34px;height:34px"><path d="M9 24l9 9 19-21"/></svg></span><span class="lbl sm">fireflyapp</span></div>
+  </div>
+
+  <canvas id="fxStage" class="fx"></canvas>
+
+  <!-- 6. money gun -->
+  <div id="s6" class="col" style="top:300px">
+    <h2 class="hd cream" style="font-size:96px"><span class="m"><span class="w">like</span></span> <span class="m"><span class="w">it?</span></span></h2>
+    <h2 class="hd cream" style="font-size:96px; margin-top:6px"><span class="m"><span class="w">use</span></span> <span class="m"><span class="w">your</span></span></h2>
+    <div style="margin-top:16px"><span id="s6-stk" class="stk lilac hd" style="font-size:84px">money gun.</span></div>
+    <p id="s6-small" class="small" style="color:var(--cream); margin:44px 0 0; width:420px">tips in USDC on Base, right from your Farcaster wallet.</p>
+    <span id="s6-nice" class="stk card hd" style="position:absolute; left:250px; top:470px; font-size:66px">nice.</span>
+  </div>
+
+  <!-- 7. Straight from the node (26-28 s) -->
+  <div id="s7" class="abs" style="inset:0; z-index:25">
+    <div class="center hd cream k" style="top:478px; font-size:116px"><span class="m"><span class="w">straight</span></span> <span class="m"><span class="w">from</span></span></div>
+    <div class="center hd cream k" style="top:478px; font-size:116px"><span class="m"><span class="w">a</span></span> <span class="hl purple" style="padding:0 .14em .06em"><span class="m"><span class="w">snapchain</span></span></span> <span class="m"><span class="w">node.</span></span></div>
+    <div class="center hd cream k" style="top:478px; font-size:116px"><span class="m"><span class="w">no</span></span> <span class="m"><span class="w">API</span></span> <span class="m"><span class="w">key.</span></span></div>
+    <div class="center k" style="top:468px"><span class="stk lilac hd" style="font-size:116px">open source.</span></div>
+  </div>
+
+  <!-- 8. End card (28-32 s) -->
+  <div id="s8" class="abs" style="inset:0; z-index:25">
+    <div id="s8-in" class="abs" style="inset:0; transform-origin:540px 520px">
+      <div id="s8-logo" class="logo cream" style="left:450px; top:118px; width:180px; height:180px; font-size:120px"><span>φ</span></div>
+      <div id="s8-word" class="word" style="top:342px; font-size:220px"><span class="l">p</span><span class="l">h</span><span class="l">u</span><span class="l">n</span><span class="l">k</span></div>
+      <div id="s8-tag" class="center hd cream" style="top:582px; font-size:54px; letter-spacing:-0.035em"><span class="m"><span class="w">find</span></span> <span class="m"><span class="w">your</span></span> <span class="m"><span class="w">people</span></span> <span class="m"><span class="w">on</span></span> <span class="m"><span class="w">Farcaster</span></span></div>
+      <div class="center" style="top:684px"><span id="s8-url" class="stk ink hd" style="font-size:70px; border-radius:999px; padding:.06em .46em .14em">phunk.social</span></div>
+      <div class="center" style="top:832px"><span id="s8-mini" class="stk lilac hd" style="font-size:42px; padding:.1em .34em .16em; border-width:4px; box-shadow:6px 6px 0 var(--ink)">also a Farcaster mini app</span></div>
+      <div id="s8-foot" class="center mono" style="top:1000px; color:var(--ink)">open source · MIT · github.com/Ramitphi/phunk-client</div>
+    </div>
+  </div>
+</div>
+
+<div id="ui"><button id="play">Pause</button><input id="scrub" type="range" min="0" max="32" step="0.001" value="0"><span id="clock">0.00</span></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- timing
+const DUR = 32, BEAT = 0.5;
+const T = {
+  // 1. logo and tagline
+  // the logo is already up on frame 0: players often use that frame as the thumbnail
+  logo: -0.16, letters: 0.3, wipe1: 1.72, burst1: 2.0, tag: 2.25, dark: 4.0,
+  // 2. the problem
+  pa: 4.0, box1: 4.5, pills: 4.85, swap: 6.0, box2: 6.62, panel: 7.72,
+  // 3. meet phunk: one card per bar line, the phone scrolls to a matching person
+  meet: 8.2, feats: [9.0, 10.0, 11.0, 12.0], out3: 13.64,
+  // 4. one tap
+  tap: 14.0, rows: 14.3, follow: 15.0, castsTab: 15.5, like: 16.25, soon: 17.0, out4: 17.64,
+  // 5. every cast shows the app
+  apps: 18.0, chips: [18.45, 18.6, 18.75], open: 19.45, sub: 19.3, ticks: [19.6, 19.75, 19.9],
+  untick: 20.75, tipTab: 21.75, out5: 21.48,
+  // 6. money gun
+  gun: 22.1, fire: [23.5, 24.5], small: 24.75, nice: 25.25,
+  // 7. straight from the node
+  k: [26.0, 26.5, 27.0, 27.5],
+  // 8. end card
+  end: 28.0,
+};
+
+// ---------------------------------------------------------------- math
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, d) => clamp((t - a) / d);
+const eo3 = (k) => 1 - Math.pow(1 - k, 3);
+const eo5 = (k) => 1 - Math.pow(1 - k, 5);
+const ei3 = (k) => k * k * k;
+const eio3 = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+// A damped spring from 0 to 1 that starts at a: f is its frequency in Hz, z its damping.
+function spring(t, a, f = 2.4, z = 0.55) {
+  const x = t - a;
+  if (x <= 0) return 0;
+  const w = 2 * Math.PI * f, wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x));
+}
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------- dom helpers
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+function show(el, on) { el.classList.toggle("hide", !on); return on; }
+// Move an element from where CSS put it: x, y in px, s scale, r degrees, o opacity.
+function tf(el, { x = 0, y = 0, s = 1, sx, sy, r = 0, o = 1 } = {}) {
+  if (o <= 0.002) { el.style.visibility = "hidden"; return; }
+  el.style.visibility = "";
+  el.style.opacity = o >= 0.998 ? "" : o.toFixed(3);
+  el.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) rotate(${r.toFixed(3)}deg) scale(${(sx ?? s).toFixed(4)}, ${(sy ?? s).toFixed(4)})`;
+}
+// Words rising out of their line, one after another.
+function rise(words, t, a, step = 0.07, f = 2.2) {
+  words.forEach((w, i) => {
+    const k = spring(t, a + i * step, f, 0.72);
+    w._fs ||= parseFloat(getComputedStyle(w).fontSize);
+    tf(w, { y: (1 - k) * 1.15 * w._fs, o: t >= a + i * step ? 1 : 0 });
+  });
+}
+// A sticker slapped on: big, then settling with a little wobble.
+function slap(el, t, a, r = -2, from = 1.6) {
+  const k = spring(t, a, 2.6, 0.5);
+  tf(el, { s: lerp(from, 1, k), r: lerp(r - 8, r, k), o: prog(t, a, 0.06) });
+}
+// A pop from nothing.
+function popIn(el, t, a, r = 0, f = 2.6, z = 0.45) {
+  const k = spring(t, a, f, z);
+  tf(el, { s: k, r: r + (1 - k) * -14, o: t >= a ? 1 : 0 });
+}
+// Leave to the right: a quick push that stays solid, fading only at the very end.
+function leave(t, a, i = 0) {
+  const k = prog(t, a + i * 0.03, 0.26);
+  return { x: ei3(k) * 540, r: ei3(k) * 6, o: 1 - clamp((k - 0.7) / 0.3) };
+}
+
+// ---------------------------------------------------------------- particles
+// The client's own bursts (app.js: confetti, hearts, bills), seeded so every render matches.
+const COLORS = ["#7959ff", "#141414", "#ccc0ff", "#fff4cc", "#28d02c", "#fffdf9", "#dc3412", "#8ccbff"];
+function burst(kind, x, y, n, t0, seed, o = {}) {
+  const R = rng(seed), out = [];
+  for (let i = 0; i < n; i++) {
+    const p = { kind, x, y, t0, rot: R() * 6, seed: R() };
+    const k = o.scale || 1;
+    if (kind === "confetti") {
+      const a = R() * Math.PI * 2, sp = (140 + R() * 380) * k;
+      Object.assign(p, { life: 1.6 + R() * 0.5, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 240 * k, spin: (R() - 0.5) * 16,
+        size: (7 + R() * 8) * (o.size || 1), color: (o.colors || COLORS)[i % (o.colors || COLORS).length], shape: i % 3, g: 380 * k });
+    } else if (kind === "hearts") {
+      Object.assign(p, { life: 1.3, vx: (R() - 0.5) * 220 * k, vy: (-230 - R() * 230) * k, size: (12 + R() * 8) * (o.size || 1),
+        color: "#dc3412", rot: (R() - 0.5) * 0.8 });
+    } else {
+      const a = (o.a0 ?? -1.15) + R() * (o.da ?? 1.3), sp = (o.v0 ?? 380) + R() * (o.dv ?? 380);
+      Object.assign(p, { life: o.life || 1.8, t0: t0 + i * (o.gap ?? 0.055), vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: a,
+        spin: (R() - 0.5) * 9, size: (0.8 + R() * 0.6) * (o.size || 1), g: o.g ?? 700 });
+    }
+    out.push(p);
+  }
+  return out;
+}
+// Draw a burst at time t; ox, oy move its origin (bursts made at 0, 0 follow their button).
+function drawParts(ctx, parts, t, ox = 0, oy = 0) {
+  for (const p of parts) {
+    const dt = t - p.t0;
+    if (dt < 0 || dt > p.life) continue;
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.strokeStyle = "#141414";
+    ctx.lineJoin = "round";
+    if (p.kind === "confetti") {
+      const d = (1 - Math.exp(-2.6 * dt)) / 2.6;
+      ctx.translate(p.x + p.vx * d, p.y + p.vy * d + p.g * dt * dt);
+      ctx.rotate(p.rot + p.spin * dt);
+      ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.5);
+      ctx.fillStyle = p.color;
+      ctx.lineWidth = 1.5 * Math.max(1, p.size / 12);
+      const s = p.size;
+      if (p.shape === 0) { ctx.fillRect(-s / 2, -s / 4, s, s / 2); ctx.strokeRect(-s / 2, -s / 4, s, s / 2); }
+      else if (p.shape === 1) { ctx.beginPath(); ctx.arc(0, 0, s / 2.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      else {
+        ctx.font = `700 ${Math.round(s * 1.6)}px Inter`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.lineWidth = 2 * Math.max(1, p.size / 12);
+        ctx.strokeText("φ", 0, 0); ctx.fillText("φ", 0, 0);
+      }
+    } else if (p.kind === "hearts") {
+      const s = p.size;
+      ctx.translate(p.x + p.vx * dt, p.y - 16 + p.vy * dt + 60 * dt * dt);
+      ctx.rotate(p.rot);
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1.3 - dt));
+      ctx.beginPath();
+      ctx.moveTo(0, s * 0.35);
+      ctx.bezierCurveTo(-s * 0.9, -s * 0.25, -s * 0.45, -s * 0.95, 0, -s * 0.45);
+      ctx.bezierCurveTo(s * 0.45, -s * 0.95, s * 0.9, -s * 0.25, 0, s * 0.35);
+      ctx.closePath();
+      ctx.fillStyle = p.color; ctx.fill();
+      ctx.lineWidth = 2; ctx.stroke();
+    } else {
+      const bw = 40 * p.size, bh = 22 * p.size;
+      ctx.translate(p.x + p.vx * dt, p.y + p.vy * dt + p.g * dt * dt / 2);
+      ctx.rotate(p.rot + p.spin * dt);
+      ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.4, dt / 0.04);
+      ctx.lineWidth = 2 * p.size;
+      ctx.fillStyle = "#bfefc0";
+      ctx.beginPath(); ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 4 * p.size); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, bh * 0.27, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+function ripple(ctx, x, y, t, t0) {
+  const k = prog(t, t0, 0.5);
+  if (k <= 0 || k >= 1) return;
+  const e = 1 - Math.pow(1 - k, 2.4);
+  ctx.save();
+  ctx.globalAlpha = 1 - k;
+  ctx.strokeStyle = "#7959ff"; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(x, y, 22 * lerp(0.4, 2.4, e), 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+function canvas(el, w, h, dpr = 2) {
+  el.width = w * dpr; el.height = h * dpr;
+  const ctx = el.getContext("2d");
+  return () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h); return ctx; };
+}
+
+// ---------------------------------------------------------------- the app in the phone
+const app = { doc: null, win: null };
+const SCREEN_TOP = 46; // the status bar above the page
+// Where an element of the page sits on the phone's screen.
+function onScreen(el) {
+  const r = el.getBoundingClientRect();
+  return { x: r.left, y: r.top + SCREEN_TOP, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + SCREEN_TOP + r.height / 2 };
+}
+const PHONE = { x: 88 + 18, y: 98 + 18 }; // the screen's corner on the stage
+const handleOf = (card) => ($(".meta .muted", card) || {}).textContent || "";
+const textOf = (card) => ($(".text", card) || {}).textContent || "";
+
+function setupApp() {
+  const d = app.doc;
+  // A phone's tab bar sits above the home indicator.
+  const st = d.createElement("style");
+  st.textContent = `html{scrollbar-width:none} ::-webkit-scrollbar{display:none} *{overflow-anchor:none!important}
+    @media (max-width:800px){.tabs{padding-bottom:26px!important} body{padding-bottom:112px!important}}
+    .toast{bottom:122px!important}`;
+  d.head.append(st);
+  // People: one of each kind first, so the scroll between them is short.
+  const people = $("#people", d);
+  const want = ["@manan", "@shawmakesmagic", "@vm", "@bertwurst.eth", "@matthuang"];
+  const cards = $$(".person", people);
+  want.slice().reverse().forEach((h) => { const c = cards.find((c) => handleOf(c) === h); if (c) people.prepend(c); });
+  // Casts: short ones from three apps.
+  const feed = $("#feed", d);
+  const casts = $$(".cast", feed);
+  const pick = [["@farcaster", "I don't think"], ["@borodutch", "love seeing"], ["@nounishprof", "so cool!"], ["@adrienne", "What if everyone"]];
+  pick.slice().reverse().forEach(([h, s]) => { const c = casts.find((c) => handleOf(c) === h && textOf(c).startsWith(s)); if (c) feed.prepend(c); });
+  // A toast, as the client shows after a follow.
+  const toast = d.createElement("div");
+  toast.className = "toast"; toast.id = "vtoast"; toast.hidden = true;
+  d.body.append(toast);
+  app.people = $$(".person", people);
+  app.casts = $$(".cast", feed);
+  app.gun = $("#tip-pane .money-gun", d);
+  app.bills = $$("#tip-pane .mg-bill", d);
+  // Where the money gun's bills come out: its nose (viewBox 280 x 184), on the stage.
+  setPane("tip");
+  const g = onScreen(app.gun), sc = g.w / 280;
+  S.nose = { x: PHONE.x + g.x + 214 * sc, y: PHONE.y + g.y + 80 * sc };
+  // Heights of the own key casts, to fold them away when that app is unticked.
+  setPane("casts");
+  app.ownKey = app.casts.filter((c) => ($(".chip.app", c) || {}).textContent === "own key").map((c) => {
+    const cs = getComputedStyle(c);
+    return { el: c, h: c.offsetHeight, mt: parseFloat(cs.marginTop), mb: parseFloat(cs.marginBottom) };
+  });
+  setPane("people");
+}
+function setPane(name) {
+  const d = app.doc;
+  for (const p of $$(".pane", d)) p.classList.toggle("active", p.dataset.pane === name);
+  for (const b of $$(".tabs button", d)) b.setAttribute("aria-selected", String(b.dataset.tab === name));
+}
+const pageY = (el) => el.getBoundingClientRect().top + app.win.scrollY;
+
+// ---------------------------------------------------------------- stage setup
+const S = {};
+function setup() {
+  S.fxBack = canvas($("#fxBack"), 1080, 1080);
+  S.fxStage = canvas($("#fxStage"), 1080, 1080);
+  S.fxPhone = canvas($("#fxPhone"), 390, 848);
+  S.letters1 = $$("#s1-word .l");
+  S.letters8 = $$("#s8-word .l");
+  // Scene 2 pills, around the edge so they never cover the words.
+  const pills = [["neynar", 230, 150, -8], ["coinbase", 720, 118, 5], ["quilcast", 160, 318, -13], ["herocast", 910, 300, 7],
+    ["fireflyapp", 186, 790, 8], ["warpcast", 900, 790, -11], ["own key", 330, 950, 9], ["baseapp", 752, 948, -6]];
+  S.pills = pills.map(([name, x, y, r], i) => {
+    const el = document.createElement("div");
+    el.className = "pill"; el.textContent = name;
+    $("#pills").append(el);
+    return { el, x, y, r, i, w: 0, h: 0 };
+  });
+  for (const p of S.pills) { p.w = p.el.offsetWidth; p.h = p.el.offsetHeight; }
+  // Bursts
+  S.conf1 = burst("confetti", 540, 324, 70, T.burst1, 11, { scale: 1.9, size: 1.7 });
+  S.conf8 = burst("confetti", 540, 208, 80, T.end, 88, { scale: 2.0, size: 1.7,
+    colors: ["#141414", "#ccc0ff", "#fff4cc", "#28d02c", "#fffdf9", "#dc3412", "#8ccbff", "#fffdf9"] });
+  // Headlines shrink, if they must, to fit their column with a margin.
+  for (const hd of $$(".col .hd")) {
+    const room = 1080 - 44 - 586, w = hd.scrollWidth;
+    if (w > room) hd.style.fontSize = `${parseFloat(getComputedStyle(hd).fontSize) * room / w}px`;
+  }
+  stack($("#s3-hd"), ["#f1", "#f2", "#f3", "#f4"], 44, 22);
+  stack($("#s5 .hd"), ["#s5-sub", "#a1", "#a2", "#a3"], 46, 0, [0, 26, 20, 20]);
+  setupApp();
+  S.followConf = burst("confetti", 0, 0, 18, T.follow, 5);
+  S.hearts = burst("hearts", 0, 0, 9, T.like, 7, { scale: 1.1, size: 1.25 });
+  publishCues();
+}
+
+// Lay out absolutely placed blocks one under another, from their real heights.
+function stack(head, ids, first, gap, gaps) {
+  let y = head.offsetTop + head.offsetHeight + first;
+  ids.forEach((id, i) => {
+    const el = $(id);
+    y += gaps ? gaps[i] : 0;
+    el.style.top = `${y}px`;
+    y += el.offsetHeight + (gaps ? 0 : gap);
+  });
+}
+
+// ---------------------------------------------------------------- scenes
+function scene1(t) {
+  if (!show($("#s1"), t < T.dark)) return;
+  const logo = $("#s1-logo");
+  const k = spring(t, T.logo, 1.9, 0.42);
+  tf(logo, { s: k, r: lerp(-60, -12, spring(t, T.logo, 1.5, 0.6)), o: 1 });
+  // At the wipe the logo flips to cream and gives a kick.
+  const flip = t >= T.wipe1;
+  logo.classList.toggle("purple", !flip); logo.classList.toggle("cream", flip);
+  if (flip) {
+    const b = spring(t, T.wipe1, 3, 0.35);
+    tf(logo, { s: 1 + (1 - b) * 0.18, r: -12 + (1 - b) * 10 });
+  }
+  S.letters1.forEach((l, i) => {
+    const a = T.letters + i * 0.07;
+    const kk = spring(t, a, 2.4, 0.5);
+    tf(l, { y: (1 - kk) * 90, s: lerp(0.2, 1, kk), r: (1 - kk) * (i % 2 ? 14 : -14), o: t >= a ? 1 : 0 });
+  });
+  slap($("#s1-tag"), t, T.tag, -3, 1.7);
+}
+
+function scene2(t) {
+  if (!show($("#s2"), t >= T.dark && t < T.panel + 0.4)) return;
+  // First line, then the purple box, then the apps fly out from behind.
+  const A = $("#s2a"), B = $("#s2b");
+  const wa = $$(".w", A);
+  if (show(A, t < T.swap + 0.2)) {
+    rise(wa.slice(0, 2), t, T.pa, 0.12);
+    const bk = eo5(prog(t, T.box1 - 0.04, 0.3));
+    $("#s2a-box").style.clipPath = `inset(0 ${(1 - bk) * 100}% 0 0 round .16em)`;
+    rise(wa.slice(2), t, T.box1, 0.1);
+    const out = eio3(prog(t, T.swap - 0.1, 0.2));
+    tf(A, { y: -60 * out, o: 1 - out });
+  }
+  if (show(B, t >= T.swap)) {
+    const wb = $$(".w", B);
+    rise(wb.slice(0, 3), t, T.swap, 0.12);
+    const bk = eo5(prog(t, T.box2 - 0.04, 0.3));
+    $("#s2b-box").style.clipPath = `inset(0 ${(1 - bk) * 100}% 0 0 round .16em)`;
+    rise(wb.slice(3), t, T.box2, 0.1);
+  }
+  for (const p of S.pills) {
+    const a = T.pills + p.i * 0.075;
+    const k = spring(t, a, 2.3, 0.5);
+    // after the swap they drift apart and fade: people leaving
+    const apart = eo3(prog(t, T.swap, 2.0));
+    const dx = p.x - 540, dy = p.y - 540;
+    const fx = Math.sin(t * 1.3 + p.i * 1.7) * 6, fy = Math.cos(t * 1.1 + p.i) * 7;
+    const x = p.x + dx * 0.22 * apart + fx - p.w / 2 + (1 - k) * dx * -0.12;
+    const y = p.y + dy * 0.22 * apart + fy - p.h / 2 + (1 - k) * dy * -0.12;
+    tf(p.el, { x, y, s: k, r: p.r * (1 + apart * 0.6) + (1 - k) * (p.i % 2 ? 25 : -25), o: (t >= a ? 1 : 0) * lerp(1, 0.38, apart) });
+  }
+}
+
+// The cream panel that slides up over the dark scene, carrying the phone.
+function panelY(t) { return (1 - eio3(prog(t, T.panel, 0.36))) * 1080; }
+
+function phoneScene(t) {
+  const on = t >= T.panel && t < T.k[0];
+  show($("#panel"), on && t < T.panel + 0.5);
+  if (!show($("#phone"), on)) return;
+  $("#panel").style.transform = `translateY(${panelY(t)}px)`;
+  // The phone rides in on the panel, then settles.
+  const settle = spring(t, T.panel + 0.18, 1.6, 0.6);
+  tf($("#phone"), { y: panelY(t) + (1 - settle) * 70 });
+  // On purple the phone's shadow goes ink.
+  $("#phone .body").style.setProperty("--sh", t >= T.tipTab ? "#141414" : "#7959ff");
+
+  // Which screen, and how far down.
+  let pane = "people", slide = 0;
+  if (t >= T.tipTab) { pane = "tip"; slide = t - T.tipTab; }
+  else if (t >= T.castsTab) { pane = "casts"; slide = t - T.castsTab; }
+  setPane(pane);
+  for (const el of $$(".pane", app.doc)) { el.style.transform = ""; el.style.opacity = ""; }
+  const paneEl = $(`#${pane}-pane`, app.doc);
+  const sl = eo3(prog(slide, 0, 0.24));
+  paneEl.style.transform = slide > 0 && sl < 1 ? `translateX(${(1 - sl) * 28}px)` : "";
+  paneEl.style.opacity = slide > 0 && sl < 1 ? sl : "";
+
+  const P = app.people;
+
+  // Follow, like, the apps filter, the toast: each a function of t.
+  const follow = $(".pactions button", P[3]);
+  const followed = t >= T.follow;
+  follow.textContent = followed ? "Following" : "Follow";
+  follow.classList.toggle("following", followed);
+  bump(follow, t, T.follow);
+  const like = $(".actions .like", app.casts[0]);
+  const liked = t >= T.like;
+  like.textContent = liked ? "Liked" : "Like";
+  like.classList.toggle("on", liked);
+  bump(like, t, T.like);
+  $("#apps-box", app.doc).open = t >= T.open;
+  const own = $('#apps input[value="own key"]', app.doc);
+  own.checked = t < T.untick;
+  const fold = eio3(prog(t, T.untick + 0.05, 0.3));
+  for (const c of app.ownKey) {
+    c.el.style.height = fold > 0 ? `${c.h * (1 - fold)}px` : "";
+    c.el.style.overflow = fold > 0 ? "hidden" : "";
+    c.el.style.opacity = fold > 0 ? 1 - Math.min(1, fold * 2) : "";
+    c.el.style.marginTop = fold > 0 ? `${c.mt * (1 - fold)}px` : "";
+    c.el.style.marginBottom = fold > 0 ? `${c.mb * (1 - fold)}px` : "";
+    c.el.style.paddingTop = c.el.style.paddingBottom = fold >= 1 ? "0px" : "";
+    c.el.style.borderWidth = fold >= 1 ? "0px" : "";
+  }
+  const toast = $("#vtoast", app.doc);
+  const tk = prog(t, T.follow + 0.08, 0.34), tout = prog(t, T.castsTab + 0.25, 0.2);
+  toast.hidden = !(tk > 0 && tout < 1);
+  toast.textContent = `Following ${handleOf(P[3])}.`;
+  const sp = spring(t, T.follow + 0.08, 2.4, 0.5);
+  toast.style.transform = `translate(-50%, ${(1 - sp) * 18 + tout * 30}px) scale(${lerp(0.85, 1, sp)}) rotate(${(1 - sp) * -3}deg)`;
+  toast.style.opacity = tk > 0 ? Math.min(1, tk * 3) * (1 - tout) : "";
+
+  // The money gun: kicks and its bills fly out on each tap.
+  let recoil = 0;
+  for (const f of T.fire) {
+    const x = t - f;
+    if (x >= 0 && x < 0.35) recoil = x < 0.07 ? x / 0.07 : 1 - eo3((x - 0.07) / 0.28);
+  }
+  app.gun.style.transformOrigin = "30% 70%";
+  app.gun.style.transform = recoil ? `translate(${-12 * recoil}px, ${3 * recoil}px) rotate(${-6 * recoil}deg)` : "";
+  const lastFire = [T.tipTab, ...T.fire].filter((f) => t >= f).pop();
+  app.bills.forEach((b, i) => {
+    const k = lastFire === undefined ? 0 : prog(t, lastFire + i * 0.07, 0.45);
+    const e = 1 + 2.25 * Math.pow(k - 1, 3) + 1.25 * Math.pow(k - 1, 2);
+    b.style.transform = `translate(${-34 * (1 - e)}px, 0) scale(${lerp(0.3, 1, e)}) rotate(${-30 * (1 - e)}deg)`;
+    b.style.opacity = Math.min(1, k * 4);
+  });
+
+  // Scroll last, once the page has its final layout for this frame.
+  let y = 0;
+  if (pane === "people") {
+    const stops = [[T.feats[0] - 0.3, P[0]], [T.feats[1] - 0.32, P[1]], [T.feats[2] - 0.32, P[2]], [T.feats[3] - 0.32, P[3]]];
+    let from = 0;
+    for (const [a, card] of stops) {
+      const to = pageY(card) - 66;
+      y = lerp(from, to, eio3(prog(t, a, 0.5)));
+      if (t < a + 0.5) break;
+      from = to;
+    }
+  } else if (pane === "casts") {
+    const first = pageY(app.casts[0]) - 66;
+    y = lerp(0, first, eio3(prog(t, T.apps - 0.12, 0.42)));
+    y = lerp(y, 0, eio3(prog(t, T.open - 0.4, 0.4)));
+    y = lerp(y, 150, eio3(prog(t, T.open + 0.08, 0.45)));
+  }
+  app.win.scrollTo(0, Math.round(y));
+
+  overlays(t, pane);
+}
+
+// A button springing into its new state (app.js pop).
+function bump(el, t, a) {
+  const x = t - a;
+  if (x < 0 || x > 0.4) { el.style.transform = ""; return; }
+  const k = x / 0.4;
+  const s = k < 0.55 ? lerp(0.6, 1.12, eo3(k / 0.55)) : lerp(1.12, 1, eio3((k - 0.55) / 0.45));
+  el.style.transform = `scale(${s})`;
+}
+
+// Rings round what the right-hand side is talking about, the finger, and the bursts.
+function overlays(t, pane) {
+  const rings = [];
+  if (pane === "people") {
+    const P = app.people;
+    const marks = [[$(".kind", P[0]), T.feats[0]], [$(".kind", P[1]), T.feats[1]], [$(".kind", P[2]), T.feats[2]], [$(".stamp", P[3]), T.feats[3]]];
+    marks.forEach(([el, a], i) => {
+      const end = i < 3 ? T.feats[i + 1] - 0.34 : T.out3;
+      if (el && t >= a + 0.05 && t < end + 0.15) rings.push([el, a + 0.05, end]);
+    });
+  }
+  if (pane === "casts") {
+    app.casts.slice(0, 3).forEach((c, i) => {
+      const a = T.chips[i];
+      if (t >= a && t < T.open - 0.4) rings.push([$(".chip.app", c), a, T.open - 0.55]);
+    });
+    if (t >= T.ticks[0] && t < T.tipTab) {
+      $$("#apps label", app.doc).forEach((l, i) => { if (t >= T.ticks[i]) rings.push([l, T.ticks[i], T.out5]); });
+    }
+  }
+  const holder = $("#rings");
+  while (holder.children.length < rings.length) holder.append(Object.assign(document.createElement("div"), { className: "ring" }));
+  [...holder.children].forEach((el, i) => {
+    if (i >= rings.length) { el.style.display = "none"; return; }
+    const [target, a, end] = rings[i];
+    const r = onScreen(target);
+    const k = spring(t, a, 2.6, 0.5), out = prog(t, end, 0.15);
+    el.style.display = "";
+    el.style.left = `${r.x - 6}px`; el.style.top = `${r.y - 6}px`;
+    el.style.width = `${r.w + 12}px`; el.style.height = `${r.h + 12}px`;
+    el.style.borderRadius = target.matches("label") ? "999px" : "14px";
+    el.style.transform = `scale(${lerp(1.35, 1, k)})`;
+    el.style.opacity = Math.min(1, prog(t, a, 0.08)) * (1 - out);
+  });
+
+  // The finger: groups of [time, target, dx, dy]. It glides between them,
+  // fades in at a group's first and out at its last.
+  const P = app.people, d = app.doc;
+  const tab = (name) => $(`.tabs button[data-tab="${name}"]`, d);
+  const follow = () => $(".pactions button", P[3]), like = () => $(".actions .like", app.casts[0]);
+  const ownKey = () => $("#apps label:nth-child(2)", d), amount = (i) => () => $$("#tip-pane .tip-grid button", d)[i];
+  const groups = [
+    [[T.follow - 0.6, follow, 80, 80], [T.follow - 0.1, follow, 0, 0], [T.castsTab - 0.1, () => tab("casts"), 0, -4],
+      [T.like - 0.1, like, 0, 0], [T.like + 0.5, like, 70, 60]],
+    [[T.untick - 0.6, ownKey, 80, 70], [T.untick - 0.1, ownKey, -40, 0], [T.tipTab - 0.1, () => tab("tip"), 0, -4],
+      [T.tipTab + 0.45, () => tab("tip"), 60, -70]],
+    [[T.fire[0] - 0.6, amount(2), 80, 80], [T.fire[0] - 0.1, amount(2), 0, 0], [T.fire[1] - 0.1, amount(3), 0, 0],
+      [T.fire[1] + 0.55, amount(3), 70, 70]],
+  ];
+  const presses = [T.follow, T.castsTab, T.like, T.untick, T.tipTab, ...T.fire];
+  const finger = $("#finger");
+  let fx = 0, fy = 0, fo = 0;
+  for (const g of groups) {
+    const a = g[0][0], b = g[g.length - 1][0];
+    if (t < a || t > b) continue;
+    fo = Math.min(prog(t, a, 0.15), 1 - prog(t, b - 0.25, 0.25));
+    let i = 0;
+    while (i < g.length - 1 && t >= g[i + 1][0]) i++;
+    const [ta, ga, dxa, dya] = g[i];
+    const ra = onScreen(ga());
+    fx = ra.cx + dxa; fy = ra.cy + dya;
+    if (i < g.length - 1) {
+      const [tb, gb, dxb, dyb] = g[i + 1];
+      const k = eio3(prog(t, ta + 0.18, tb - ta - 0.2));
+      if (k > 0) { const rb = onScreen(gb()); fx = lerp(fx, rb.cx + dxb, k); fy = lerp(fy, rb.cy + dyb, k); }
+    }
+  }
+  let press = 1;
+  for (const p of presses) { const x = t - p; if (x > -0.06 && x < 0.16) press = 1 - 0.18 * Math.sin(clamp((x + 0.06) / 0.22) * Math.PI); }
+  finger.style.display = fo > 0 ? "" : "none";
+  finger.style.transform = `translate(${fx}px, ${fy}px) scale(${press})`;
+  finger.style.opacity = fo;
+
+  // Ripples, the follow confetti, the like hearts.
+  const ctx = S.fxPhone();
+  const fb = onScreen($(".pactions button", P[3])), lb = onScreen($(".actions .like", app.casts[0]));
+  if (pane === "people") { ripple(ctx, fb.cx, fb.cy, t, T.follow); drawParts(ctx, S.followConf, t, fb.cx, fb.cy); }
+  if (pane === "casts") {
+    ripple(ctx, lb.cx, lb.cy, t, T.like);
+    drawParts(ctx, S.hearts, t, lb.cx, lb.cy);
+    const ol = onScreen($('#apps label:nth-child(2)', d));
+    ripple(ctx, ol.cx - 30, ol.cy, t, T.untick);
+  }
+  if (pane === "tip") {
+    $$("#tip-pane .tip-grid button", d).slice(2, 4).forEach((b, i) => { const r = onScreen(b); ripple(ctx, r.cx, r.cy, t, T.fire[i]); });
+  }
+  const tb = onScreen(tab(pane === "tip" ? "tip" : "casts"));
+  ripple(ctx, tb.cx, tb.cy - 4, t, pane === "tip" ? T.tipTab : T.castsTab);
+}
+
+function scene3(t) {
+  if (!show($("#s3"), t >= T.meet && t < T.out3 + 0.4)) return;
+  const hd = $("#s3-hd");
+  rise($$(".w", hd), t, T.meet, 0.1);
+  slap($("#s3-stk"), t, T.meet + 0.18, -2);
+  const outH = leave(t, T.out3, 0);
+  hd.style.transform = `translate(${outH.x}px,0)`; hd.style.opacity = outH.o;
+  ["#f1", "#f2", "#f3", "#f4"].forEach((id, i) => {
+    const el = $(id), a = T.feats[i];
+    const k = spring(t, a, 2.0, 0.6);
+    const out = leave(t, T.out3, i + 1);
+    const rot = [-1.4, 1.1, -0.9, 1.5][i];
+    tf(el, { x: (1 - k) * 160 + out.x, r: rot + (1 - k) * 9 + out.r, o: Math.min(prog(t, a, 0.1), out.o) });
+  });
+}
+
+function check(box, t, a, color = "#28d02c") {
+  const on = t >= a;
+  box.style.background = on ? color : "";
+  const path = $("path", box);
+  if (path) {
+    const len = 52;
+    path.style.strokeDasharray = len;
+    path.style.strokeDashoffset = len * (1 - eo3(prog(t, a, 0.2)));
+  }
+  const k = t >= a && t < a + 0.4 ? spring(t, a, 3, 0.4) : 1;
+  box.style.transform = `scale(${lerp(0.75, 1, k)})`;
+}
+
+function scene4(t) {
+  if (!show($("#s4"), t >= T.tap && t < T.out4 + 0.4)) return;
+  const col = $("#s4");
+  const hd = $(".hd", col);
+  rise($$(".w", hd), t, T.tap, 0.1, 2.4);
+  slap($("#s4-stk"), t, T.tap + 0.12, -3);
+  const o0 = leave(t, T.out4, 0);
+  hd.style.transform = `translate(${o0.x}px,0)`; hd.style.opacity = o0.o;
+  ["#r1", "#r2", "#r3"].forEach((id, i) => {
+    const el = $(id), a = T.rows + i * 0.12;
+    const k = spring(t, a, 2.2, 0.62), out = leave(t, T.out4, i + 1);
+    tf(el, { x: (1 - k) * 120 + out.x, o: Math.min(prog(t, a, 0.1), out.o) });
+  });
+  check($("#r1 .box"), t, T.follow);
+  check($("#r2 .box"), t, T.like);
+  const soon = $("#r3 .soon");
+  popIn(soon, t, T.soon, -4);
+}
+
+function scene5(t) {
+  if (!show($("#s5"), t >= T.apps && t < T.tipTab + 0.3)) return;
+  const col = $("#s5");
+  const hd = $(".hd", col);
+  rise($$(".w", hd), t, T.apps, 0.06, 2.4);
+  slap($("#s5-stk"), t, T.apps + 0.2, -2);
+  const out = (i) => leave(t, T.out5, i);
+  const o0 = out(0);
+  hd.style.transform = `translate(${o0.x}px,0)`; hd.style.opacity = o0.o;
+  const sub = $("#s5-sub"), ks = spring(t, T.sub, 2.2, 0.65), o1 = out(1);
+  tf(sub, { y: (1 - ks) * 40, x: o1.x, o: Math.min(prog(t, T.sub, 0.1), o1.o) });
+  ["#a1", "#a2", "#a3"].forEach((id, i) => {
+    const el = $(id), a = T.ticks[i] - 0.1;
+    const k = spring(t, a, 2.2, 0.62), o = out(i + 2);
+    tf(el, { x: (1 - k) * 100 + o.x, o: Math.min(prog(t, a, 0.1), o.o) });
+    const box = $(".box", el);
+    if (i === 1 && t >= T.untick) {
+      box.style.background = "";
+      $("path", box).style.strokeDasharray = 52;
+      $("path", box).style.strokeDashoffset = 52;
+      const k2 = spring(t, T.untick, 3, 0.4);
+      box.style.transform = `scale(${lerp(0.75, 1, k2)})`;
+    } else check(box, t, T.ticks[i], "#7959ff");
+  });
+  const strike = $("#a2 .strike"), sk = eo3(prog(t, T.untick + 0.05, 0.22));
+  strike.style.width = `calc(${sk * 100}% + 12px)`;
+  strike.style.opacity = sk > 0 ? 1 : 0;
+  $("#a2 .lbl").style.opacity = t >= T.untick ? lerp(1, 0.45, sk) : "";
+}
+
+function scene6(t) {
+  if (!show($("#s6"), t >= T.gun && t < T.k[0])) return;
+  const w = $$("#s6 .w");
+  rise(w, t, T.gun, 0.14, 2.3);
+  slap($("#s6-stk"), t, T.gun + 0.5, -3);
+  const sm = $("#s6-small"), k = spring(t, T.small, 2, 0.7);
+  tf(sm, { y: (1 - k) * 30, o: prog(t, T.small, 0.2) });
+  slap($("#s6-nice"), t, T.nice, 7, 1.9);
+  // Bills out of the phone's money gun, up past the top of the frame.
+  const ctx = S.fxStage();
+  if (!S.bills) {
+    const { x: nx, y: ny } = S.nose;
+    S.bills = [
+      ...burst("bills", nx, ny, 16, T.fire[0], 21, { a0: -1.45, da: 0.75, v0: 760, dv: 420, g: 760, size: 1.6, life: 1.7, gap: 0.035 }),
+      ...burst("bills", nx, ny, 24, T.fire[1], 42, { a0: -1.5, da: 0.85, v0: 820, dv: 480, g: 760, size: 1.75, life: 1.8, gap: 0.03 }),
+    ];
+  }
+  drawParts(ctx, S.bills, t);
+}
+
+function scene7(t) {
+  const on = t >= T.k[0] && t < T.end;
+  if (!show($("#s7"), on)) return;
+  $$("#s7 .k").forEach((el, i) => {
+    const a = T.k[i];
+    if (!show(el, t >= a && (i === 3 || t < T.k[i + 1]))) return;
+    if (i === 3) { slap($(".stk", el), t, a, -2, 1.35); return; }
+    const words = $$(".w", el);
+    words.forEach((w, j) => {
+      const k = spring(t, a + j * 0.05, 3, 0.62);
+      tf(w, { y: (1 - k) * 80, o: t >= a + j * 0.05 ? 1 : 0 });
+    });
+    const box = $(".hl", el);
+    if (box) box.style.clipPath = `inset(0 ${(1 - eo5(prog(t, a + 0.03, 0.22))) * 100}% 0 0 round .16em)`;
+  });
+}
+
+function scene8(t) {
+  if (!show($("#s8"), t >= T.end)) return;
+  const a = T.end;
+  // a slow push in while it holds
+  const push = eio3(prog(t, a + 0.6, DUR - a - 0.6));
+  $("#s8-in").style.transform = `scale(${1 + 0.03 * push})`;
+  const k = spring(t, a - 0.1, 2.6, 0.42); // already half grown on the cut
+  tf($("#s8-logo"), { s: k, r: lerp(-70, -12, spring(t, a - 0.1, 1.8, 0.6)) });
+  S.letters8.forEach((l, i) => {
+    const b = a + 0.06 + i * 0.06, kk = spring(t, b, 2.4, 0.5);
+    tf(l, { y: (1 - kk) * 80, s: lerp(0.2, 1, kk), r: (1 - kk) * (i % 2 ? 12 : -12), o: t >= b ? 1 : 0 });
+  });
+  rise($$("#s8-tag .w"), t, a + 0.5, 0.05, 2.4);
+  popIn($("#s8-url"), t, a + 0.78, -1.5, 2.4, 0.5);
+  slap($("#s8-mini"), t, a + 1.02, -3, 1.5);
+  const f = $("#s8-foot"), kf = spring(t, a + 1.3, 2, 0.75);
+  tf(f, { y: (1 - kf) * 20, o: prog(t, a + 1.3, 0.3) });
+}
+
+// Backgrounds: cream, a purple wipe from the logo, dark, the cream panel, a
+// purple wipe from the Tip tab, dark, purple.
+function background(t) {
+  const A = $("#bgA"), B = $("#bgB");
+  let base = "cream", over = null, clip = "";
+  if (t < T.dark) {
+    base = "cream";
+    const k = eio3(prog(t, T.wipe1, 0.3));
+    if (k > 0) { over = "purple"; clip = `circle(${k * 1600}px at 540px 324px)`; }
+  } else if (t < T.panel + 0.36) base = "dark";
+  else if (t < T.tipTab) base = "cream";
+  else if (t < T.k[0]) {
+    base = "cream"; over = "purple";
+    const tb = app.doc ? onScreen($('.tabs button[data-tab="tip"]', app.doc)) : { cx: 330, cy: 800 };
+    const k = eio3(prog(t, T.tipTab, 0.38));
+    clip = k >= 1 ? "" : `circle(${k * 1600}px at ${PHONE.x + tb.cx}px ${PHONE.y + tb.cy}px)`;
+  } else if (t < T.k[3]) base = "dark";
+  else base = "purple";
+  A.className = `bg ${base}`;
+  B.style.display = over ? "" : "none";
+  if (over) { B.className = `bg ${over}`; B.style.clipPath = clip; }
+}
+
+function seek(t) {
+  background(t);
+  const back = S.fxBack();
+  if (t < T.dark) drawParts(back, S.conf1, t);
+  drawParts(back, S.conf8, t);
+  scene1(t); scene2(t); phoneScene(t); scene3(t); scene4(t); scene5(t); scene6(t); scene7(t); scene8(t);
+  if (!(t >= T.gun && t < T.k[0])) S.fxStage();
+}
+
+// ---------------------------------------------------------------- sound cues
+// What the soundtrack (sound.py) plays and when, from the same times as the picture.
+function publishCues() {
+  const L = (a, n, step) => Array.from({ length: n }, (_, i) => +(a + i * step).toFixed(3));
+  window.CUES = {
+    duration: DUR, bpm: 120,
+    pop: [0, ...L(T.letters, 5, 0.07), T.tag, ...L(T.pills, 8, 0.075), T.meet + 0.18, ...T.feats, T.tap + 0.12,
+      ...L(T.rows, 3, 0.12), T.soon, T.apps + 0.2, T.gun + 0.5, T.nice, T.k[3], T.end, ...L(T.end + 0.06, 5, 0.06),
+      T.end + 0.78, T.end + 1.02].map((x) => +x.toFixed(3)),
+    tick: [...T.chips, ...T.ticks, T.untick],
+    tap: [T.follow, T.castsTab, T.like, T.untick, T.tipTab, ...T.fire],
+    success: [T.follow, T.like],
+    sparkle: [T.burst1, T.like, T.end],
+    cash: T.fire,
+    whoosh: [T.wipe1, T.swap - 0.1, T.panel, T.out3, T.out4, T.out5 + 0.15, T.tipTab],
+    impact: [T.burst1, T.panel + 0.3, T.tipTab + 0.25, T.end],
+    riser: [[0.9, T.burst1], [T.k[1], T.end]],
+    stab: T.k,
+    words: [T.pa, T.box1, T.swap, T.box2],
+    // sections of the music: [start, end, intensity 0-3]
+    music: [[0, 2, 0], [2, 4, 2], [4, 8, 1], [8, 26, 3], [26, 28, -1], [28, 30, 2], [30, 32, 0]],
+  };
+}
+
+// ---------------------------------------------------------------- start
+async function ready() {
+  await document.fonts.load('800 100px "Bricolage Grotesque"');
+  await document.fonts.load("700 100px Inter", "φ");
+  await document.fonts.load('600 25px "JetBrains Mono"');
+  await document.fonts.load("600 31px Inter");
+  const frame = $("#app");
+  if (!frame.contentDocument || frame.contentDocument.readyState !== "complete" || !frame.contentDocument.querySelector(".person")) {
+    await new Promise((r) => frame.addEventListener("load", r, { once: true }));
+  }
+  app.doc = frame.contentDocument; app.win = frame.contentWindow;
+  await app.doc.fonts.ready;
+  await Promise.all([...app.doc.images].map((i) => (i.complete ? null : i.decode().catch(() => null))));
+  setup();
+  seek(0);
+  window.READY = true;
+}
+
+const params = new URLSearchParams(location.search);
+if (params.has("render")) document.documentElement.classList.add("render");
+window.seek = seek;
+ready().then(() => {
+  if (params.has("render")) return;
+  // Preview: play in real time, fit to the window, with the soundtrack if it is built.
+  const stage = $("#stage");
+  const fit = () => { const s = Math.min(innerWidth / 1080, (innerHeight - 50) / 1080); stage.style.transform = `scale(${s})`; stage.style.margin = `0 ${(1080 * s - 1080) / 2}px ${(1080 * s - 1080)}px`; };
+  fit(); addEventListener("resize", fit);
+  const audio = new Audio("_build/soundtrack.wav");
+  let t = +(params.get("t") || 0), playing = true, last = performance.now();
+  const scrub = $("#scrub"), clock = $("#clock"), btn = $("#play");
+  const sync = () => { try { audio.currentTime = t; if (playing) audio.play().catch(() => {}); } catch {} };
+  btn.onclick = () => { playing = !playing; btn.textContent = playing ? "Pause" : "Play"; playing ? sync() : audio.pause(); };
+  scrub.oninput = () => { t = +scrub.value; sync(); };
+  addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); btn.onclick(); } });
+  sync();
+  const loop = (now) => {
+    if (playing) { t += (now - last) / 1000; if (t >= DUR) { t = 0; sync(); } }
+    last = now;
+    seek(t); scrub.value = t; clock.textContent = t.toFixed(2);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
