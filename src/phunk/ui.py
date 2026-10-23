@@ -22,6 +22,7 @@ import datetime as dt
 import ipaddress
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -401,9 +402,20 @@ class UI:
         return {"fid": fid, "custody": custody, "nonce": int(signers.get("currentUserNonce") or 0)}
 
 
+    async def key_json(self, q) -> dict:
+        """Is this app key active on the account? From the node, the source of
+        truth: the mini app asks it on launch to know phunk is still connected."""
+        fid = int(q.get("fid", 0))
+        key = str(q.get("key", "")).lower()
+        if fid <= 0 or not re.fullmatch(r"0x[0-9a-f]{64}", key):
+            raise ValueError("send fid and key (0x + 64 hex)")
+        signers = await self.hub.collect("/v1/signersByFid", {"fid": fid}, key="signers")
+        return {"fid": fid, "key": key, "active": any(str(s.get("key", "")).lower() == key for s in signers)}
+
+
 GET_ROUTES = {"/api/me": UI.me_json, "/api/feed": UI.feed_json,
               "/api/suggestions": UI.suggestions_json, "/api/people": UI.people_json,
-              "/api/owner": UI.owner_json}
+              "/api/owner": UI.owner_json, "/api/key": UI.key_json}
 
 
 async def answer(coro) -> tuple[int, dict]:

@@ -537,6 +537,33 @@ function savedKey() {
 }
 const connected = () => { const k = savedKey(); return !!(k && k.state === "completed"); };
 
+// Is the saved key on the account? The node is the source of truth: an
+// approval often finishes while this page is closed (it sends people to the
+// Farcaster app), and Farcaster's request service may forget it afterwards.
+async function keyActive(k) {
+  if (!k || !k.pub) return false;
+  try { return !!(await api(`/api/key?fid=${k.fid}&key=0x${k.pub}`)).active; } catch { return false; }
+}
+
+function markConnected(k, cheerful) {
+  k.state = "completed";
+  store.set(KEY_STORE, k);
+  if (cheerful) {
+    track("Connect done");
+    burst("confetti", { x: window.innerWidth / 2, y: window.innerHeight * 0.4 }, 60);
+    buzz("success");
+    toast("phunk is connected 🫡");
+  }
+  renderAccount();
+}
+
+// On launch, and when the page comes back into view: finish a pending
+// approval quietly if the key made it onto the account.
+async function restoreKey() {
+  const k = canConnect() && savedKey();
+  if (k && k.state !== "completed" && (await keyActive(k))) markConnected(k, false);
+}
+
 // Sign one follow / unfollow / like / unlike and send it. args: the target.
 async function act(kind, ...args) {
   const k = savedKey();
@@ -575,19 +602,10 @@ function connectSheet(then) {
     try {
       let k = savedKey();
       // The last request may have gone through while the page was away.
-      if (k && k.token && k.state !== "completed") {
-        const s = await api(`/api/connect?token=${encodeURIComponent(k.token)}`).catch(() => null);
-        if (s && s.state === "completed" && (!s.fid || s.fid === viewerFid())) {
-          k.state = "completed";
-          store.set(KEY_STORE, k);
-          track("Connect done");
-          close();
-          burst("confetti", { x: window.innerWidth / 2, y: window.innerHeight * 0.4 }, 60);
-          buzz("success");
-          toast("phunk is connected 🫡");
-          renderAccount();
-          return then && then();
-        }
+      if (k && k.state !== "completed" && (await keyActive(k))) {
+        close();
+        markConnected(k, true);
+        return then && then();
       }
       // Otherwise a fresh key and request on every tap: an older request may
       // have expired, or failed in the Farcaster app, and can't be retried.
@@ -602,21 +620,12 @@ function connectSheet(then) {
       again.hidden = false;
       try { await miniapp.actions.openUrl(k.url); } catch { /* the link above still works */ }
       // Wait for the approval: about 10 minutes, every 2 seconds.
+      // Wait for the key to show up on the account: about 10 minutes, every 2 seconds.
       for (let i = 0; i < 300 && open; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        let s;
-        try { s = await api(`/api/connect?token=${encodeURIComponent(k.token)}`); } catch (e) { if (e.status === 404) throw e; continue; }
-        if (s.state === "approved") status.textContent = "Approved. Adding the key to your account…";
-        if (s.state === "completed") {
-          if (s.fid && s.fid !== viewerFid()) throw new Error("That approval came from another account.");
-          k.state = "completed";
-          store.set(KEY_STORE, k);
-          track("Connect done");
+        if (await keyActive(k)) {
           close();
-          burst("confetti", { x: window.innerWidth / 2, y: window.innerHeight * 0.4 }, 60);
-          buzz("success");
-          toast("phunk is connected 🫡");
-          renderAccount();
+          markConnected(k, true);
           return then && then();
         }
       }
@@ -624,8 +633,6 @@ function connectSheet(then) {
     } catch (e) {
       track("Connect failed", { reason: failure(e) });
       buzz("error");
-      const k = savedKey();
-      if (k && k.state !== "completed") store.set(KEY_STORE, Object.assign(k, { state: "failed" }));
       status.textContent = `Couldn't connect: ${e.message}`;
       go.disabled = false;
     }
@@ -1262,6 +1269,8 @@ async function init() {
   renderTip();
   $("#lookup-name").value = state.who;
   renderWho();
+  restoreKey();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) restoreKey(); });
 
   $("#lookup").addEventListener("submit", (ev) => {
     ev.preventDefault();
