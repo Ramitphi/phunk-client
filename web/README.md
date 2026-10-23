@@ -353,5 +353,5 @@ To make it fast:
    `fra1` for a server in Germany, `iad1` for US East).
 3. In Vercel → **Firewall**, add a rate limit rule for `/api/*` (say 60
    requests a minute per IP). Each lookup of a new account costs the node
-   about 150 requests, so this keeps one visitor from asking for thousands.
+   about 200 requests, so this keeps one visitor from asking for thousands.
 - Nothing is stored about visitors. The function doesn't log requests.

@@ -260,13 +260,13 @@ async def profile(hub: Hub, fid: int, *, casts: int = PROFILE_CASTS, now: int | 
 
 
 async def people_feed(hub: Hub, fid: int, *, dismissed: set[int] = frozenset(), limit: int = 15,
-                      check_talked: int = 15, check_circle: int = 12, check_bridge: int = 12,
+                      check_talked: int = 30, check_circle: int = 12, check_bridge: int = 12,
                       channel_name=lambda u: u) -> dict:
     """Cards for `fid`, plus a one-line summary of their network.
 
     Roughly: your follows, your casts and reactions from the last 90 days,
     the friend-of-friend sample in `recommend.suggest`, then one profile
-    (casts + keys) per person checked. About 150 requests on first load.
+    (casts + keys) per person checked. About 200 requests on first load.
 
     Only people with a profile check can become bridge cards, so the
     candidates are split into two pools: many mutual follows (circle) and a
