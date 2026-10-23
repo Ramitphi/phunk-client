@@ -21,9 +21,10 @@
 #
 # It is safe to run again: it reuses the server, volume and key it finds. It:
 #   1. uploads your SSH public key to the project, if it isn't there yet
-#   2. creates a volume for the node's data (default 2000 GB, ext4)
-#   3. creates the server with the volume attached (default cpx42:
-#      8 vCPU, 16 GB RAM, Ubuntu 22.04, in Nuremberg)
+#   2. creates the server (default cpx42: 8 vCPU, 16 GB RAM, Ubuntu 22.04,
+#      in Nuremberg)
+#   3. creates a volume for the node's data (default 2000 GB, ext4) and
+#      attaches it
 #   4. runs provision.sh on it (Docker, a "snapchain" user, the firewall,
 #      node.sh), mounts the volume at /home/snapchain/snapchain, where the
 #      node keeps its database, and reboots if the updates need it
@@ -141,24 +142,27 @@ EOF
         confirm "Create them?"
     fi
 
-    if [ -z "$vid" ]; then
-        say "Creating volume $VOLUME (${VOLUME_GB} GB)"
-        hcloud volume create --name "$VOLUME" --size "$VOLUME_GB" --location "$LOCATION" --format ext4 >/dev/null
-        vid="$(volume_id)"
-        [ -n "$vid" ] || die "the volume was not created"
-    else
-        say "Volume $VOLUME already exists"
-    fi
-
+    # The server first: if the type is sold out in this location, nothing is
+    # left behind. The volume is then created in the server's location.
     if [ -z "$sid" ]; then
         say "Creating server $NAME ($TYPE in $LOCATION)"
         hcloud server create --name "$NAME" --type "$TYPE" --image "$IMAGE" \
-            --location "$LOCATION" --ssh-key "$KEY_NAME" --volume "$VOLUME" >/dev/null
+            --location "$LOCATION" --ssh-key "$KEY_NAME" >/dev/null \
+            || die "could not create the server. If $TYPE is not available in $LOCATION, try another location (LOCATION=hel1) or type (TYPE=ccx23)."
         sid="$(server_id)"
         [ -n "$sid" ] || die "the server was not created"
         new=1
     else
         say "Server $NAME already exists"
+    fi
+
+    if [ -z "$vid" ]; then
+        say "Creating volume $VOLUME (${VOLUME_GB} GB), attached to $NAME"
+        hcloud volume create --name "$VOLUME" --size "$VOLUME_GB" --server "$NAME" --format ext4 >/dev/null
+        vid="$(volume_id)"
+        [ -n "$vid" ] || die "the volume was not created"
+    else
+        say "Volume $VOLUME already exists"
         local on
         on="$(hcloud volume describe "$VOLUME" -o format='{{if .Server}}{{.Server.ID}}{{end}}')"
         if [ -z "$on" ]; then
@@ -218,6 +222,12 @@ Done. $NAME is at $ip ($TYPE in $LOCATION), with a ${VOLUME_GB} GB volume for
 the node's data. Next, start the node (command 1):
 
     ssh -t $NODE_USER@$ip ./node.sh start
+
+Once ./node.sh status says every shard is in sync, read from it (command 2):
+
+    ssh $NODE_USER@$ip
+    pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
+    phunk --node http://localhost:3381 whois dwr
 
 Delete everything later with: $(self destroy)
 EOF
