@@ -17,6 +17,10 @@ from .timeutil import from_datetime
 
 DEFAULT_NODE = "https://haatz.quilibrium.com"
 MAX_PAGE = 1000
+# With `keep` and a `limit`, `Hub.pages` makes at most this many requests (one
+# more per extra 1000 of limit), so an account with thousands of deleted casts
+# costs a bounded number of requests. It may then return fewer than `limit`.
+FILTER_PAGES = 5
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -289,9 +293,15 @@ class Hub:
 
         `keep(item)` filters items (for example only CAST_ADD). Items it
         drops don't count towards `limit`, but still count as new, so a page
-        of only dropped items doesn't end paging.
+        of only dropped items doesn't end paging. After a page with dropped
+        items, the next pages are 10 times bigger (up to 1000). With a
+        `limit`, a filtered read makes at most `FILTER_PAGES` requests (plus
+        one per extra 1000 of `limit`) and returns what it found by then.
         """
         page_size = MAX_PAGE if limit is None else max(1, min(MAX_PAGE, limit))
+        if keep is not None and limit is not None:
+            cap = FILTER_PAGES + (max(1, limit) - 1) // MAX_PAGE
+            max_pages = cap if not max_pages else min(max_pages, cap)
         token = None
         n_pages = 0
         n_out = 0
@@ -305,7 +315,7 @@ class Hub:
             except NotFound:
                 return
             items = data.get(key) or []
-            new = kept = 0
+            new = kept = dropped = 0
             for item in items:
                 h = item.get("hash") or repr(item)
                 if h in seen:
@@ -316,6 +326,7 @@ class Hub:
                     continue
                 kept += 1
                 if keep and not keep(item):
+                    dropped += 1
                     continue
                 yield item
                 n_out += 1
@@ -327,6 +338,8 @@ class Hub:
                 return
             if max_pages and n_pages >= max_pages:
                 return
+            if dropped:  # deleted casts in the way: take bigger steps past them
+                page_size = min(MAX_PAGE, max(100, page_size * 10))
 
     async def collect(self, path: str, params: dict, **kw) -> list[dict]:
         """`pages(...)` into a list."""
@@ -383,9 +396,13 @@ class Hub:
 
     # -------------------------------------------------------------- graph
 
-    async def following(self, fid: int, *, limit: int | None = None) -> AsyncIterator[Follow]:
-        """Accounts `fid` follows."""
-        async for m in self.pages("/v1/linksByFid", {"fid": fid, "link_type": "follow"}, limit=limit):
+    async def following(self, fid: int, *, limit: int | None = None,
+                        newest_first: bool = False) -> AsyncIterator[Follow]:
+        """Accounts `fid` follows, oldest follow first (or newest first)."""
+        params = {"fid": fid, "link_type": "follow"}
+        if newest_first:
+            params["reverse"] = "true"
+        async for m in self.pages("/v1/linksByFid", params, limit=limit):
             if (m["data"].get("linkBody") or {}).get("targetFid"):
                 yield Follow.from_message(m)
 
@@ -409,17 +426,19 @@ class Hub:
             yield Cast.from_message(m)
 
     async def feed(self, fid: int, *, since: dt.datetime | int | None = None, per_account: int = 10,
-                   limit: int = 50) -> list[Cast]:
+                   limit: int = 50, follows: list[int] | None = None) -> list[Cast]:
         """Recent casts from everyone `fid` follows, newest first.
 
         A node has no feed endpoint: a client builds the feed itself, by
         reading each followed account's latest casts and merging them.
         `since` defaults to 24 hours ago. Large follow lists take a while on
-        a shared node; your own node is much faster.
+        a shared node; your own node is much faster. `follows` reads only
+        these accounts instead of everyone `fid` follows (one request each).
         """
         if since is None:
             since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
-        follows = [f.target_fid async for f in self.following(fid)]
+        if follows is None:
+            follows = [f.target_fid async for f in self.following(fid)]
 
         async def latest(target: int) -> list[Cast]:
             try:

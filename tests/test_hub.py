@@ -491,3 +491,74 @@ def test_mentions_and_replies_skip_removes():
                 [c.hash async for c in hub.channel("https://example.com/c")])
 
     assert run({"/v1/castsByMention": handler, "/v1/castsByParent": handler}, test) == (["0x01"],) * 3
+
+
+def test_thousands_of_deletes_cost_a_few_requests():
+    # An account that deleted thousands of casts: castsByFid returns their
+    # CAST_REMOVE messages first (newest first), then the casts still there.
+    # A filtered read with a limit grows its pages and stops after a few.
+    def node_with(n_removes, n_adds=5):
+        msgs = [msg("0x%040x" % (i + 1), ts=10_000_000 - i, type="MESSAGE_TYPE_CAST_REMOVE",
+                    castRemoveBody={"targetHash": "AAAA"}) for i in range(n_removes)]
+        msgs += [msg("0xadd%d" % i, ts=1_000 - i, type="MESSAGE_TYPE_CAST_ADD", castAddBody={"text": "hi"})
+                 for i in range(n_adds)]
+
+        async def handler(request):
+            size, start = int(request.query["pageSize"]), int(request.query.get("pageToken") or 0)
+            more = start + size < len(msgs)
+            return web.json_response({"messages": msgs[start:start + size],
+                                      "nextPageToken": str(start + size) if more else None})
+        return {"/v1/castsByFid": handler}
+
+    def casts_calls(calls):
+        return [q for p, q in calls if p == "/v1/castsByFid"]
+
+    async def test(hub, calls):
+        from phunk.people import profile
+
+        out = {}
+        out["limited"] = [c.hash async for c in hub.casts(1, limit=30)], casts_calls(calls)
+        calls.clear()
+        out["profile"] = (await profile(hub, 1, now=10_000_000)).latest, casts_calls(calls)
+        calls.clear()
+        out["window"] = [c.hash async for c in hub.casts(1, since=500, limit=10)], casts_calls(calls)
+        calls.clear()
+        out["all"] = [c.hash async for c in hub.casts(1)], casts_calls(calls)
+        return out
+
+    # 3,000 deletes: still found within the budget, as pages grow 30 -> 300 -> 1000.
+    got = run(node_with(3000), test)
+    hashes, calls = got["limited"]
+    assert hashes == ["0xadd%d" % i for i in range(5)]
+    assert [q["pageSize"] for q in calls] == ["30", "300", "1000", "1000", "1000"]
+    assert len(got["profile"][1]) == 5 and len(got["profile"][0]) == 2
+    assert len(got["window"][1]) <= 5
+    assert got["all"][0] == hashes and len(got["all"][1]) == 4  # no limit: pages of 1000, no cap
+
+    # 50,000 deletes: a bounded number of requests, and nothing to show.
+    got = run(node_with(50_000), test)
+    for name in ("limited", "profile", "window"):
+        found, calls = got[name]
+        assert not found and len(calls) == 5, name
+
+
+def test_feed_reads_only_the_follows_it_is_given():
+    links = {"messages": [msg("l1", fid=9, linkBody={"targetFid": 1}), msg("l2", fid=9, linkBody={"targetFid": 2})]}
+
+    async def links_handler(request):
+        return web.json_response(links)
+
+    async def casts_handler(request):
+        return web.json_response({"messages": [msg("c" + request.query["fid"], fid=int(request.query["fid"]),
+                                                   castAddBody={"text": "hi"})]})
+
+    async def test(hub, calls):
+        newest = [f.target_fid async for f in hub.following(9, newest_first=True)]
+        feed = [c.hash for c in await hub.feed(9, since=0, follows=[2])]
+        return newest, feed, calls
+
+    newest, feed, calls = run({"/v1/linksByFid": links_handler, "/v1/castsByFid": casts_handler}, test)
+    assert newest == [1, 2] and calls[0][1]["reverse"] == "true"
+    assert feed == ["c2"]
+    assert [q["fid"] for p, q in calls if p == "/v1/castsByFid"] == ["2"]
+    assert sum(1 for p, _ in calls if p == "/v1/linksByFid") == 1  # follows given: not read again

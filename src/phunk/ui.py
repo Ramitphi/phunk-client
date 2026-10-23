@@ -56,7 +56,7 @@ CASTING = False
 def tip_fid_from_env() -> int | None:
     """PHUNK_TIP_FID: the account that the money gun (Tip tab) tips. Unset: no button."""
     value = os.environ.get("PHUNK_TIP_FID", "").strip()
-    return int(value) if value.isdigit() and int(value) > 0 else None
+    return int(value) if _digits(value) and int(value) > 0 else None
 
 
 CASTING_SOON = "Casting from phunk is coming soon. For now: `phunk post` in a terminal."
@@ -72,10 +72,25 @@ MAX_USERS = 5000
 MAX_WINDOWS = 64
 MAX_FID = 2**64 - 1  # fids are uint64 on the node
 NODE_BUSY = "the node is busy; try again in a minute"
+# The hosted site: only the windows the page offers (app.js WINDOWS), so each
+# account has a few cache keys, and at most this many followed accounts read
+# per feed (the most recently followed).
+PUBLIC_HOURS = (6, 24, 72, 168)
+PUBLIC_MAX_FOLLOWS = 1000
 
 
 class NoSuchAccount(NotFound):
     """No account by that name or fid. Its text is safe to show as is."""
+
+
+class BadRequest(ValueError):
+    """Bad input from the request. Its text is safe to show as is; other
+    ValueErrors get a plain "bad request" on the hosted site."""
+
+
+def _digits(value) -> bool:
+    """Only ASCII 0-9. `str.isdigit()` also takes "²", which int() refuses."""
+    return re.fullmatch(r"[0-9]+", str(value)) is not None
 
 
 # ------------------------------------------------------------------ helpers
@@ -117,8 +132,8 @@ def cast_ref(value: Any) -> tuple[int, str]:
         fid, h = value.get("fid"), value.get("hash")
     else:
         fid, _, h = str(value or "").partition(":")
-    if not str(fid).isdigit() or not isinstance(h, str) or not h.startswith("0x"):
-        raise ValueError("expected a cast as fid:0xhash")
+    if not _digits(fid) or not isinstance(h, str) or not h.startswith("0x"):
+        raise BadRequest("expected a cast as fid:0xhash")
     return int(fid), h
 
 
@@ -164,18 +179,18 @@ def reasons(s: Suggestion, names: dict[int, str | None]) -> list[str]:
 
 
 def _int(q, name: str, default: int) -> int:
-    """A whole number from the query string, or a ValueError that says so."""
+    """A whole number from the query string, or a BadRequest that says so."""
     raw = str(q.get(name, default)).strip()
-    if not re.fullmatch(r"-?\d{1,30}", raw):
-        raise ValueError(f"{name} must be a whole number")
+    if not re.fullmatch(r"-?[0-9]{1,30}", raw):
+        raise BadRequest(f"{name} must be a whole number")
     return int(raw)
 
 
 def _fid(q) -> int:
     """`fid` from the query string: a positive whole number."""
     raw = str(q.get("fid", "")).strip()
-    if not re.fullmatch(r"\d{1,30}", raw) or not 0 < int(raw) <= MAX_FID:
-        raise ValueError("fid must be a positive number")
+    if not re.fullmatch(r"[0-9]{1,30}", raw) or not 0 < int(raw) <= MAX_FID:
+        raise BadRequest("fid must be a positive number")
     return int(raw)
 
 
@@ -299,8 +314,9 @@ class UI:
             "author": self.user_json(author), "app": app,
         }
 
-    async def feed_window(self, fid: int, hours: int, refresh: bool = False) -> list[dict]:
-        """Every cast in the window, newest first, with author and app. Cached."""
+    async def feed_window(self, fid: int, hours: int, refresh: bool = False) -> tuple[list[dict], bool]:
+        """Every cast in the window, newest first, with author and app, and
+        whether the follows read were capped (hosted site only). Cached."""
         key = (fid, hours)
         hit = self._feeds.get(key)
         if self._fresh(hit, FEED_TTL, refresh):
@@ -308,8 +324,16 @@ class UI:
 
         async def load():
             since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
-            casts = await self.hub.feed(fid, since=since, per_account=10 if hours <= 24 else 25, limit=500)
-            return list(await asyncio.gather(*(self.cast_json(c) for c in casts)))
+            follows, capped = None, False
+            if self.public:  # bound the cost of one request: the most recent follows only
+                follows = [f.target_fid async for f in
+                           self.hub.following(fid, limit=PUBLIC_MAX_FOLLOWS + 1, newest_first=True)]
+                follows = list(dict.fromkeys(follows))
+                capped = len(follows) > PUBLIC_MAX_FOLLOWS
+                follows = follows[:PUBLIC_MAX_FOLLOWS]
+            casts = await self.hub.feed(fid, since=since, per_account=10 if hours <= 24 else 25, limit=500,
+                                        follows=follows)
+            return list(await asyncio.gather(*(self.cast_json(c) for c in casts))), capped
 
         fut = asyncio.ensure_future(load())
         self._feeds[key] = (time.monotonic(), fut)
@@ -362,7 +386,7 @@ class UI:
     async def who(self, value: str | None) -> int:
         """A username or fid from the query, or the key's fid."""
         value = (value or "").strip().lstrip("@")
-        if value.isdigit():
+        if _digits(value):
             if not 0 < int(value) <= MAX_FID:
                 raise NoSuchAccount(f"No Farcaster account with fid {int(value)}.")
             return int(value)
@@ -406,14 +430,20 @@ class UI:
 
     async def feed_json(self, q) -> dict:
         fid = await self.who(q.get("who"))
-        hours = max(1, min(168, _int(q, "hours", 24)))
+        hours = _int(q, "hours", 24)
+        if self.public and hours not in PUBLIC_HOURS:
+            raise BadRequest("hours must be 6, 24, 72 or 168")
+        hours = max(1, min(168, hours))
         offset = max(0, _int(q, "offset", 0))
         limit = max(1, min(100, _int(q, "limit", PAGE)))
-        items = await self.feed_window(fid, hours, refresh=q.get("refresh") == "1")
+        items, capped = await self.feed_window(fid, hours, refresh=q.get("refresh") == "1")
         kept = filter_by_app(items, only=_split(q.get("only")) or None, hide=_split(q.get("hide")))
-        return {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
-                "apps": app_counts(items), "casts": kept[offset:offset + limit],
-                "more": offset + limit < len(kept)}
+        out = {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
+               "apps": app_counts(items), "casts": kept[offset:offset + limit],
+               "more": offset + limit < len(kept)}
+        if self.public:
+            out["capped"] = capped  # true: read only the PUBLIC_MAX_FOLLOWS most recent follows
+        return out
 
     async def suggestions_json(self, q) -> dict:
         fid = await self.who(q.get("who"))
@@ -439,7 +469,7 @@ class UI:
         fid = _fid(q)
         key = str(q.get("key", "")).lower()
         if not re.fullmatch(r"0x[0-9a-f]{64}", key):
-            raise ValueError("key must be 0x and 64 hex characters")
+            raise BadRequest("key must be 0x and 64 hex characters")
         signers = await self.hub.collect("/v1/signersByFid", {"fid": fid}, key="signers")
         return {"fid": fid, "key": key, "active": any(str(s.get("key", "")).lower() == key for s in signers)}
 
@@ -465,7 +495,12 @@ async def answer(coro, *, public: bool = False) -> tuple[int, dict]:
             log.warning("not found: %s", e)
             return 404, {"error": "not found"}
         return 404, {"error": f"not found: {e}"}
-    except ValueError as e:
+    except BadRequest as e:
+        return 400, {"error": str(e)}
+    except ValueError as e:  # from deeper down (bad JSON from the node, a decode): not for users
+        if public:
+            log.warning("bad request: %r", e)
+            return 400, {"error": "bad request"}
         return 400, {"error": str(e)}
     except NodeError as e:
         if public:
@@ -569,7 +604,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         async def go():
             text = str(d.get("text") or "").strip()
             if not text:
-                raise ValueError("write something first")
+                raise BadRequest("write something first")
             reply_to = cast_ref(d["reply_to"]) if d.get("reply_to") else None
             channel = None if reply_to else channel_url(d.get("channel"))
             h = await w.cast(text, reply_to=reply_to, channel=channel)
@@ -586,7 +621,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         async def go():
             action = d.get("action")
             if action not in ("like", "unlike", "recast", "unrecast"):
-                raise ValueError("action is like, unlike, recast or unrecast")
+                raise BadRequest("action is like, unlike, recast or unrecast")
             fid, h = cast_ref(d.get("cast"))
             return {"hash": await getattr(w, action)(fid, h)}
         return await run(go())
@@ -599,10 +634,10 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         async def go():
             action = d.get("action", "follow")
             if action not in ("follow", "unfollow"):
-                raise ValueError("action is follow or unfollow")
+                raise BadRequest("action is follow or unfollow")
             target = d.get("fid")
-            if not str(target).isdigit():
-                raise ValueError("fid must be a number")
+            if not _digits(target):
+                raise BadRequest("fid must be a number")
             h = await getattr(w, action)(int(target))
             if action == "follow":
                 ui.followed_here.add(int(target))

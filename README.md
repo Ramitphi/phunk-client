@@ -71,9 +71,9 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 |---|---|---|
 | `fid_by_name(name)` | `/v1/userNameProofByName` | fid |
 | `user(fid)`, `user_by_name(name)` | `/v1/userDataByFid` | `User`: username, display name, pfp, bio, primary addresses |
-| `following(fid)` | `/v1/linksByFid` | `Follow`s |
+| `following(fid, newest_first=)` | `/v1/linksByFid` | `Follow`s, oldest follow first (or newest first) |
 | `followers(fid)` | `/v1/linksByTargetFid` | `Follow`s |
-| `casts(fid, since=, limit=)` | `/v1/castsByFid` | `Cast`s, newest first |
+| `casts(fid, since=, limit=)` | `/v1/castsByFid` | `Cast`s, newest first; deleted casts left out |
 | `cast(fid, hash)` | `/v1/castById` | one `Cast` |
 | `replies(fid, hash)` | `/v1/castsByParent` | `Cast`s |
 | `channel(url, since=, limit=)` | `/v1/castsByParent?url=` | `Cast`s in a channel |
@@ -81,7 +81,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `reactions(fid, "like" \| "recast")` | `/v1/reactionsByFid` | `Reaction`s |
 | `keys(fid)` | `/v1/onChainEventsByFid`, `/v1/signersByFid` | `Key`s: every key add / remove, and the app that asked for each |
 | `app_of(message)`, `app_name(app_fid)` | | which app signed a cast, like or follow |
-| `feed(fid, since=, limit=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows, newest first |
+| `feed(fid, since=, limit=, follows=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows (or just `follows`), newest first |
 | `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
 | `eth_addresses(fid)` | `/v1/verificationsByFid` | every Ethereum address the account verified (the primary one is just one of them) |
@@ -93,6 +93,9 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 Everything that lists things is an async iterator, so you can stop early
 (`limit=`) or stream through a whole history. Every dataclass keeps the
 node's original message in `.raw`.
+
+Cast lists skip deleted casts. Some accounts have deleted thousands, so a
+cast list with a `limit` reads at most 5 pages and may return fewer casts.
 
 `decode_key_request(metadata)` decodes the ABI-encoded
 `SignedKeyRequestMetadata` from a key ADD event on its own, if you're reading
