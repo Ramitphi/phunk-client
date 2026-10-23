@@ -9,6 +9,10 @@ to anyone's account.
 
     POST /api/sign-key-request   {"key": "0x<32-byte Ed25519 public key>"}
       -> {"metadata": "0x...", "request_fid": 123, "request_signer": "0x...", "deadline": 190000000}
+    POST /api/sign-key-request   {"key": "0x...", "onchain": true}
+      -> the same, for a key added on chain (the Farcaster app's approval
+         screen): signed for the SignedKeyRequestValidator on Optimism, with a
+         Unix deadline
     GET  /api/sign-key-request
       -> {"request_fid": 123, "request_signer": "0x..."}
 
@@ -35,6 +39,11 @@ from eth_account.messages import encode_typed_data
 FARCASTER_EPOCH = 1609459200
 TTL = 3600  # an approval is valid for an hour
 KEY_DOMAIN = {"name": "Farcaster KeyAdd", "version": "1", "chainId": 1}
+# The Farcaster app adds approved keys on Optimism (KeyGateway), whose
+# SignedKeyRequestValidator checks this domain and a Unix deadline. Same
+# values as @farcaster/core's SIGNED_KEY_REQUEST_VALIDATOR_EIP_712_DOMAIN.
+ONCHAIN_DOMAIN = {"name": "Farcaster SignedKeyRequestValidator", "version": "1", "chainId": 10,
+                  "verifyingContract": "0x00000000FC700472606ED4fA22623Acf62c60553"}
 TYPES = {
     "EIP712Domain": [
         {"name": "name", "type": "string"},
@@ -46,6 +55,10 @@ TYPES = {
         {"name": "key", "type": "bytes"},
         {"name": "deadline", "type": "uint256"},
     ],
+}
+ONCHAIN_TYPES = {
+    "EIP712Domain": TYPES["EIP712Domain"] + [{"name": "verifyingContract", "type": "address"}],
+    "SignedKeyRequest": TYPES["SignedKeyRequest"],
 }
 KEY_HEX = re.compile(r"^0x[0-9a-fA-F]{64}$")
 PATHS = {"/api/sign-key-request", "/api/sign_key_request"}
@@ -64,13 +77,18 @@ def load_account():
     raise RuntimeError("set PHUNK_APP_CUSTODY_KEY or PHUNK_APP_MNEMONIC")
 
 
-def approve(key_hex: str, app_fid: int, account, now: float | None = None) -> dict:
-    """Sign a SignedKeyRequest for one public key. Pure, apart from the clock."""
+def approve(key_hex: str, app_fid: int, account, now: float | None = None, onchain: bool = False) -> dict:
+    """Sign a SignedKeyRequest for one public key. Pure, apart from the clock.
+
+    Default: for a gasless KEY_ADD message (Farcaster-time deadline).
+    onchain: for a key added on Optimism, as the Farcaster app does (Unix deadline)."""
     if not isinstance(key_hex, str) or not KEY_HEX.match(key_hex):
         raise ValueError("key must be a 0x-prefixed 32-byte Ed25519 public key")
     key = bytes.fromhex(key_hex[2:])
-    deadline = int(time.time() if now is None else now) - FARCASTER_EPOCH + TTL
-    typed = {"types": TYPES, "primaryType": "SignedKeyRequest", "domain": KEY_DOMAIN,
+    unix = int(time.time() if now is None else now)
+    deadline = unix + TTL if onchain else unix - FARCASTER_EPOCH + TTL
+    types, domain = (ONCHAIN_TYPES, ONCHAIN_DOMAIN) if onchain else (TYPES, KEY_DOMAIN)
+    typed = {"types": types, "primaryType": "SignedKeyRequest", "domain": domain,
              "message": {"requestFid": app_fid, "key": key, "deadline": deadline}}
     signature = bytes(account.sign_message(encode_typed_data(full_message=typed)).signature)
     return {
@@ -110,7 +128,9 @@ def sign(raw: bytes) -> tuple[int, dict]:
     except ValueError:
         return 400, {"error": "send JSON: {\"key\": \"0x...\"}"}
     try:
-        return 200, approve(data.get("key") if isinstance(data, dict) else None, app_fid, account)
+        if not isinstance(data, dict):
+            data = {}
+        return 200, approve(data.get("key"), app_fid, account, onchain=data.get("onchain") is True)
     except ValueError as e:
         return 400, {"error": str(e)}
 
