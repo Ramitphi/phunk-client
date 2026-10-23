@@ -1149,11 +1149,12 @@ function personCard(p, i = 0) {
     h("span", { class: "muted small" }, `${ago(c.ts)}${c.channel ? " · " + chan(c.channel) : ""}${c.app ? " · " + c.app : ""}`),
     h("div", { class: "text clamp" }, c.text || (c.embeds && c.embeds.length ? "(a link or image)" : "(empty cast)"))));
 
-  body.append(head,
+  // Native append turns null into the text "null", so drop the empty parts.
+  body.append(...[head,
     p.bio ? h("div", { class: "bio" }, p.bio.length > 160 ? p.bio.slice(0, 160) + "…" : p.bio) : null,
     why,
     previews.length ? h("div", { class: "previews" }, previews) : h("div", { class: "muted small" }, "No recent casts."),
-    h("div", { class: "pactions" }, follow, canCast() ? hi : null, nope));
+    h("div", { class: "pactions" }, follow, canCast() ? hi : null, nope)].filter(Boolean));
   return h("article", { class: `card person ${p.kind}` }, avatar(p), body);
 }
 

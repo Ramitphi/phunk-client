@@ -409,3 +409,53 @@ def test_token_goes_in_a_header_and_a_refusal_says_so():
     assert seen[0][0] == "Bearer s3cret" and seen[1][0] == "Bearer s3cret"
     assert all("s3cret" not in url for _, url in seen)  # never in the URL
     assert len(seen) == 4  # a refusal is not retried
+
+
+def test_casts_skip_removes_and_the_casts_they_removed():
+    # castsByFid returns CAST_REMOVE messages too (a deleted cast), with the
+    # removed cast's hash in base64. Newest first, so a remove comes before
+    # its add if the node still has both.
+    gone = "0x" + "ab" * 20
+    gone_b64 = base64.b64encode(bytes.fromhex(gone[2:])).decode()
+
+    def add(h, ts):
+        return msg(h, ts=ts, type="MESSAGE_TYPE_CAST_ADD", castAddBody={"text": h})
+
+    def remove(h, ts, target):
+        return msg(h, ts=ts, type="MESSAGE_TYPE_CAST_REMOVE", castRemoveBody={"targetHash": target})
+
+    pages = {
+        None: {"messages": [add("0x01", 500), remove("0xr1", 450, gone_b64), remove("0xr2", 400, "AAAA")],
+               "nextPageToken": "p2"},
+        "p2": {"messages": [remove("0xr3", 390, "BBBB"), remove("0xr4", 380, "CCCC")], "nextPageToken": "p3"},
+        "p3": {"messages": [add(gone, 300), add("0x02", 200), add("0x03", 100)], "nextPageToken": None},
+    }
+
+    async def handler(request):
+        return web.json_response(pages[request.query.get("pageToken")])
+
+    async def test(hub, calls):
+        every = [c.hash async for c in hub.casts(1)]
+        limited = [c.hash async for c in hub.casts(1, limit=2)]
+        recent = [c.hash async for c in hub.casts(1, since=150)]
+        return every, limited, recent
+
+    every, limited, recent = run({"/v1/castsByFid": handler}, test)
+    # A page of only removes doesn't end paging, and they don't use up the limit.
+    assert every == ["0x01", "0x02", "0x03"]
+    assert limited == ["0x01", "0x02"]
+    assert recent == ["0x01", "0x02"]
+
+
+def test_mentions_and_replies_skip_removes():
+    def remove(h):
+        return msg(h, type="MESSAGE_TYPE_CAST_REMOVE", castRemoveBody={"targetHash": "AAAA"})
+
+    async def handler(request):
+        return web.json_response({"messages": [remove("0xr"), msg("0x01", castAddBody={"text": "hi"})]})
+
+    async def test(hub, calls):
+        return ([c.hash async for c in hub.mentions(1)], [c.hash async for c in hub.replies(1, "0x00")],
+                [c.hash async for c in hub.channel("https://example.com/c")])
+
+    assert run({"/v1/castsByMention": handler, "/v1/castsByParent": handler}, test) == (["0x01"],) * 3
