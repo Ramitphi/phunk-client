@@ -113,6 +113,19 @@ a:hover { text-decoration-thickness: 2px; }
 .top-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .gh { color: var(--fg-soft); font-size: 15px; text-decoration: none; }
 .gh:hover { color: var(--fg); }
+.lang {
+  color: var(--fg-soft); font-size: 14px; text-decoration: none;
+  padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px;
+}
+.lang:hover { color: var(--fg); border-color: var(--accent); }
+
+/* Chinese pages: CJK fonts first after the system font, and no narrow
+   heading measure (16ch fits only about 8 Chinese characters). */
+:root:lang(zh) {
+  --sans: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+          "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+}
+:lang(zh) .hero h1 { max-width: 14em; }
 .theme {
   display: grid; place-items: center; width: 34px; height: 34px;
   border: 1px solid var(--line); border-radius: 8px;

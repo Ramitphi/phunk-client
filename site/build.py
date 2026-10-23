@@ -327,7 +327,9 @@ def read_page(src: Path, out: str) -> Page:
 
 
 def collect_pages() -> list[Page]:
-    pages = [read_page(CONTENT / "index.md", "index.html")]
+    pages = [read_page(CONTENT / "index.md", "index.html"),
+             # The quickstart in Chinese. The tutorial and concepts stay in English.
+             read_page(CONTENT / "zh" / "index.md", "zh/index.html")]
 
     # docs/TUTORIAL.md is one file on GitHub. On the site, its writing chapter
     # (the "## 10. Writing..." section) gets a page of its own.
@@ -441,11 +443,26 @@ NAV = [
     ("concepts/index.html", "Concepts"),
 ]
 
+# Pages with "lang: zh-CN" get this nav and these strings. Their nav still
+# leads to the English tutorial and concepts.
+NAV_ZH = [
+    ("zh/index.html", "快速开始"),
+    ("tutorial.html", "教程"),
+    ("writing.html", "写入"),
+    ("concepts/index.html", "概念"),
+]
+STRINGS = {
+    "en": {"skip": "Skip to content", "license": "MIT licensed. Source and issues on",
+           "refs": "Protocol references:", "edit": "Edit this page"},
+    "zh-CN": {"skip": "跳到正文", "license": "MIT 许可证。源代码和问题反馈在",
+              "refs": "协议参考：", "edit": "编辑此页"},
+}
+
 ICON_SUN = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 ICON_MOON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>'
 
 TEMPLATE = """<!doctype html>
-<html lang="en">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -453,17 +470,17 @@ TEMPLATE = """<!doctype html>
 <meta name="description" content="{description}">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="{root}favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="{root}style.css">
+<link rel="stylesheet" href="{root}style.css">{alternate}
 <script>try{{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}}catch(e){{}}</script>
 <script src="{root}site.js" defer></script>
 </head>
 <body class="{body_class}">
-<a class="skip" href="#main">Skip to content</a>
+<a class="skip" href="#main">{s_skip}</a>
 <header class="top">
   <div class="top-in">
     <a class="brand" href="{root}index.html"><span class="brand-mark" aria-hidden="true">ϕ</span>phunk-client</a>
     <nav class="nav" aria-label="Site">{nav}</nav>
-    <div class="top-tools">
+    <div class="top-tools">{lang_switch}
       <a class="gh" href="{repo}" aria-label="Source on GitHub">GitHub</a>
       <button class="theme" type="button" aria-label="Switch colour theme">{sun}{moon}</button>
     </div>
@@ -480,8 +497,8 @@ TEMPLATE = """<!doctype html>
 </main>
 </div>
 <footer class="foot">
-  <p>MIT licensed. Source and issues on <a href="{repo}">GitHub</a>.{edit}</p>
-  <p>Protocol references: <a href="https://docs.farcaster.xyz">docs.farcaster.xyz</a> and <a href="https://snapchain.farcaster.xyz">snapchain.farcaster.xyz</a>.</p>
+  <p>{s_license} <a href="{repo}">GitHub</a>.{edit}</p>
+  <p>{s_refs} <a href="https://docs.farcaster.xyz">docs.farcaster.xyz</a> and <a href="https://snapchain.farcaster.xyz">snapchain.farcaster.xyz</a>.</p>
 </footer>
 </body>
 </html>
@@ -501,6 +518,11 @@ def render_toc(page: Page) -> str:
     )
 
 
+def is_home_page(page: Page) -> bool:
+    """The quickstart, in any language: hero layout, no page header or pager."""
+    return page.out == "index.html" or page.meta.get("home") == "yes"
+
+
 def render_page(page: Page, pages: list[Page]) -> str:
     root = "../" * page.out.count("/")
     section = page.out.split("/")[0]
@@ -508,8 +530,18 @@ def render_page(page: Page, pages: list[Page]) -> str:
         here = href == page.out or ("/" in page.out and href.startswith(section + "/"))
         return ' aria-current="page"' if here else ""
 
-    nav = "".join(f'<a href="{root}{href}"{current(href)}>{label}</a>' for href, label in NAV)
-    is_home = page.out == "index.html"
+    lang = page.meta.get("lang", "en")
+    strings = STRINGS.get(lang, STRINGS["en"])
+    nav_items = NAV_ZH if lang.startswith("zh") else NAV
+    nav = "".join(f'<a href="{root}{href}"{current(href)}>{label}</a>' for href, label in nav_items)
+    is_home = is_home_page(page)
+
+    # A link to the same page in the other language, from "alt_*" front matter.
+    alternate = lang_switch = ""
+    if page.meta.get("alt_href"):
+        href, label, alt_lang = page.meta["alt_href"], page.meta["alt_label"], page.meta["alt_lang"]
+        alternate = f'\n<link rel="alternate" hreflang="{alt_lang}" href="{href}">'
+        lang_switch = f'\n      <a class="lang" href="{href}" hreflang="{alt_lang}" lang="{alt_lang}">{html.escape(label)}</a>'
     toc = render_toc(page) if page.meta.get("toc") == "yes" else ""
     intro = ""
     if not is_home:
@@ -521,7 +553,7 @@ def render_page(page: Page, pages: list[Page]) -> str:
         intro = f'<header class="page-head">{crumb}<h1>{html.escape(page.title)}</h1>{lede}</header>'
 
     pager = ""
-    seq = [p for p in pages if p.out not in ("index.html", "concepts/index.html")]
+    seq = [p for p in pages if not is_home_page(p) and p.out != "concepts/index.html"]
     if page in seq:
         i = seq.index(page)
         prev_p = seq[i - 1] if i > 0 else None
@@ -535,13 +567,22 @@ def render_page(page: Page, pages: list[Page]) -> str:
 
     edit = ""
     src = page.meta.get("edit") or page.source.relative_to(ROOT).as_posix()
-    edit = f' <a href="{REPO}/edit/main/{src}">Edit this page</a>.'
+    edit = f' <a href="{REPO}/edit/main/{src}">{strings["edit"]}</a>.'
 
-    title = "phunk-client: read Farcaster from your own node" if is_home else f"{page.title} · phunk-client"
+    if is_home:
+        title = page.meta.get("html_title", "phunk-client: read Farcaster from your own node")
+    else:
+        title = f"{page.title} · phunk-client"
     return TEMPLATE.format(
         title=html.escape(title),
         description=html.escape(page.summary or page.meta.get("description", "")),
         root=root,
+        lang=html.escape(lang),
+        alternate=alternate,
+        lang_switch=lang_switch,
+        s_skip=strings["skip"],
+        s_license=strings["license"],
+        s_refs=strings["refs"],
         body_class=("home" if is_home else "doc") + (" has-toc" if toc else ""),
         nav=nav,
         repo=REPO,
@@ -605,7 +646,7 @@ def build() -> None:
             md = prepare_tutorial(md)
         else:
             m = re.search(r"(?m)^# (.*)\n", md)
-            if m and page.out not in ("index.html", "writing.html"):   # these set their own titles
+            if m and not is_home_page(page) and page.out != "writing.html":   # these set their own titles
                 page.title = page.title or strip_inline(m.group(1))
                 md = md.replace(m.group(0), "", 1)
         r = Renderer(make_linker(page, by_source))

@@ -1,6 +1,9 @@
 ---
 title: Quickstart
 summary: Run a Snapchain read node and read Farcaster from it with a small Python client. Three commands, then a tutorial.
+alt_href: zh/index.html
+alt_label: 中文
+alt_lang: zh-CN
 ---
 
 ::: hero
