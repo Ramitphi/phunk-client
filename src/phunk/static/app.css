@@ -1,6 +1,9 @@
 /* phunk ui. Paper and ink, Farcaster purple for actions, Farcaster's other
    action colours for one job each: blue channels, red likes, green recasts,
-   yellow notices. Each colour is a light fill with a dark shade for text. */
+   yellow notices. Each colour is a light fill with a dark shade for text.
+   Dark is "pastel night": dusky indigo paper, soft lavender ink, and the same
+   stickers as pastel fills with dark text. --link is purple text on the page
+   itself (links, the active tab), so it stays light in the dark theme. */
 :root {
   --bg: #f5f1ea;
   --card: #fffdf9;
@@ -15,6 +18,7 @@
   --cta-text: #ffffff;
   --tint: #ece8ff;
   --tint-text: #5d42d6;
+  --link: #5d42d6;
   --hl: #ccc0ff;
   --chip: #eae3d7;
   --blue-bg: #e1f1ff;
@@ -34,54 +38,62 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #141414;
-    --card: #1f1d1a;
-    --text: #f5f1ea;
-    --muted: #b5aea4;
-    --line: #3a3631;
-    --edge: #cfc8bd;
-    --shadow-color: #866aff;
-    --cta: #866aff;
-    --cta-deep: #6b52e6;
-    --tint: #2a2342;
-    --tint-text: #cfc4ff;
-    --chip: #2e2b27;
-    --blue-bg: #0e2a40;
-    --blue-text: #8ccbff;
-    --red: #e03e1a;
-    --red-bg: #3a1810;
-    --red-text: #ff9c85;
-    --green-bg: #0f2e12;
-    --green-text: #7ee081;
-    --warn-bg: #2f2812;
-    --warn-text: #f2d48a;
-    --warn-edge: #b88a2e;
+    --bg: #1d1b2c;
+    --card: #27243b;
+    --text: #f1edff;
+    --muted: #aba4c8;
+    --line: #3a3656;
+    --edge: #7a73ad;
+    --shadow-color: #b9a8ff;
+    --cta: #b9a8ff;
+    --cta-deep: #a896f7;
+    --cta-text: #1b1733;
+    --tint: #cdc2ff;
+    --tint-text: #2a2060;
+    --link: #cdc2ff;
+    --hl: #ffc9de;
+    --chip: #332f4d;
+    --blue-bg: #bfe1ff;
+    --blue-text: #0d3b63;
+    --red: #ff8fa3;
+    --red-bg: #ffc9d3;
+    --red-text: #6e1426;
+    --green: #8fe3a6;
+    --green-bg: #c4f1cf;
+    --green-text: #11502a;
+    --warn-bg: #ffe6a6;
+    --warn-text: #3d2c00;
+    --warn-edge: #c99a2e;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #141414;
-  --card: #1f1d1a;
-  --text: #f5f1ea;
-  --muted: #b5aea4;
-  --line: #3a3631;
-  --edge: #cfc8bd;
-  --shadow-color: #866aff;
-  --cta: #866aff;
-  --cta-deep: #6b52e6;
-  --tint: #2a2342;
-  --tint-text: #cfc4ff;
-  --chip: #2e2b27;
-  --blue-bg: #0e2a40;
-  --blue-text: #8ccbff;
-  --red: #e03e1a;
-  --red-bg: #3a1810;
-  --red-text: #ff9c85;
-  --green-bg: #0f2e12;
-  --green-text: #7ee081;
-  --warn-bg: #2f2812;
-  --warn-text: #f2d48a;
-  --warn-edge: #b88a2e;
+  --bg: #1d1b2c;
+  --card: #27243b;
+  --text: #f1edff;
+  --muted: #aba4c8;
+  --line: #3a3656;
+  --edge: #7a73ad;
+  --shadow-color: #b9a8ff;
+  --cta: #b9a8ff;
+  --cta-deep: #a896f7;
+  --cta-text: #1b1733;
+  --tint: #cdc2ff;
+  --tint-text: #2a2060;
+  --link: #cdc2ff;
+  --hl: #ffc9de;
+  --chip: #332f4d;
+  --blue-bg: #bfe1ff;
+  --blue-text: #0d3b63;
+  --red: #ff8fa3;
+  --red-bg: #ffc9d3;
+  --red-text: #6e1426;
+  --green: #8fe3a6;
+  --green-bg: #c4f1cf;
+  --green-text: #11502a;
+  --warn-bg: #ffe6a6;
+  --warn-text: #3d2c00;
+  --warn-edge: #c99a2e;
   color-scheme: dark;
 }
 
@@ -96,7 +108,7 @@ body {
   color: var(--text);
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
-a { color: var(--tint-text); }
+a { color: var(--link); }
 h2 { font-family: var(--display); font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 
@@ -171,7 +183,7 @@ code { font-family: var(--mono); font-size: 13px; }
 .logo {
   width: 34px; height: 34px; border-radius: 50%;
   display: grid; place-items: center;
-  background: var(--cta); color: #fff;
+  background: var(--cta); color: var(--cta-text);
   border: 1.5px solid var(--edge);
   font-size: 20px; letter-spacing: 0;
   transform: rotate(-10deg);
@@ -209,7 +221,7 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 .tabs button[aria-selected="true"] { background: var(--tint); color: var(--tint-text); font-weight: 700; }
 .tabs .plus, .tabs .plus[aria-selected="true"] {
-  margin-left: auto; background: var(--cta); color: #fff; border: 1.5px solid var(--edge);
+  margin-left: auto; background: var(--cta); color: var(--cta-text); border: 1.5px solid var(--edge);
   box-shadow: var(--shadow); font-family: var(--display); font-weight: 800; padding: 4px 18px;
 }
 .tabs .you-tab { display: none; }
@@ -427,10 +439,10 @@ img.avatar { background: var(--chip); }
   .tabs [data-tab="you"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21a8 8 0 0 1 16 0'/%3E%3C/svg%3E"); }
   .tabs [data-tab="compose"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
   .tabs [data-tab="people"] { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3C/svg%3E"); }
-  .tabs button[aria-selected="true"] { color: var(--tint-text); font-weight: 700; }
+  .tabs button[aria-selected="true"] { color: var(--link); font-weight: 700; }
   .tabs .plus, .tabs .plus[aria-selected="true"] {
     flex: 0 0 56px; height: 56px; min-height: 56px; margin: 0 8px; padding: 0; align-self: center;
-    background: var(--cta); color: #fff; border: 1.5px solid var(--edge); border-radius: 18px;
+    background: var(--cta); color: var(--cta-text); border: 1.5px solid var(--edge); border-radius: 18px;
     box-shadow: var(--shadow); transform: rotate(-6deg);
   }
   .tabs .plus::before { width: 26px; height: 26px; }
@@ -466,7 +478,7 @@ img.avatar { background: var(--chip); }
 .money-gun .mg-mark { stroke: #141414; stroke-width: 2; }
 .money-gun .mg-line { stroke: var(--edge); }
 .money-gun .mg-shine { stroke: var(--hl); stroke-width: 5; }
-.money-gun .mg-glyph { fill: #fff; stroke: none; font: 800 30px var(--display); text-anchor: middle; }
+.money-gun .mg-glyph { fill: var(--cta-text); stroke: none; font: 800 30px var(--display); text-anchor: middle; }
 /* Each time the tab opens, the bills fly out of the nose. */
 .money-gun .mg-bill { transform-box: fill-box; transform-origin: center; animation: mg-fire .45s cubic-bezier(.2, .9, .3, 1.25) both; }
 .money-gun .mg-bill:nth-child(2) { animation-delay: .07s; }
