@@ -434,27 +434,66 @@ the same HTTP API. It needs no API key and no account with anyone.
 The database is 500–800 GB today and grows, so don't skimp on disk. Any
 provider works. Rough monthly prices (check before you rent):
 
-- **Dedicated server** (Hetzner, OVH, Latitude and similar): about $60–150.
+- **Hetzner Cloud**, which the script below rents for you: a `cpx42`
+  (8 cores, 16 GB) is about €70, and a 2 TB volume about €100. Billed by
+  the hour, so a one-day test costs a few euros.
+- **Dedicated server** (Hetzner, OVH, Latitude and similar): about $60–150,
+  but you order it by hand and it can take a day to arrive.
 - **Cloud VM plus a 2 TB volume** (AWS, GCP, DigitalOcean and similar):
   about $200–400. Most of that is the disk.
 
-Pick Ubuntu 22.04 and add your SSH key when you create the server.
-
 ### Three commands
 
-Log in to the new server (as root, or a user with sudo) and prepare it:
+**Command 0: rent and prepare the server.** On your own computer, install
+the [`hcloud` CLI](https://github.com/hetznercloud/cli) (`brew install
+hcloud` on macOS), make an API token (Hetzner Console → your project →
+Security → API tokens → Read & Write), and run
+[`scripts/hetzner.sh`](https://github.com/Ramitphi/phunk-client/blob/main/scripts/hetzner.sh):
+
+```sh
+export HCLOUD_TOKEN=<your token>
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
+```
+
+It shows what it will create and asks before spending anything. Then it:
+
+1. uploads your SSH public key (`~/.ssh/id_ed25519.pub`; make one with
+   `ssh-keygen -t ed25519` if you have none)
+2. creates a 2 TB volume and a `cpx42` server running Ubuntu 22.04, in
+   Nuremberg
+3. logs in as root and runs
+   [`provision.sh`](https://github.com/Ramitphi/phunk-client/blob/main/scripts/provision.sh),
+   which updates the system, installs Docker, creates a `snapchain` user
+   with your SSH key, and turns on the firewall
+4. mounts the volume at `/home/snapchain/snapchain`, where the node keeps
+   its database, and reboots if the updates need it
+
+It ends by printing the server's address and the next command. It is safe
+to run again; it reuses what it already made. Change the defaults with
+environment variables, for example `LOCATION=hel1` or `VOLUME_GB=1500`.
+`cpx42` exists in `nbg1` and `hel1`; in other locations use `TYPE=ccx23`
+(4 dedicated cores, 16 GB). To print the address again, or to delete the server and volume and stop
+the bill:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash -s ip
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash -s destroy
+```
+
+**Somewhere else?** Rent any Ubuntu 22.04 server that meets the minimums,
+with your SSH key on it. Log in as root and run `provision.sh` yourself:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/provision.sh | sudo bash
 ```
 
-This updates the system, installs Docker, creates a `snapchain` user with
-your SSH key, and turns on the firewall. If it says a reboot is needed,
-reboot. Then log in as that user and start the node:
+If it says a reboot is needed, reboot. Put the node's data on the big
+disk: `~snapchain/snapchain` is where it goes.
+
+**Command 1: start the node.**
 
 ```sh
-ssh snapchain@<ip>
-./node.sh start
+ssh -t snapchain@<ip> ./node.sh start
 ```
 
 `node.sh` runs Farcaster's official

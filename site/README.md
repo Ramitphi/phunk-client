@@ -32,11 +32,7 @@ The "Background" links under tutorial headings come from `TUTORIAL_ASIDES`
 in `build.py`. If you rename a tutorial heading, update that table; the build
 tells you if one goes missing.
 
-## Open slots
-
-- **Quickstart commands 0 and 1**: the two `PLACEHOLDER` lines in
-  `site/content/index.md`. They come from `scripts/provision.sh` and
-  `scripts/node.sh` once those land on `main`.
+## The writing page
 
 The writing page is cut from `docs/TUTORIAL.md` at the heading that starts
 with `WRITING_HEADING` in `build.py` ("10. Writing"). If that chapter is
