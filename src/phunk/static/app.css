@@ -272,7 +272,8 @@ code { font-family: var(--mono); font-size: 13px; }
 
 /* Window pills */
 .pills { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; border: 0; margin: 0; padding: 0; min-width: 0; }
-.pills legend { float: left; font-size: 13px; font-weight: 700; margin-right: 6px; padding: 0; }
+/* The label sits on top everywhere (iOS Safari won't float a legend). */
+.pills legend { float: none; width: 100%; font-size: 13px; font-weight: 700; margin: 0 0 8px; padding: 0; }
 .pills label {
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
@@ -284,6 +285,14 @@ code { font-family: var(--mono); font-size: 13px; }
 }
 .pills input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .pills label:has(input:checked) { background: var(--tint); color: var(--tint-text); border-color: var(--tint-text); }
+/* Refresh lines up with the pills, as one of them; the count gets its own line. */
+.controls > .row { align-items: flex-end; }
+#refresh {
+  min-height: 40px; padding: 0 16px; border-radius: 999px;
+  font-family: var(--display); font-weight: 700;
+}
+#feed-status { flex-basis: 100%; }
+#feed-status:empty { display: none; }
 #feed-status:not(:empty)::before {
   content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; vertical-align: 1px;
   border-radius: 50%; background: var(--green); border: 1px solid var(--green-text);
