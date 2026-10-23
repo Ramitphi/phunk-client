@@ -60,6 +60,16 @@ def _refused(path: str, status: int, sent_token: bool) -> str:
     return f"{path}: HTTP {status}: this node wants a token (Hub(..., token=) or PHUNK_NODE_TOKEN)"
 
 
+def _failed(path: str, e: BaseException) -> str:
+    """Why a request gave up, without the exception's repr: an aiohttp
+    error's repr carries the request headers (the token) and the URL."""
+    if isinstance(e, aiohttp.ClientResponseError):
+        return f"{path}: HTTP {e.status}"
+    if isinstance(e, asyncio.TimeoutError):
+        return f"{path}: timed out"
+    return f"{path}: {type(e).__name__}"
+
+
 MAX_CACHED = 5000  # fids kept by each lookup cache below, so a long-running server stays small
 
 
@@ -169,7 +179,7 @@ class Hub:
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     self.errors += 1
                     if attempt == self.retries - 1:
-                        raise NodeError(f"{path}: {e!r}") from e
+                        raise NodeError(_failed(path, e)) from e
             await asyncio.sleep(min(30, 2**attempt) * (0.5 + random.random()))
         raise NodeError(f"{path}: out of retries")
 
@@ -202,7 +212,7 @@ class Hub:
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     self.errors += 1
                     if attempt == self.retries - 1:
-                        raise NodeError(f"{path}: {e!r}") from e
+                        raise NodeError(_failed(path, e)) from e
             await asyncio.sleep(min(30, 2**attempt) * (0.5 + random.random()))
         raise NodeError(f"{path}: out of retries")
 

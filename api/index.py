@@ -32,7 +32,9 @@ answers, it just keeps nobody):
     KV_REST_API_URL    Upstash Redis, from Vercel's Redis integration. It
     KV_REST_API_TOKEN  holds each account's notification token.
     MINIAPP_DOMAIN     where notifications open (default miniapp.phunk.social)
-    CRON_SECRET        Vercel sets this; the weekly digest checks for it
+    CRON_SECRET        a long random string you add to the project. Vercel
+                       Cron then sends it as `Authorization: Bearer ...`.
+                       Without it the weekly digest answers 401 to everyone.
 
 On your own node, raise PHUNK_RATE and PHUNK_CONCURRENCY (for example 150
 and 48): a feed is one request per account followed, so this is what makes
@@ -45,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hmac
 import json
 import os
 import sys
@@ -166,9 +169,11 @@ async def _webhook(body: bytes) -> tuple[int, dict]:
 
 
 async def _digest(headers: dict) -> tuple[int, dict]:
-    """GET /api/cron/digest: the weekly note. Only Vercel Cron may call it."""
-    secret = os.environ.get("CRON_SECRET")
-    if secret and headers.get("authorization") != f"Bearer {secret}":
+    """GET /api/cron/digest: the weekly note. Only Vercel Cron may call it:
+    without CRON_SECRET set on the project, nobody may."""
+    secret = os.environ.get("CRON_SECRET") or ""
+    given = headers.get("authorization") or ""
+    if not secret or not hmac.compare_digest(given.encode(), f"Bearer {secret}".encode()):
         return 401, {"error": "not allowed"}
     loop, ui = await asyncio.to_thread(_start)
 
@@ -265,9 +270,12 @@ async def app(scope, receive, send):
     elif scope["method"] == "POST" and path == "/api/webhook":
         status, body = await _webhook(await _body(receive))
         cache = "no-store"
-    elif scope["method"] in ("GET", "HEAD") and path == "/api/cron/digest":
-        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
-        status, body = await _digest(headers)
+    elif path == "/api/cron/digest":
+        if scope["method"] == "GET":
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+            status, body = await _digest(headers)
+        else:
+            status, body = 405, {"error": "GET only"}
         cache = "no-store"
     elif scope["method"] in ("GET", "HEAD"):
         target = scope["path"] + ("?" + scope["query_string"].decode("latin-1") if scope.get("query_string") else "")

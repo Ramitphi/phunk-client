@@ -130,6 +130,38 @@ def test_not_found():
     assert run({"/v1/userNameProofByName": handler}, test) == "not found"
 
 
+def test_errors_never_carry_the_token_or_the_node_url():
+    """aiohttp's error repr holds the request headers and URL; NodeError's text must not."""
+    async def busy(request):
+        return web.Response(status=429)
+
+    async def main():
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", busy)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        url = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+        out = []
+        try:
+            async with Hub(url, rate=1000, retries=2, token="tok-very-secret-123") as hub:
+                for call in (hub.get("/v1/info"), hub.post("/v1/validateMessage", b"x")):
+                    try:
+                        await call
+                    except NodeError as e:
+                        out.append(str(e) + repr(e))
+        finally:
+            await runner.cleanup()
+        return out
+
+    out = asyncio.run(main())
+    assert len(out) == 2
+    for text in out:
+        assert "HTTP 429" in text
+        assert "tok-very-secret-123" not in text and "127.0.0.1" not in text and "Bearer" not in text
+
+
 def test_user_profile():
     async def handler(request):
         def ud(t, v):

@@ -21,6 +21,7 @@ import asyncio
 import datetime as dt
 import ipaddress
 import json
+import logging
 import os
 import re
 import time
@@ -37,6 +38,7 @@ from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
 
+log = logging.getLogger("phunk.ui")
 STATIC = Path(__file__).parent / "static"
 CHANNEL_PREFIX = "https://warpcast.com/~/channel/"
 # Older channels use the URL of the NFT they started with. A few well-known ones, for display.
@@ -68,6 +70,12 @@ PAGE = 30
 # Cache sizes, so a long-running public server doesn't grow without end.
 MAX_USERS = 5000
 MAX_WINDOWS = 64
+MAX_FID = 2**64 - 1  # fids are uint64 on the node
+NODE_BUSY = "the node is busy; try again in a minute"
+
+
+class NoSuchAccount(NotFound):
+    """No account by that name or fid. Its text is safe to show as is."""
 
 
 # ------------------------------------------------------------------ helpers
@@ -153,6 +161,22 @@ def reasons(s: Suggestion, names: dict[int, str | None]) -> list[str]:
     if s.channels:
         out.append("Both active in " + ", ".join(channel_name(c) or c for c in s.channels))
     return out
+
+
+def _int(q, name: str, default: int) -> int:
+    """A whole number from the query string, or a ValueError that says so."""
+    raw = str(q.get(name, default)).strip()
+    if not re.fullmatch(r"-?\d{1,30}", raw):
+        raise ValueError(f"{name} must be a whole number")
+    return int(raw)
+
+
+def _fid(q) -> int:
+    """`fid` from the query string: a positive whole number."""
+    raw = str(q.get("fid", "")).strip()
+    if not re.fullmatch(r"\d{1,30}", raw) or not 0 < int(raw) <= MAX_FID:
+        raise ValueError("fid must be a positive number")
+    return int(raw)
 
 
 def _split(value: str | None) -> set[str]:
@@ -339,12 +363,21 @@ class UI:
         """A username or fid from the query, or the key's fid."""
         value = (value or "").strip().lstrip("@")
         if value.isdigit():
+            if not 0 < int(value) <= MAX_FID:
+                raise NoSuchAccount(f"No Farcaster account with fid {int(value)}.")
             return int(value)
         if value:
             name = value.lower()
+
+            async def lookup() -> int:
+                try:
+                    return await self.hub.fid_by_name(name)
+                except NotFound as e:
+                    raise NoSuchAccount(f"No Farcaster account called @{name}.") from e
+
             hit = self._fids.get(name)
             if not self._fresh(hit, NAME_TTL, False):
-                hit = (time.monotonic(), asyncio.ensure_future(self.hub.fid_by_name(name)))
+                hit = (time.monotonic(), asyncio.ensure_future(lookup()))
                 self._fids[name] = hit
                 _trim(self._fids, MAX_USERS)
             return await hit[1]
@@ -373,9 +406,9 @@ class UI:
 
     async def feed_json(self, q) -> dict:
         fid = await self.who(q.get("who"))
-        hours = max(1, min(168, int(q.get("hours", 24))))
-        offset = max(0, int(q.get("offset", 0)))
-        limit = max(1, min(100, int(q.get("limit", PAGE))))
+        hours = max(1, min(168, _int(q, "hours", 24)))
+        offset = max(0, _int(q, "offset", 0))
+        limit = max(1, min(100, _int(q, "limit", PAGE)))
         items = await self.feed_window(fid, hours, refresh=q.get("refresh") == "1")
         kept = filter_by_app(items, only=_split(q.get("only")) or None, hide=_split(q.get("hide")))
         return {"fid": fid, "hours": hours, "offset": offset, "total": len(kept), "all": len(items),
@@ -394,9 +427,7 @@ class UI:
     async def owner_json(self, q) -> dict:
         """Who owns an account (custody address) and its key nonce: what
         authorizing a gasless KEY_ADD needs."""
-        fid = int(q.get("fid", 0))
-        if fid <= 0:
-            raise ValueError("fid must be a positive number")
+        fid = _fid(q)
         custody = await self.hub.custody_address(fid)
         signers = await self.hub.signers(fid)
         return {"fid": fid, "custody": custody, "nonce": int(signers.get("currentUserNonce") or 0)}
@@ -405,10 +436,10 @@ class UI:
     async def key_json(self, q) -> dict:
         """Is this app key active on the account? From the node, the source of
         truth: the mini app asks it on launch to know phunk is still connected."""
-        fid = int(q.get("fid", 0))
+        fid = _fid(q)
         key = str(q.get("key", "")).lower()
-        if fid <= 0 or not re.fullmatch(r"0x[0-9a-f]{64}", key):
-            raise ValueError("send fid and key (0x + 64 hex)")
+        if not re.fullmatch(r"0x[0-9a-f]{64}", key):
+            raise ValueError("key must be 0x and 64 hex characters")
         signers = await self.hub.collect("/v1/signersByFid", {"fid": fid}, key="signers")
         return {"fid": fid, "key": key, "active": any(str(s.get("key", "")).lower() == key for s in signers)}
 
@@ -418,17 +449,28 @@ GET_ROUTES = {"/api/me": UI.me_json, "/api/feed": UI.feed_json,
               "/api/owner": UI.owner_json, "/api/key": UI.key_json}
 
 
-async def answer(coro) -> tuple[int, dict]:
-    """Await an endpoint; turn the errors it can raise into (status, JSON)."""
+async def answer(coro, *, public: bool = False) -> tuple[int, dict]:
+    """Await an endpoint; turn the errors it can raise into (status, JSON).
+
+    `public` (the hosted site): node errors get a plain message, and the
+    details go to the server's log only."""
     try:
         return 200, await coro
     except LookupError as e:  # NotFound is not a LookupError; KeyError is
         return 400, {"error": str(e).strip("'")}
+    except NoSuchAccount as e:
+        return 404, {"error": str(e)}
     except NotFound as e:
+        if public:
+            log.warning("not found: %s", e)
+            return 404, {"error": "not found"}
         return 404, {"error": f"not found: {e}"}
     except ValueError as e:
         return 400, {"error": str(e)}
     except NodeError as e:
+        if public:
+            log.warning("node error: %s", e)
+            return 502, {"error": NODE_BUSY}
         return 502, {"error": f"node error: {e}"}
 
 
@@ -437,7 +479,7 @@ async def get_json(ui: UI, path: str, query) -> tuple[int, dict]:
     route = GET_ROUTES.get(path)
     if route is None:
         return 404, {"error": "no such endpoint"}
-    return await answer(route(ui, query))
+    return await answer(route(ui, query), public=ui.public)
 
 
 # ---------------------------------------------------------------------- web
@@ -504,7 +546,7 @@ def make_app(ui: UI, *, check_host: bool = True) -> web.Application:
         return data
 
     async def run(coro):
-        status, data = await answer(coro)
+        status, data = await answer(coro, public=ui.public)
         return web.json_response(data, status=status)
 
     @r.get("/")

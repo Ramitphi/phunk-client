@@ -128,11 +128,12 @@ def test_site_asgi_app(site):
     assert asgi(site.app, "GET", "/api/nope")[0] == 404
 
 
-def test_webhook_and_digest_say_so_when_notifications_are_not_set_up(site):
+def test_webhook_and_digest_say_so_when_notifications_are_not_set_up(site, monkeypatch):
     """Without a Redis, the two notification endpoints answer 503, not 404 or 500."""
     status, headers, body = asgi(site.app, "POST", "/api/webhook", b'{"header": "x"}')
     assert status == 503 and "not set up" in body["error"] and headers["cache-control"] == "no-store"
-    assert asgi(site.app, "GET", "/api/cron/digest")[0] == 503
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
     # Still not a read endpoint: a GET of the webhook path is a 404 from the read API.
     assert asgi(site.app, "GET", "/api/webhook")[0] == 404
 
@@ -143,6 +144,86 @@ def test_the_digest_cron_is_only_for_vercel(site, monkeypatch):
     assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer wrong")])[0] == 401
     # With the right secret it gets past the gate (503: no store on this deployment).
     assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
+
+
+def test_the_digest_cron_is_closed_without_a_secret(site, monkeypatch):
+    """No CRON_SECRET on the project: nobody may run the digest."""
+    monkeypatch.delenv("CRON_SECRET", raising=False)
+    for auth in ((), [("authorization", "Bearer ")], [("authorization", "Bearer None")]):
+        status, _, body = asgi(site.app, "GET", "/api/cron/digest", headers=auth)
+        assert (status, body) == (401, {"error": "not allowed"})
+    monkeypatch.setenv("CRON_SECRET", "")
+    assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer ")])[0] == 401
+
+
+def test_the_digest_cron_answers_head_and_post_with_405(site, monkeypatch):
+    async def boom(headers):
+        raise AssertionError("the digest must not run")
+
+    monkeypatch.setattr(site, "_digest", boom)
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    auth = [("authorization", "Bearer s3cret")]
+    for method in ("HEAD", "POST"):
+        status, headers, _ = asgi(site.app, method, "/api/cron/digest", headers=auth)
+        assert status == 405 and headers["cache-control"] == "no-store"
+
+
+def test_site_errors_never_show_the_node_token_or_url(monkeypatch, caplog):
+    """A node that keeps answering 429: the visitor gets a plain message, and
+    neither the answer nor the log carries the gateway token or the node URL."""
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+
+    async def busy(request):
+        return web.Response(status=429)
+
+    async def start():
+        app = web.Application()
+        app.router.add_get("/{tail:.*}", busy)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        return runner, site._server.sockets[0].getsockname()[1]
+
+    runner, port = asyncio.run_coroutine_threadsafe(start(), loop).result()
+    url, token = f"http://127.0.0.1:{port}", "tok-very-secret-123"
+    monkeypatch.setenv("PHUNK_NODE", url)
+    monkeypatch.setenv("PHUNK_NODE_TOKEN", token)
+    monkeypatch.setenv("PHUNK_RATE", "1000")
+    spec = importlib.util.spec_from_file_location("phunk_site_busy", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        _, ui = mod._start()
+        ui.hub.retries = 2  # retry once, then give up
+        with caplog.at_level("WARNING", logger="phunk.ui"):
+            outs = [mod.respond("/api/feed?who=9"), mod.respond("/api/owner?fid=9")]
+        for status, body, cache in outs:
+            assert (status, body, cache) == (502, {"error": "the node is busy; try again in a minute"}, "no-store")
+        assert "HTTP 429" in caplog.text
+        for text in [json.dumps(outs), caplog.text]:
+            assert token not in text and "127.0.0.1" not in text and "Bearer" not in text
+    finally:
+        if mod._loop is not None:
+            asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
+            mod._loop.call_soon_threadsafe(mod._loop.stop)
+        asyncio.run_coroutine_threadsafe(runner.cleanup(), loop).result()
+        loop.call_soon_threadsafe(loop.stop)
+
+
+def test_site_errors_are_plain_words(site):
+    assert site.respond("/api/people?who=thisuserdoesnotexist_zz9")[:2] == (
+        404, {"error": "No Farcaster account called @thisuserdoesnotexist_zz9."})
+    assert site.respond("/api/people?who=0")[:2] == (404, {"error": "No Farcaster account with fid 0."})
+    assert site.respond("/api/people?who=99999999999999999999")[:2] == (
+        404, {"error": "No Farcaster account with fid 99999999999999999999."})
+    for target, error in [("/api/feed?who=me&hours=abc", "hours must be a whole number"),
+                          ("/api/feed?who=me&hours=1e9", "hours must be a whole number"),
+                          ("/api/feed?who=me&offset=x", "offset must be a whole number"),
+                          ("/api/owner?fid=abc", "fid must be a positive number"),
+                          ("/api/key?fid=abc&key=0x" + "ab" * 32, "fid must be a positive number")]:
+        assert site.respond(target) == (400, {"error": error}, "no-store"), target
 
 
 def test_vercel_runs_the_weekly_digest():

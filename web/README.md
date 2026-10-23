@@ -190,7 +190,7 @@ How it fits together:
 | `webhookUrl` in the manifest | Where a Farcaster client POSTs its signed add / remove events |
 | `POST /api/webhook` | Checks the signature, checks the key is one of that account's live keys on the node, then keeps or drops their token |
 | Upstash Redis | Holds `{fid: {url, token}}` and when each account last got a note |
-| `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`); Vercel sends `CRON_SECRET`, and nothing else may call it |
+| `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`). Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` once you add `CRON_SECRET` to the project; nothing else may call it |
 | `src/phunk/notify.py` | All of the above, with `tests/test_notify.py` offline |
 
 To turn it on:
@@ -198,8 +198,12 @@ To turn it on:
 1. In the Vercel project: **Storage → Create → Upstash Redis** (the free
    tier is plenty; one small hash per account). Connect it to the project,
    which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-2. Redeploy. The manifest already points at `/api/webhook`.
-3. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
+2. In **Settings → Environment Variables**, add `CRON_SECRET`: a long
+   random string (for example `openssl rand -hex 32`). Vercel does not set
+   it for you. Once it is there, Vercel Cron sends it with each run.
+   Without it the digest answers 401 to everyone, Vercel Cron included.
+3. Redeploy. The manifest already points at `/api/webhook`.
+4. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
    means it can't see the Redis.
 
 Without the Redis the site works exactly as before; the webhook answers

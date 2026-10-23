@@ -295,6 +295,31 @@ def test_owner_gives_the_latest_custody_address_and_key_nonce():
     assert bad == 400
 
 
+def test_bad_input_gets_plain_words():
+    async def test(client, base, calls, submitted):
+        out = []
+        for path in ("/api/people?who=nobody-here", "/api/feed?who=@Nobody-Here", "/api/people?who=0",
+                     "/api/people?who=99999999999999999999", "/api/feed?hours=abc", "/api/feed?hours=1e9",
+                     "/api/feed?limit=ten", "/api/owner?fid=abc", "/api/owner?fid=0",
+                     "/api/key?fid=abc&key=0x" + "ab" * 32):
+            async with client.get(base + path) as r:
+                out.append((r.status, (await r.json())["error"]))
+        return out
+
+    assert run(test) == [
+        (404, "No Farcaster account called @nobody-here."),
+        (404, "No Farcaster account called @nobody-here."),
+        (404, "No Farcaster account with fid 0."),
+        (404, "No Farcaster account with fid 99999999999999999999."),
+        (400, "hours must be a whole number"),
+        (400, "hours must be a whole number"),
+        (400, "limit must be a whole number"),
+        (400, "fid must be a positive number"),
+        (400, "fid must be a positive number"),
+        (400, "fid must be a positive number"),
+    ]
+
+
 def test_key_says_whether_a_key_is_active_on_the_account():
     async def test(client, base, calls, submitted):
         out = []
