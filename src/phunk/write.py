@@ -1,6 +1,6 @@
 """Write to Farcaster: give your client an app key, then cast, react and follow.
 
-    pip install 'phunk-client[write]'
+    pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 
 Two kinds of keys are involved:
 
@@ -32,7 +32,8 @@ try:
     from eth_account.messages import encode_typed_data
     from nacl.signing import SigningKey
 except ImportError as e:  # pragma: no cover
-    raise ImportError("writing needs extra packages: pip install 'phunk-client[write]'") from e
+    raise ImportError("writing needs extra packages: pip install "
+                      "'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'") from e
 
 from . import proto
 from .hub import Hub, NodeError

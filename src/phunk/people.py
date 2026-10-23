@@ -142,7 +142,7 @@ def build(
         if moved:
             why.append(f"Now posts from {_app(p.app_now, 'their')} (was {_app(p.app_before, 'their')}).")
         if quiet is not None:
-            why.append(f"Quiet for {quiet} days. Say hi?")
+            why.append(f"Quiet for {quiet} days.")
         if not follows:
             why.append("You don't follow them yet.")
         reconnect.append(Card(fid, "reconnect", why, n + 5 * moved + 3 * (not follows),

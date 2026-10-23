@@ -829,7 +829,9 @@ const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and 
 
 function soon() {
   track("Casting soon");
-  toast("Casting is coming soon. Follow and like for now.", 5000);
+  toast(isPublic() && !canConnect()
+    ? "Casting is coming soon. For now, Follow and Open take you to Farcaster."
+    : "Casting is coming soon. For now, follow and like here, or run `phunk post`.", 5000);
 }
 
 function needKey() {
@@ -1051,6 +1053,11 @@ const KIND = {
   circle: ["Your circle", "Many people you follow follow them"],
   bridge: ["Bridge", "A few mutuals, somewhere new"],
 };
+const KIND_OTHER = {
+  reconnect: ["Reconnect", "Someone they talked to"],
+  circle: ["Their circle", "Many people they follow follow them"],
+  bridge: ["Bridge", "A few mutuals, somewhere new"],
+};
 
 function viewingSelf() {
   const me = state.me;
@@ -1059,9 +1066,31 @@ function viewingSelf() {
   return !!(me && me.user && (w === me.user.username || w === String(me.fid)));
 }
 
+// The account looked up, as text: "@dwr" or "fid 3".
+const whoLabel = () => (/^\d+$/.test(state.who) ? `fid ${state.who}` : `@${state.who.replace(/^@/, "")}`);
+
+// people.py writes each card's reasons to "you", the account looked up.
+// When that's someone else, name them instead.
+function reasonFor(text) {
+  if (viewingSelf()) return text;
+  const who = whoLabel();
+  return text
+    .replace(/^You talked (\d+) times/, `${who} talked with them $1 times`)
+    .replace("You don't follow them yet.", `${who} doesn't follow them yet.`)
+    .replace(/(person|people) you follow:/, `$1 ${who} follows:`)
+    .replace("; you post from your own key", `; ${who} posts from their own key`)
+    .replace("; you post from", `; ${who} posts from`)
+    .replace("you don't post in", `${who} doesn't post in`);
+}
+
+function renderTitle() {
+  $("#people-pane .pane-title").replaceChildren(viewingSelf() ? "Your " : `${whoLabel()}'s `,
+    h("span", { class: "hl" }, "people"));
+}
+
 function personCard(p, i = 0) {
   const card = { kind: p.kind, slot: slot(i) };
-  const [label, hint] = KIND[p.kind] || [p.kind, ""];
+  const [label, hint] = (viewingSelf() ? KIND : KIND_OTHER)[p.kind] || [p.kind, ""];
   const canAct = state.me.can_write && viewingSelf();
 
   const follow = h("button", { type: "button", class: p.following ? "following" : null }, p.following ? "Following" : "Follow");
@@ -1144,7 +1173,7 @@ function personCard(p, i = 0) {
     p.ns_vote ? h("span", { class: "stamp", title: "Holds the \u201cI voted for Network School Farcaster\u201d NFT" }, "voted NS") : null,
     app);
   const why = h("div", { class: "why" }, h("span", { class: `kind ${p.kind}`, title: hint }, label),
-    h("span", {}, p.why.join(" ")));
+    h("span", {}, p.why.map(reasonFor).join(" ")));
   const previews = (p.latest || []).map((c) => h("div", { class: "preview" },
     h("span", { class: "muted small" }, `${ago(c.ts)}${c.channel ? " · " + chan(c.channel) : ""}${c.app ? " · " + c.app : ""}`),
     h("div", { class: "text clamp" }, c.text || (c.embeds && c.embeds.length ? "(a link or image)" : "(empty cast)"))));
@@ -1162,13 +1191,13 @@ function renderSummary() {
   const s = state.summary;
   const box = $("#summary");
   if (!s) { box.replaceChildren(); return; }
-  const you = viewingSelf() ? "You" : (state.who.match(/^\d+$/) ? `fid ${state.who}` : `@${state.who.replace(/^@/, "")}`);
+  const you = viewingSelf() ? "You" : whoLabel();
   const parts = [`${you} follow${you === "You" ? "" : "s"} ${s.following} people`];
   if (s.talked_to) parts.push(`talked with ${s.talked_to} in the last ${s.days} days`);
   let line = parts.join(" and ") + ".";
   const extra = [];
   if (s.moved) extra.push(`${s.moved} of them now post from a different app`);
-  if (s.not_following) extra.push(`${s.not_following} ${you === "You" ? "you don't follow" : "they don't follow"}`);
+  if (s.not_following) extra.push(`${s.not_following} ${you === "You" ? "you don't follow" : you + " doesn't follow"}`);
   if (extra.length) line += " Of those, " + extra.join("; ") + ".";
   if (s.my_app) line += ` Posting from ${s.my_app === "own key" ? "their own key" : s.my_app}.`.replace("their own", you === "You" ? "your own" : "their own");
   box.replaceChildren(h("p", {}, line));
@@ -1328,6 +1357,7 @@ function renderWho() {
     who.textContent = `${handle(me.user)} · ${power(me)}`;
   } else who.textContent = "read-only";
   $("#lookup-me").hidden = self || !me.user;
+  renderTitle();
   if (!(me.can_write && self) && state.tab === "compose") setTab(state.lastTab);
   renderAccount();
 }

@@ -685,14 +685,14 @@ already posts has it.
 
 > **Seed phrases are dangerous.** Whoever has one owns the account. Try
 > this with a **test account**, never your main one. Only paste a seed
-> phrase into software from developers you trust (this one is under 400
+> phrase into software from developers you trust (this one is about 500
 > lines: `src/phunk/write.py`). Apps that can should ask a wallet to sign
 > the authorization instead, so the phrase never leaves it.
 
 Install the writing extras (Ed25519, BLAKE3 and Ethereum signing):
 
 ```sh
-pip install 'phunk-client[write]'
+pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 ```
 
 ### Add an app key

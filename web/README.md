@@ -1,11 +1,12 @@
 # phunk.social
 
 The web client from `phunk ui`, hosted. Type a Farcaster username, see that
-account's people and casts. The site holds no keys: on the plain site,
-Follow opens the profile and Open opens the cast in Farcaster. Inside a
-Farcaster client it runs as a mini app (see below), where people can
-approve phunk once and then follow and like from it. Casting from phunk is
-coming soon.
+account's people and casts. The site holds no keys: Follow opens the
+profile and Open opens the cast in Farcaster. Inside a Farcaster client it
+runs as a mini app (see below) and does the same, in the client. Following
+and liking from inside the page is paused for now
+([below](#follow-and-like-paused)) and will come back later. Casting from
+phunk is coming soon.
 
 One Vercel project with two [services](https://vercel.com/docs/services)
 on one domain:
@@ -54,8 +55,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
    - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
      `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
      Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
-   - For follow and like in the mini app: `PHUNK_SIGNER_URL`
-     ([below](#follow-and-like-optional)).
+   - For follow and like in the mini app, once it's back: `PHUNK_SIGNER_URL`
+     ([below](#follow-and-like-paused)). Paused for now; leave it unset.
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below), and for notifications a connected
      Upstash Redis (`KV_REST_API_URL`, `KV_REST_API_TOKEN`).
@@ -92,10 +93,9 @@ the page:
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
 - opens profiles and casts in the client: **Follow** opens the profile
-  and **Open** opens the cast, until the viewer connects phunk (below);
-  Say hi, Reply and New cast come back with casting,
-- with `PHUNK_SIGNER_URL` set, lets the viewer **follow and like** from
-  phunk after approving it once in their Farcaster app,
+  and **Open** opens the cast, with confetti on the tap. Following and
+  liking from inside the page is paused (below). Say hi, Reply and New cast
+  come back with casting,
 - with `PHUNK_TIP_FID` set, shows a **money gun** in its own Tip tab
   (the people list and the You screen end with a small card whose button leads there): $1, $37, $69, $420,
   or $10 to $1000 on a slider (round steps, finer at the low end). It calls `sdk.actions.sendToken`, which opens the
@@ -104,9 +104,9 @@ the page:
 - once someone's people are on screen, offers **Add phunk**, which keeps it
   in their apps and turns on the weekly note (asked at most twice, never on
   the plain site),
-- gives taps the launch video's cues: a ring where you tap, confetti on a
-  follow, hearts on a like, bills out of the money gun, tabs that slide
-  in. Each one has a haptic too: the client's own (`sdk.haptics`, where
+- gives taps the launch video's cues: a ring where you tap, confetti on
+  Follow, hearts on a like (when liking is back), bills out of the money
+  gun, tabs that slide in. Each one has a haptic too: the client's own (`sdk.haptics`, where
   it has them), or the phone's vibration on the plain site. "Reduce
   motion" turns the movement off and keeps the haptics,
 - hides the client's splash screen once the page is up.
@@ -115,15 +115,18 @@ A cast with a phunk.social link shows a card with a **See your people**
 button that opens `miniapp.phunk.social` (the `fc:miniapp` tag in
 `web/head.html`). `MINIAPP_DOMAIN` in `web/build.sh` sets that domain.
 
-### Follow and like (optional)
+### Follow and like (paused)
 
-**Paused for now.** `SIGNER_URL` in `api/index.py` is set to `None` and
-`canConnect()` in `src/phunk/static/app.js` returns `false`, so Follow opens the
-profile and Open opens the cast in Farcaster (with confetti), and `/api/connect`
-and `/api/submit` answer 503. The signer refuses `"onchain": true`. Restore the
-commented lines there to turn it back on.
+**Paused for now; it will come back later.** An open signer let anyone get
+an approval link in phunk's name for a key they hold, which could be used
+for phishing. So `SIGNER_URL` in `api/index.py` is set to `None` and
+`canConnect()` in `src/phunk/static/app.js` returns `false`: Follow opens the
+profile and Open opens the cast in Farcaster (with confetti), and
+`/api/connect` and `/api/submit` answer 503. The signer refuses
+`"onchain": true`. Restore the commented lines there to turn it back on.
 
-With a signer set up, people can follow and like right in the mini app.
+The design below is kept for when it returns. With a signer set up, people
+can follow and like right in the mini app.
 Their first Follow or Like asks them to approve phunk once in their
 Farcaster app. After that the page signs follows and likes itself, and the
 site passes them to the node.
@@ -149,7 +152,7 @@ app. Other clients show these follows and likes as sent from the app
 account. People can remove the key any time in Farcaster's settings;
 **Forget** on the You screen drops it from the phone.
 
-To turn it on:
+To turn it on (once it's back):
 
 1. Make a **dedicated app account** for phunk, from a fresh wallet that
    holds nothing else. Never a main or personal account: its key will sit
@@ -190,7 +193,7 @@ How it fits together:
 | `webhookUrl` in the manifest | Where a Farcaster client POSTs its signed add / remove events |
 | `POST /api/webhook` | Checks the signature, checks the key is one of that account's live keys on the node, then keeps or drops their token |
 | Upstash Redis | Holds `{fid: {url, token}}` and when each account last got a note |
-| `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`); Vercel sends `CRON_SECRET`, and nothing else may call it |
+| `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`). Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` once you add `CRON_SECRET` to the project; nothing else may call it |
 | `src/phunk/notify.py` | All of the above, with `tests/test_notify.py` offline |
 
 To turn it on:
@@ -198,8 +201,12 @@ To turn it on:
 1. In the Vercel project: **Storage → Create → Upstash Redis** (the free
    tier is plenty; one small hash per account). Connect it to the project,
    which sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-2. Redeploy. The manifest already points at `/api/webhook`.
-3. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
+2. In **Settings → Environment Variables**, add `CRON_SECRET`: a long
+   random string (for example `openssl rand -hex 32`). Vercel does not set
+   it for you. Once it is there, Vercel Cron sends it with each run.
+   Without it the digest answers 401 to everyone, Vercel Cron included.
+3. Redeploy. The manifest already points at `/api/webhook`.
+4. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
    means it can't see the Redis.
 
 Without the Redis the site works exactly as before; the webhook answers

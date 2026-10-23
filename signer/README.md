@@ -33,7 +33,9 @@ Keys can be added two ways, and each wants its own approval:
   default. The deadline is Farcaster time.
 - On chain, through Farcaster's KeyGateway on Optimism, which is what the
   Farcaster app does when someone approves a signed key request. Send
-  `"onchain": true`. The approval is signed for the SignedKeyRequestValidator
+  `"onchain": true`. **Paused for now:** the signer answers 403, because an
+  open signer let anyone get an approval link in phunk's name for a key they
+  hold, which could be used for phishing. The approval is signed for the SignedKeyRequestValidator
   (`0x00000000FC700472606ED4fA22623Acf62c60553`, chain 10) and the deadline
   is Unix time. With the wrong one, the app's approval fails with
   `InvalidMetadata`.
@@ -43,9 +45,11 @@ curl -s -X POST https://<your-signer>/api/sign-key-request \
      -H 'Content-Type: application/json' -d '{"key": "0x<64 hex chars>", "onchain": true}'
 ```
 
-The phunk.social mini app uses it too: its `/api/connect` asks the signer
-to approve the key a phone makes, so people can follow and like from the
-mini app (`web/README.md`).
+The phunk.social mini app is meant to use it too: its `/api/connect` asks
+the signer to approve the key a phone makes, so people can follow and like
+from the mini app. That is paused with on-chain approvals; for now Follow
+and Open in the mini app go to Farcaster (`web/README.md`). The gasless
+default above, which `phunk key add --app-signer` uses, still works.
 
 ## Deploy on Vercel
 
