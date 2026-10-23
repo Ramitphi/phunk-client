@@ -207,6 +207,10 @@ def test_static_build_page_and_mini_app(monkeypatch):
     # Analytics on the hosted page only, allowed by its CSP; never in `phunk ui`.
     assert '<script defer src="https://assets.onedollarstats.com/stonks.js"></script>' in html
     assert "onedollarstats" not in (ROOT / "src/phunk/static/index.html").read_text()
+    # Android WebViews (mini app hosts) get a window.chrome before the script runs,
+    # or it drops every visit from them as headless.
+    shim = "&& !window.chrome) window.chrome = {};"
+    assert shim in html and html.index(shim) < html.index("assets.onedollarstats.com/stonks.js")
     csp = config["services"]["web"]["headers"][0]["headers"][0]["value"]
     assert "https://assets.onedollarstats.com" in csp and "https://collector.onedollarstats.com" in csp
 
