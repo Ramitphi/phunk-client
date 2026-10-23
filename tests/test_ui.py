@@ -90,7 +90,8 @@ async def node(request):
             return web.json_response({"messages": []})
         return web.json_response({"messages": REACTIONS.get(int(q["fid"]), [])})
     if p == "/v1/signersByFid":
-        return web.json_response({"signers": [], "currentUserNonce": 4})
+        signers = [{"key": "0x" + "AB" * 32}] if q["fid"] == "50" else []
+        return web.json_response({"signers": signers, "currentUserNonce": 4})
     if p == "/v1/verificationsByFid":
         return web.json_response({"messages": [
             msg(f"v{i}", int(q["fid"]), verificationAddAddressBody={"address": a, "protocol": "PROTOCOL_ETHEREUM"})
@@ -292,6 +293,18 @@ def test_owner_gives_the_latest_custody_address_and_key_nonce():
     # The latest register or transfer wins; lowercase like the wallet compares it.
     assert status == 200 and body == {"fid": 50, "custody": "0x" + "cd" * 20, "nonce": 4}
     assert bad == 400
+
+
+def test_key_says_whether_a_key_is_active_on_the_account():
+    async def test(client, base, calls, submitted):
+        out = []
+        for path in ("/api/key?fid=50&key=0x" + "ab" * 32, "/api/key?fid=50&key=0x" + "cd" * 32,
+                     "/api/key?fid=61&key=0x" + "ab" * 32, "/api/key?fid=50&key=nope"):
+            async with client.get(base + path) as r:
+                out.append((r.status, (await r.json()).get("active")))
+        return out
+
+    assert run(test) == [(200, True), (200, False), (200, False), (400, None)]
 
 
 # ------------------------------------------------------------------ writing
