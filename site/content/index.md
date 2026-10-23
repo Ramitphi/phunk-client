@@ -18,18 +18,17 @@ Three commands: get a server, start a node on it, read from the node.
 ### Get a server
 
 ```sh
-# on a fresh Ubuntu server, as root
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/provision.sh | sudo bash
+# on your own computer, with the hcloud CLI and a Hetzner API token
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
 ```
 
-A Linux machine with 16 GB of RAM, 4 CPU cores, 2 TB of disk and ports 3381 to 3383 open. Those are Snapchain's stated minimums.
+This rents a server on Hetzner Cloud (8 CPU cores, 16 GB of RAM) with a 2 TB volume, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. It asks before it spends anything, and prints the server's address. Hetzner bills by the hour; `hetzner.sh destroy` deletes it all. [Run your own node](tutorial.html#9-run-your-own-node) covers the setup, what it costs, and how to use another provider.
 :::
 ::: step
 ### Start a read node
 
 ```sh
-ssh snapchain@<server-ip>
-./node.sh start      # then ./node.sh status to watch it sync
+ssh -t snapchain@<server-ip> ./node.sh start      # then ./node.sh status to watch it sync
 ```
 
 This installs Snapchain under Docker, downloads a snapshot of the network (several hundred GB, a few hours), then syncs the blocks made since. A read node follows the chain and serves the API. It does not vote on blocks. [Read nodes and validators](concepts/nodes.md) explains the difference.

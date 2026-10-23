@@ -26,7 +26,7 @@ licensed, public.
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `signer/` | The app's signing service, its own Vercel project at sign.phunk.social (ASGI `app`, entrypoint in `signer/pyproject.toml`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only, kept out of the phunk.social project |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
-| `scripts/` | `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
+| `scripts/` | `hetzner.sh` (run on your own computer: rents a Hetzner Cloud server and volume with `hcloud`, runs `provision.sh` on it, mounts the volume as the node's data dir), `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
 | `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py` run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only); `tests/js/fc_test.mjs` checks `fc.js` against the vectors (run by `test_web.py` when `node` is there) |
 | `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
