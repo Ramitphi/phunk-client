@@ -314,8 +314,9 @@ set_api() {
     installed || die "no node installed in $NODE_DIR; run ./node.sh start"
     override_is_ours || die "$f is yours; set the snapchain ports in it by hand"
     compose_new_enough || die "this needs Docker Compose $COMPOSE_MIN or newer (docker compose version)"
-    # A restart during the snapshot download starts it over, and can leave a
-    # shard syncing from block 1. The API comes up once the download is done.
+    # A restart during the snapshot download makes the shards not yet
+    # downloaded skip the snapshot and sync from block 1, which takes months.
+    # The API comes up once the download is done.
     curl -fsS --max-time 10 "$API/v1/info" >/dev/null 2>&1 \
         || die "the node's API is not up yet (still downloading the snapshot?). Try again once ./node.sh status answers."
     as_root true
