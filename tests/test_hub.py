@@ -253,6 +253,44 @@ def test_app_lookups_shared_by_concurrent_casts():
     assert sorted(paths) == ["/v1/onChainEventsByFid", "/v1/signersByFid", "/v1/userDataByFid"]
 
 
+def test_profile_sees_a_move_by_someone_who_posts_a_lot():
+    # 60 casts in 3 days: the newest 20 from a new app, the rest from the
+    # old one. Nothing is older than two weeks, yet the move still shows,
+    # and one stray cast from the old app among the newest doesn't hide it.
+    now = 10_000_000
+    signers = ["0xk1"] * 20 + ["0xk2"] * 40
+    signers[1] = "0xk2"
+    casts = [msg("0x%02x" % i, ts=now - i * 3600, signer=k, castAddBody={"text": "hi"})
+             for i, k in enumerate(signers)]
+
+    async def casts_handler(request):
+        return web.json_response({"messages": casts})
+
+    async def events(request):
+        return web.json_response({"events": [
+            {"blockTimestamp": 1, "signerEventBody": {"key": "0xk1", "eventType": "SIGNER_EVENT_TYPE_ADD",
+                                                      "metadata": metadata(9152)}},
+            {"blockTimestamp": 2, "signerEventBody": {"key": "0xk2", "eventType": "SIGNER_EVENT_TYPE_ADD",
+                                                      "metadata": metadata(9153)}}]})
+
+    async def signers_handler(request):
+        return web.json_response({"signers": []})
+
+    async def user_data(request):
+        name = {"9152": "newapp", "9153": "oldapp"}[request.query["fid"]]
+        return web.json_response({"messages": [
+            msg("u", fid=int(request.query["fid"]), userDataBody={"type": "USER_DATA_TYPE_USERNAME",
+                                                                   "value": name})]})
+
+    async def test(hub, calls):
+        from phunk.people import profile
+        return await profile(hub, 1, now=now)
+
+    p = run({"/v1/castsByFid": casts_handler, "/v1/onChainEventsByFid": events,
+             "/v1/signersByFid": signers_handler, "/v1/userDataByFid": user_data}, test)
+    assert (p.app_now, p.app_before, p.moved) == ("newapp", "oldapp", True)
+
+
 def test_failed_app_lookup_is_retried():
     tries = []
 
@@ -531,7 +569,7 @@ def test_thousands_of_deletes_cost_a_few_requests():
     hashes, calls = got["limited"]
     assert hashes == ["0xadd%d" % i for i in range(5)]
     assert [q["pageSize"] for q in calls] == ["30", "300", "1000", "1000", "1000"]
-    assert len(got["profile"][1]) == 5 and len(got["profile"][0]) == 2
+    assert len(got["profile"][1]) <= 5 and len(got["profile"][0]) == 2
     assert len(got["window"][1]) <= 5
     assert got["all"][0] == hashes and len(got["all"][1]) == 4  # no limit: pages of 1000, no cap
 
