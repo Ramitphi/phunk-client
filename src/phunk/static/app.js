@@ -574,7 +574,15 @@ function connectSheet(then) {
     status.textContent = "Getting phunk ready…";
     try {
       let k = savedKey();
-      if (!k || k.state === "failed" || (k.at && Date.now() - k.at > 50 * 60 * 1000 && k.state !== "completed")) {
+      // Keep an earlier request only once it's approved (the key is being
+      // added). One still pending may never go through, for example when
+      // the Farcaster app can't add it, so start a fresh one.
+      if (k && k.token && k.state !== "failed") {
+        let s = null;
+        try { s = await api(`/api/connect?token=${encodeURIComponent(k.token)}`); } catch { /* start over */ }
+        if (!s || (s.state !== "approved" && s.state !== "completed")) k = null;
+      }
+      if (!k || !k.token || k.state === "failed") {
         const { ed } = await libs();
         const priv = ed.utils.randomPrivateKey();
         k = { fid: viewerFid(), priv: phunkMsg.bytesToHex(priv), pub: phunkMsg.bytesToHex(await ed.getPublicKeyAsync(priv)), state: "new" };
