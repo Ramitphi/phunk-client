@@ -4,6 +4,35 @@ Read and write Farcaster straight from a Snapchain / Hypersnap node. No API
 key, no Neynar, no indexer: just the node's HTTP API, with the paging quirks
 handled for you, and gasless app keys for posting.
 
+## Quickstart (3 commands)
+
+Any machine with Python 3.10+. No API key and no node of your own: it reads
+from a public node by default.
+
+```sh
+pip install git+https://github.com/Ramitphi/phunk-client
+phunk whois dwr                   # a profile
+phunk feed dwr --hide warpcast    # last 24h from everyone dwr follows, minus one app
+```
+
+```
+$ phunk whois dwr
+fid           3
+username      dwr
+display_name  Dan Romero
+bio           Interested in technology and other stuff.
+url           https://danromero.org
+eth_address   0x6Ce09Ed5526DE4aFe4a981AD86d17B2F5c92feA5
+```
+
+`phunk feed` prints one line per cast: the time, who posted, the app that
+signed it (`[own key]` when it's their own key), and the text. To read from
+your own node instead, follow the
+[microsite quickstart](https://ramitphi.github.io/phunk-client/) and see
+[Which node](#which-node).
+
+In Python:
+
 ```python
 import asyncio
 from phunk import Hub
@@ -137,7 +166,7 @@ phunk casts dwr -n 5
 phunk apps dwr          # which apps signed their last 200 casts
 phunk --node http://localhost:3381 info
 
-# writing (pip install 'phunk-client[write]')
+# writing: pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 phunk key add                      # seed phrase in (hidden), app key saved to ~/.config/phunk
 phunk key list                     # the account's keys and the app behind each
 phunk key revoke                   # the saved key revokes itself; no seed phrase
@@ -174,10 +203,10 @@ for Network School Farcaster" NFT on Base in any wallet they verified. The
 check is one `eth_call` to Base (`PHUNK_BASE_RPC`, default
 `https://mainnet.base.org`; `off` hides the stamp).
 
-In this first release the page follows people and likes casts; it doesn't
-cast yet. Casting, replies and recasts in the page are coming soon (`phunk
-ui --casting` previews them). The command line does all of it today:
-`phunk post`, `phunk recast`.
+With a key from `phunk key add`, the local page follows people and likes
+casts; it doesn't cast yet. Casting, replies and recasts in the page are
+coming soon (`phunk ui --casting` previews them). The command line does all
+of it today: `phunk post`, `phunk recast`.
 
 ```sh
 phunk ui --as dwr      # read-only: look at anyone's people
@@ -189,12 +218,14 @@ to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
 A hosted copy runs at [phunk.social](https://phunk.social): type a
-username, and Follow and Open take you to Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away. Approve
-phunk once in your Farcaster app and you can follow and like from it, with
-no seed phrase. People who add it can get one short note a week about their
-people. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
-it on Vercel.
+username and see that account's people and casts. It holds no keys:
+**Follow** opens the profile and **Open** opens the cast in Farcaster.
+Inside a Farcaster client it is a mini app that shows your own people right
+away, and Follow and Open go to the client the same way. Following and
+liking from inside the page is paused for now and will come back later;
+casting from it is coming soon. People who add the mini app can get one
+short note a week about their people. `phunk ui --public` runs the same
+mode locally. See [`web/README.md`](web/README.md) to deploy it on Vercel.
 
 ## Which node
 

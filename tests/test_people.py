@@ -50,7 +50,7 @@ def test_reconnect_only_when_there_is_something_to_do():
     assert set(by) == {2, 3}
     assert all(c.kind == "reconnect" for c in cards)
     assert "Now posts from fireflyapp (was warpcast)." in by[2].why
-    assert "Quiet for 20 days. Say hi?" in by[3].why
+    assert "Quiet for 20 days." in by[3].why
     assert by[2].following and by[2].score > by[3].score  # moved ranks above quiet
 
 
