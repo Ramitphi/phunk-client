@@ -621,6 +621,99 @@ function connectSheet(then) {
   go.focus();
 }
 
+// ------------------------------------------- in-app approval test (probe)
+// Can the mini app's own wallet approve phunk's key, with no trip to the
+// Farcaster app? Only if the wallet is the account's owner (custody)
+// address and the client lets it sign a gasless KEY_ADD authorization.
+// This asks for that signature for a throwaway key, checks who signed it,
+// and sends nothing: the key is never kept, so the signature can't be used.
+// Shown in the mini app to the account the money gun tips (the maintainer),
+// or with ?probe=1.
+
+const VIEM = "https://esm.sh/viem@2.21.55";
+
+function probeVisible() {
+  if (!miniapp || !viewerFid()) return false;
+  const tip = state.me && state.me.tip;
+  return new URLSearchParams(location.search).has("probe") || !!(tip && Number(tip.fid) === viewerFid());
+}
+
+function probeRow() {
+  const out = h("div", { class: "probe small" });
+  const go = h("button", { type: "button", class: "ghost small" }, "Test in-app approval");
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    out.replaceChildren();
+    try { await runProbe(out); } catch (e) { probeLine(out, "stopped", e.message || String(e)); }
+    go.disabled = false;
+  });
+  return h("div", {},
+    h("div", { class: "row between small" }, h("span", { class: "muted" }, "Check if approval can happen right here (sends nothing)."), go),
+    out);
+}
+
+function probeLine(out, label, value) {
+  out.append(h("div", { class: "probe-line" }, h("span", { class: "muted" }, label), h("code", {}, String(value))));
+}
+
+async function runProbe(out) {
+  const fid = viewerFid();
+  probeLine(out, "fid", fid);
+  let caps = [];
+  try { caps = await miniapp.getCapabilities(); } catch { /* old host */ }
+  probeLine(out, "client offers a wallet", caps.includes("wallet.getEthereumProvider") ? "yes" : "no");
+  try { probeLine(out, "client chains", ((await miniapp.getChains()) || []).join(", ") || "none listed"); } catch { /* old host */ }
+  const owner = await api(`/api/owner?fid=${fid}`);
+  probeLine(out, "account owner (custody)", owner.custody);
+  const eth = await miniapp.wallet.getEthereumProvider();
+  if (!eth) { probeLine(out, "wallet", "none"); return; }
+  const accounts = (await eth.request({ method: "eth_requestAccounts" })) || [];
+  probeLine(out, "wallet address", accounts.join(", ") || "none");
+  probeLine(out, "wallet chain", await eth.request({ method: "eth_chainId" }).catch((e) => `? ${e.message}`));
+  const mine = accounts.find((a) => a.toLowerCase() === owner.custody);
+  probeLine(out, "wallet is the owner", mine ? "YES" : "no");
+
+  // The authorization a gasless KEY_ADD carries (src/phunk/write.py), for a
+  // throwaway key that is dropped right after.
+  const { ed } = await libs();
+  const pub = await ed.getPublicKeyAsync(ed.utils.randomPrivateKey());
+  const typed = {
+    domain: { name: "Farcaster KeyAdd", version: "1", chainId: 1 },
+    types: {
+      EIP712Domain: [{ name: "name", type: "string" }, { name: "version", type: "string" }, { name: "chainId", type: "uint256" }],
+      KeyAdd: [{ name: "fid", type: "uint256" }, { name: "key", type: "bytes" }, { name: "keyType", type: "uint32" },
+        { name: "scopes", type: "uint32[]" }, { name: "ttl", type: "uint32" }, { name: "nonce", type: "uint32" },
+        { name: "deadline", type: "uint256" }],
+    },
+    primaryType: "KeyAdd",
+    message: { fid, key: "0x" + phunkMsg.bytesToHex(pub), keyType: 1, scopes: [3, 4, 5, 6], ttl: 2592000,
+      nonce: owner.nonce + 1, deadline: phunkMsg.now() + 3600 },
+  };
+  const from = mine || accounts[0];
+  const ask = () => eth.request({ method: "eth_signTypedData_v4", params: [from, JSON.stringify(typed)] });
+  let sig = null;
+  try { sig = await ask(); } catch (e) {
+    probeLine(out, "signature", `refused: ${e.code ?? ""} ${e.message || e}`);
+    // Some wallets want to be on the domain's chain (Ethereum) first.
+    try {
+      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] });
+      probeLine(out, "switched to Ethereum", "yes, asking again");
+      sig = await ask();
+    } catch (e2) { probeLine(out, "after switching chain", `refused: ${e2.code ?? ""} ${e2.message || e2}`); }
+  }
+  if (!sig) { probeLine(out, "result", "the wallet won't sign it: keep the approval screen"); return; }
+  probeLine(out, "signature", "got one ✓");
+  try {
+    const { recoverTypedDataAddress } = await import(VIEM);
+    const { EIP712Domain, ...types } = typed.types;
+    const by = await recoverTypedDataAddress({ ...typed, types, message: { ...typed.message, fid: BigInt(fid),
+      deadline: BigInt(typed.message.deadline) }, signature: sig });
+    probeLine(out, "signed by", by);
+    probeLine(out, "result", by.toLowerCase() === owner.custody
+      ? "it works: approval can happen right here" : "signed, but not by the owner: keep the approval screen");
+  } catch (e) { probeLine(out, "check", `couldn't check the signer: ${e.message}`); }
+}
+
 function forgetKey() {
   track("Disconnect");
   try { localStorage.removeItem(KEY_STORE); } catch { /* private mode */ }
@@ -1155,6 +1248,7 @@ function renderAccount() {
     rows.push(h("div", { class: "row between small" },
       h("span", { class: "muted" }, "phunk keeps its key on this phone."), forget));
   }
+  if (probeVisible()) rows.push(probeRow());
   if (!viewingSelf()) {
     rows.push(h("p", { class: "muted small" },
       `Viewing ${/^\d+$/.test(state.who) ? "fid " + state.who : "@" + state.who.replace(/^@/, "")}'s people, read-only.`));
