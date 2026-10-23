@@ -55,11 +55,12 @@ phunk --node http://localhost:3381 post "hello from my own node"
 :::
 
 ::: note No server yet?
-Skip the first two steps. A public node answers the same API, and the client uses one by default:
+Skip the first two steps. A public node answers the same API, and the client uses one by default. Three commands:
 
 ```sh
 pip install git+https://github.com/Ramitphi/phunk-client
 phunk whois dwr
+phunk feed dwr --hide warpcast
 ```
 :::
 

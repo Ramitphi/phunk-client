@@ -1,7 +1,7 @@
 """phunk: read Farcaster straight from a Snapchain / Hypersnap node.
 
 Writing (app keys, casts, likes, follows) lives in `phunk.write` and needs
-`pip install 'phunk-client[write]'`.
+`pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'`.
 """
 from . import proto
 from .hub import DEFAULT_NODE, Hub, NodeError, NotFound, RateLimiter
