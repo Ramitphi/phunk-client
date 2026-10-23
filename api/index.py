@@ -11,6 +11,9 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET /api/feed?who=dwr&hours=24
     GET /api/suggestions?who=dwr
     POST /api/webhook         the mini app's signed add / remove events
+    POST /api/connect         {"key": "0x..."}: start approving a key made in the page
+    GET  /api/connect?token=  where that approval stands
+    POST /api/submit          {"message": "0x..."}: a follow or like signed in the page
     GET /api/cron/digest      the weekly note, from Vercel Cron
 
 Settings (environment variables, optional):
@@ -19,6 +22,10 @@ Settings (environment variables, optional):
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
+
+Follow and like in the mini app (optional; unset, they open Farcaster):
+    PHUNK_SIGNER_URL   the app's signing service, e.g.
+                       https://sign.phunk.social/api/sign-key-request (signer/)
 
 Mini app notifications (all optional; without a store the webhook still
 answers, it just keeps nobody):
@@ -47,13 +54,18 @@ from urllib.parse import parse_qsl, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from phunk import notify  # noqa: E402
-from phunk.hub import DEFAULT_NODE, Hub  # noqa: E402
+from phunk import connect, notify  # noqa: E402
+from phunk.hub import DEFAULT_NODE, Hub, NodeError  # noqa: E402
 from phunk.onchain import base_rpc_from_env  # noqa: E402
 from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
 MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}/"
+SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
+FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
+# Per instance, per IP: start a few approvals, poll their status, send follows and likes.
+LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
+          "submit": connect.RateLimit(60, 60)}
 CACHE = {
     "/api/me": "public, max-age=300, s-maxage=3600",
     "/api/people": "public, max-age=60, s-maxage=600, stale-while-revalidate=3600",
@@ -82,7 +94,8 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
                           concurrency=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
                           token=os.environ.get("PHUNK_NODE_TOKEN") or None)
                 await hub.__aenter__()
-                return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env())
+                return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),
+                          connect=SIGNER_URL is not None)
 
             _ui = asyncio.run_coroutine_threadsafe(make(), loop).result()
             _store = notify.store_from_env(_ui.hub.session, os.environ)
@@ -167,6 +180,53 @@ async def _digest(headers: dict) -> tuple[int, dict]:
     return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
 
 
+async def _connect(kind: str, ip: str, body: bytes = b"", query: dict | None = None) -> tuple[int, dict]:
+    """POST /api/connect, GET /api/connect, POST /api/submit."""
+    if SIGNER_URL is None:
+        return 503, {"error": "follow and like are not set up on this deployment"}
+    if not LIMITS[kind].allow(ip):
+        return 429, {"error": "slow down a little and try again in a minute"}
+    loop, ui = await asyncio.to_thread(_start)
+
+    async def run():
+        try:
+            if kind == "status":
+                return 200, await connect.status(ui.hub.session, (query or {}).get("token", ""), api=FARCASTER_API)
+            try:
+                data = json.loads(body or b"{}")
+            except ValueError:
+                return 400, {"error": "send JSON"}
+            if not isinstance(data, dict):
+                return 400, {"error": "send a JSON object"}
+            if kind == "start":
+                return 200, await connect.start(ui.hub.session, SIGNER_URL, data.get("key"), api=FARCASTER_API)
+            raw = str(data.get("message") or "").removeprefix("0x")
+            try:
+                message = bytes.fromhex(raw)
+            except ValueError:
+                return 400, {"error": "message must be hex"}
+            connect.check(message)
+            try:
+                sent = await ui.hub.submit(message)
+            except NodeError as e:
+                return 400, {"error": f"the node said no: {e}"}
+            return 200, {"hash": sent.get("hash")}
+        except connect.ConnectError as e:
+            return e.status, {"error": str(e)}
+
+    future = asyncio.run_coroutine_threadsafe(run(), loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+
+
+def _client_ip(scope) -> str:
+    headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+    forwarded = headers.get("x-forwarded-for") or headers.get("x-real-ip") or ""
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    client = scope.get("client") or ("", 0)
+    return str(client[0])
+
+
 async def _body(receive) -> bytes:
     """The whole request body, up to 64 KB."""
     out = b""
@@ -190,7 +250,15 @@ async def app(scope, receive, send):
     if scope["type"] != "http":
         return
     path = scope["path"].rstrip("/")
-    if scope["method"] == "POST" and path == "/api/webhook":
+    if path in ("/api/connect", "/api/submit") and scope["method"] in ("GET", "POST"):
+        kind = "submit" if path == "/api/submit" else ("start" if scope["method"] == "POST" else "status")
+        if kind == "submit" and scope["method"] != "POST":
+            status, body = 405, {"error": "POST a signed message"}
+        else:
+            query = dict(parse_qsl(scope.get("query_string", b"").decode("latin-1")))
+            status, body = await _connect(kind, _client_ip(scope), await _body(receive) if scope["method"] == "POST" else b"", query)
+        cache = "no-store"
+    elif scope["method"] == "POST" and path == "/api/webhook":
         status, body = await _webhook(await _body(receive))
         cache = "no-store"
     elif scope["method"] in ("GET", "HEAD") and path == "/api/cron/digest":

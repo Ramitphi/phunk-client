@@ -1,10 +1,11 @@
 # phunk.social
 
-The web client from `phunk ui`, hosted and read-only. Type a Farcaster
-username, see that account's people and casts. Follow opens the profile
-and Open opens the cast in Farcaster, because the site holds no keys and
-can't act for anyone. Casting from phunk is coming soon. Inside a Farcaster client it runs as a mini app
-(see below).
+The web client from `phunk ui`, hosted. Type a Farcaster username, see that
+account's people and casts. The site holds no keys: on the plain site,
+Follow opens the profile and Open opens the cast in Farcaster. Inside a
+Farcaster client it runs as a mini app (see below), where people can
+approve phunk once and then follow and like from it. Casting from phunk is
+coming soon.
 
 One Vercel project with two [services](https://vercel.com/docs/services)
 on one domain:
@@ -53,6 +54,8 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
    - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
      `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
      Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
+   - For follow and like in the mini app: `PHUNK_SIGNER_URL`
+     ([below](#follow-and-like-optional)).
    - Later, for the mini app: `FARCASTER_HEADER`, `FARCASTER_PAYLOAD`,
      `FARCASTER_SIGNATURE` (below), and for notifications a connected
      Upstash Redis (`KV_REST_API_URL`, `KV_REST_API_TOKEN`).
@@ -88,9 +91,11 @@ the page:
 - loads the mini app SDK (`@farcaster/miniapp-sdk`, pinned, from esm.sh;
   only inside a client, never on the plain site),
 - shows the viewer's own people straight away, from the client's context,
-- opens profiles and casts in the client: **Follow** opens the profile,
-  **Open** opens the cast (Say hi, Reply and New cast come back with
-  casting),
+- opens profiles and casts in the client: **Follow** opens the profile
+  and **Open** opens the cast, until the viewer connects phunk (below);
+  Say hi, Reply and New cast come back with casting,
+- with `PHUNK_SIGNER_URL` set, lets the viewer **follow and like** from
+  phunk after approving it once in their Farcaster app,
 - with `PHUNK_TIP_FID` set, shows a **money gun** in its own Tip tab
   (the people list and the You screen end with a small card whose button leads there): $1, $37, $69, $420,
   or $10 to $1000 on a slider (round steps, finer at the low end). It calls `sdk.actions.sendToken`, which opens the
@@ -99,11 +104,72 @@ the page:
 - once someone's people are on screen, offers **Add phunk**, which keeps it
   in their apps and turns on the weekly note (asked at most twice, never on
   the plain site),
+- gives taps the launch video's cues: a ring where you tap, confetti on a
+  follow, hearts on a like, bills out of the money gun, tabs that slide
+  in. Each one has a haptic too: the client's own (`sdk.haptics`, where
+  it has them), or the phone's vibration on the plain site. "Reduce
+  motion" turns the movement off and keeps the haptics,
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**
 button that opens `miniapp.phunk.social` (the `fc:miniapp` tag in
 `web/head.html`). `MINIAPP_DOMAIN` in `web/build.sh` sets that domain.
+
+### Follow and like (optional)
+
+With a signer set up, people can follow and like right in the mini app.
+Their first Follow or Like asks them to approve phunk once in their
+Farcaster app. After that the page signs follows and likes itself, and the
+site passes them to the node.
+
+| Piece | What |
+|---|---|
+| The page | Makes an Ed25519 key in the browser and keeps it there (localStorage). The private key never leaves the phone |
+| `src/phunk/static/fc.js` | Builds and signs follow, unfollow, like and unlike in the page; `tests/js/fc_test.mjs` checks it byte for byte against the official library's messages |
+| `POST /api/connect` | Asks the signer (`signer/`) to approve the public key for the app account, then opens a signed key request with Farcaster. Answers the approval link |
+| `GET /api/connect?token=` | Where that request stands: `completed` once the key is on their account |
+| `POST /api/submit` | Passes a signed message to the node. Only follows, unfollows, likes and unlikes get through; the node checks the signature and that the key belongs to the account |
+| `src/phunk/connect.py` | All of the above, with offline tests in `tests/test_web.py` |
+
+The Farcaster endpoints behind `/api/connect`:
+
+```sh
+POST https://api.farcaster.xyz/v2/signed-key-requests   {key, requestFid, signature, deadline}
+GET  https://api.farcaster.xyz/v2/signed-key-request?token=0x...
+```
+
+No seed phrase and no custody key: people approve in their own Farcaster
+app. Other clients show these follows and likes as sent from the app
+account. People can remove the key any time in Farcaster's settings;
+**Forget** on the You screen drops it from the phone.
+
+To turn it on:
+
+1. Make a **dedicated app account** for phunk, from a fresh wallet that
+   holds nothing else. Never a main or personal account: its key will sit
+   on a server.
+2. Deploy the signer as its own Vercel project, with
+   `PHUNK_APP_FID=<app account fid>` and the app account's key
+   (`signer/README.md`). Type the key into Vercel yourself and mark it
+   sensitive. It never goes in this project, the repo or a chat.
+3. In this project, set
+   `PHUNK_SIGNER_URL=https://sign.phunk.social/api/sign-key-request`
+   and redeploy.
+4. Check `GET /api/me` shows `"can_connect": true`. Then open the mini app
+   on a phone, tap Follow on someone, approve, and look for the follow in
+   Farcaster.
+
+Without `PHUNK_SIGNER_URL` the site works as before: `/api/connect` and
+`/api/submit` answer 503, and Follow opens the profile.
+
+Each instance allows, per IP, 10 approvals per 10 minutes and 60 submits a
+minute. For a hard cap, add a Vercel firewall rule on `/api/connect` and
+`/api/submit`.
+
+Cost: the signer and the relay cost nothing beyond Vercel. Approving puts
+the key on chain from the person's account. Unless the request is
+sponsored, their Farcaster app may charge them a small fee for that; check
+it on your first approval.
 
 ### Notifications (optional)
 
@@ -191,7 +257,8 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Look up` | The username box is sent | `by`: `username`, `fid` or `empty` |
 | `People loaded` | The people feed arrives | `took`, `cards`, `self` (the viewer's own people: `yes`/`no`), `refresh` |
 | `People failed` | It doesn't | `reason`: `not found`, `bad lookup`, `server`, `network` or a status; `took` |
-| `Follow` | Follow on a card (opens the profile) | `kind` (`reconnect`, `circle`, `bridge`), `slot` |
+| `Follow` | Follow on a card (opens the profile, or in a connected mini app, follows) | `kind` (`reconnect`, `circle`, `bridge`), `slot` |
+| `Followed` | The follow went through (mini app, connected) | `kind`, `slot` |
 | `Say hi` | Say hi on a card | `kind`, `slot` |
 | `Not now` | A card is dismissed | `kind`, `slot` |
 | `Casts opened` | The Casts tab | |
@@ -200,7 +267,13 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Window` | A time window is picked | `window` |
 | `Load more` | More casts | `mode`: `next page` or `wider window` |
 | `App filter` | An app is shown or hidden | `change`: `show`, `hide`, `show all`, `hide all` |
-| `Open` | Open on a cast (the hosted site can't like, so it opens the cast in Farcaster) | |
+| `Open` | Open on a cast (opens it in Farcaster) | |
+| `Liked`, `Unliked` | Like / unlike went through (mini app, connected) | |
+| `Connect shown` | The one-time approval sheet opens (Follow or Like before phunk is connected) | |
+| `Connect skipped` | Not now on that sheet | |
+| `Connect done` | The person approved phunk's key in Farcaster | |
+| `Connect failed` | Starting or finishing the approval failed | `reason` |
+| `Disconnect` | Forget on the You screen (drops the key from this phone) | |
 | `Reply` | Reply on a cast (opens it in Farcaster) | |
 | `New cast` | The composer opens | |
 | `Casting soon` | New cast while casting is off: demand for it | |
@@ -213,7 +286,8 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Back to me` | Back to the viewer's own people | |
 | `Theme` | The theme toggle | `theme` |
 
-Useful funnels: `Visit` → `Look up` → `People loaded` → `Follow`; and
+Useful funnels: `Visit` → `Look up` → `People loaded` → `Follow`;
+`Connect shown` → `Connect done` → `Followed`; and
 `Follow` / `Not now` split by `kind` and `slot`, to see which suggestions
 work. `People failed` and `Casts failed` with `took` show when the node is
 slow or down.

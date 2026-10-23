@@ -37,15 +37,24 @@ def test_public_mode_has_no_account_and_refuses_writes():
     assert submitted == []
 
 
+SUBMITTED: list[bytes] = []  # what the fake node was sent, per test
+
+
 @pytest.fixture
 def fake_node():
     """The fake node on its own loop and thread, as a URL."""
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
+    SUBMITTED.clear()
+
+    async def submit(request):
+        SUBMITTED.append(await request.read())
+        return web.json_response({"hash": "0x" + "aa" * 20})
 
     async def start():
         app = web.Application()
         app.router.add_get("/{tail:.*}", node)
+        app.router.add_post("/v1/submitMessage", submit)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -172,12 +181,13 @@ def test_static_build_page_and_mini_app(monkeypatch):
     config = json.loads((ROOT / "vercel.json").read_text())
     web = config["services"]["web"]
     assert (web["root"], web["outputDirectory"]) == ("web", "_site")
-    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js"}
+    assert {p.name for p in (out / "static").iterdir()} == {"app.css", "app.js", "fc.js"}
 
     # The page, plus the mini app embed and link previews in <head>.
     html = (out / "index.html").read_text()
     # The CSS and JS links carry a version, so phones drop an old cached copy.
     assert re.search(r'href="/static/app\.css\?v=\d+"', html) and re.search(r'src="/static/app\.js\?v=\d+"', html)
+    assert re.search(r'src="/static/fc\.js\?v=\d+"', html)
     assert html.replace("\n", "").count("</head>") == 1
     # The money gun is drawn in the page, not loaded as an image, so it takes the theme's colours.
     assert '<svg class="money-gun"' in html and "money-gun.svg" not in html
@@ -272,3 +282,148 @@ def test_local_mode_refresh_still_rereads():
     me, extra = run(test)
     assert me["node"].startswith("http://127.0.0.1:")
     assert extra > 0
+
+
+# ------------------------------------------- follow and like from the mini app
+
+V = json.loads((ROOT / "tests" / "vectors" / "write.json").read_text())
+APP_FID, APP_SIG = 777, bytes(range(65))
+
+
+def _metadata(fid: int, signer: str, sig: bytes, deadline: int) -> str:
+    word = lambda n: int(n).to_bytes(32, "big")  # noqa: E731
+    raw = (word(0x20) + word(fid) + b"\x00" * 12 + bytes.fromhex(signer[2:]) + word(0x80) + word(deadline)
+           + word(len(sig)) + sig + b"\x00" * (-len(sig) % 32))
+    return "0x" + raw.hex()
+
+
+@pytest.fixture
+def fake_farcaster():
+    """A stand-in for the app's signer and Farcaster's key-request API: (base URL, what they got)."""
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    got = {"signer": [], "requests": []}
+
+    async def signer(request):
+        body = await request.json()
+        got["signer"].append(body)
+        return web.json_response({"metadata": _metadata(APP_FID, "0x" + "12" * 20, APP_SIG, 190003600),
+                                  "request_fid": APP_FID, "deadline": 190003600})
+
+    async def create(request):
+        body = await request.json()
+        got["requests"].append(body)
+        token = "0x" + "c0ffee" * 8
+        return web.json_response({"result": {"signedKeyRequest": {
+            "token": token, "deeplinkUrl": f"farcaster://signed-key-request?token={token}",
+            "key": body["key"], "requestFid": body["requestFid"], "state": "pending"}}})
+
+    async def status(request):
+        if request.query.get("token") != "0x" + "c0ffee" * 8:
+            return web.json_response({"errors": [{"message": "No signed key request found"}]}, status=400)
+        return web.json_response({"result": {"signedKeyRequest": {"state": "completed", "userFid": 9}}})
+
+    async def start():
+        app = web.Application()
+        app.router.add_post("/sign", signer)
+        app.router.add_post("/v2/signed-key-requests", create)
+        app.router.add_get("/v2/signed-key-request", status)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        s = web.TCPSite(runner, "127.0.0.1", 0)
+        await s.start()
+        return runner, s._server.sockets[0].getsockname()[1]
+
+    runner, port = asyncio.run_coroutine_threadsafe(start(), loop).result()
+    yield f"http://127.0.0.1:{port}", got
+    asyncio.run_coroutine_threadsafe(runner.cleanup(), loop).result()
+    loop.call_soon_threadsafe(loop.stop)
+
+
+@pytest.fixture
+def connect_site(fake_node, fake_farcaster, monkeypatch):
+    """api/index.py with a signer: follow and like are on."""
+    base, got = fake_farcaster
+    monkeypatch.setenv("PHUNK_SIGNER_URL", f"{base}/sign")
+    monkeypatch.setenv("PHUNK_FARCASTER_API", base)
+    monkeypatch.setenv("PHUNK_NODE", fake_node)
+    monkeypatch.setenv("PHUNK_RATE", "1000")
+    spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    yield mod, got
+    if mod._loop is not None:
+        asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
+        mod._loop.call_soon_threadsafe(mod._loop.stop)
+
+
+def _post(app, path, body: dict, ip="1.2.3.4"):
+    return asgi(app, "POST", path, json.dumps(body).encode(), headers=[("x-forwarded-for", ip)])
+
+
+def test_connect_is_off_without_a_signer(site):
+    status, _, me = asgi(site.app, "GET", "/api/me")
+    assert status == 200 and me["can_connect"] is False
+    status, headers, body = _post(site.app, "/api/connect", {"key": "0x" + "22" * 32})
+    assert status == 503 and "not set up" in body["error"] and headers["cache-control"] == "no-store"
+    assert _post(site.app, "/api/submit", {"message": V["like"]["message"]})[0] == 503
+    assert SUBMITTED == []
+
+
+def test_connect_opens_a_signed_key_request_for_the_app(connect_site):
+    site, got = connect_site
+    assert asgi(site.app, "GET", "/api/me")[2]["can_connect"] is True
+    key = "0x" + V["signer_key"]
+    status, headers, body = _post(site.app, "/api/connect", {"key": key})
+    assert status == 200 and headers["cache-control"] == "no-store"
+    assert body["app_fid"] == APP_FID and body["deeplink"].startswith("farcaster://signed-key-request?token=0x")
+    assert body["url"] == "https://client.farcaster.xyz/deeplinks/signed-key-request?token=" + body["token"]
+    # The signer saw only the public key; Farcaster got the app's signature from its approval.
+    assert got["signer"] == [{"key": key}]
+    assert got["requests"] == [{"key": key, "requestFid": APP_FID, "signature": "0x" + APP_SIG.hex(),
+                                "deadline": 190003600}]
+    status, _, body = asgi(site.app, "GET", f"/api/connect?token={body['token']}")
+    assert status == 200 and body == {"state": "completed", "fid": 9}
+    # Bad input is refused before anything goes out.
+    assert _post(site.app, "/api/connect", {"key": "0x1234"})[0] == 400
+    assert asgi(site.app, "GET", "/api/connect?token=nope")[0] == 400
+    assert asgi(site.app, "GET", "/api/connect?token=0xdeadbeef")[0] == 404
+    assert len(got["requests"]) == 1
+
+
+def test_submit_relays_only_follows_and_likes(connect_site):
+    site, _ = connect_site
+    for name in ("like", "follow", "unfollow"):
+        status, _, body = _post(site.app, "/api/submit", {"message": "0x" + V[name]["message"]})
+        assert status == 200 and body["hash"].startswith("0x"), name
+    assert [m.hex() for m in SUBMITTED] == [V[n]["message"] for n in ("like", "follow", "unfollow")]
+    # Casts, recasts and junk stay out.
+    for name in ("cast_simple", "cast_remove", "unrecast", "key_add"):
+        status, _, body = _post(site.app, "/api/submit", {"message": V[name]["message"]})
+        assert status == 400 and "only relays follows and likes" in body["error"], name
+    assert _post(site.app, "/api/submit", {"message": "zz"})[0] == 400
+    assert _post(site.app, "/api/submit", {"message": "0a" + "ff" * 40})[0] == 400
+    assert _post(site.app, "/api/submit", {"message": "00" * 2000})[0] == 400
+    assert asgi(site.app, "GET", "/api/submit")[0] == 405
+    assert len(SUBMITTED) == 3
+
+
+def test_connect_rate_limits_per_ip():
+    from phunk.connect import RateLimit
+
+    limit = RateLimit(2, 60)
+    assert limit.allow("a", 0) and limit.allow("a", 1) and not limit.allow("a", 2)
+    assert limit.allow("b", 2)  # per IP
+    assert limit.allow("a", 61.5)  # the window moves on
+
+
+def test_page_signs_follows_and_likes_like_the_official_library():
+    """fc.js builds byte-identical messages to tests/vectors/write.json (tests/js/fc_test.mjs)."""
+    import shutil
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("node is not installed")
+    out = subprocess.run([node_bin, str(ROOT / "tests" / "js" / "fc_test.mjs")], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.count("ok ") >= 9
