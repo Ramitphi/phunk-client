@@ -10,7 +10,14 @@
 <meta name="fc:miniapp" content='{"version":"1","imageUrl":"https://__MINIAPP_DOMAIN__/img/embed.png","button":{"title":"See your people","action":{"type":"launch_miniapp","name":"phunk","url":"https://__MINIAPP_DOMAIN__/","splashImageUrl":"https://__MINIAPP_DOMAIN__/img/splash.png","splashBackgroundColor":"#f5f1ea"}}}'>
 <meta name="fc:frame" content='{"version":"1","imageUrl":"https://__MINIAPP_DOMAIN__/img/embed.png","button":{"title":"See your people","action":{"type":"launch_frame","name":"phunk","url":"https://__MINIAPP_DOMAIN__/","splashImageUrl":"https://__MINIAPP_DOMAIN__/img/splash.png","splashBackgroundColor":"#f5f1ea"}}}'>
 <!-- Analytics: onedollarstats.com, a dashboard per domain (phunk.social, miniapp.phunk.social).
-     No cookies; query strings are dropped, so looked-up usernames are never sent. -->
+     No cookies; query strings are dropped, so looked-up usernames are never sent.
+     Its script drops a visit as headless when the browser says "Chrome" but has no
+     window.chrome. Android WebViews are like that, and Farcaster clients open the mini
+     app in one, so every mini app visit on Android was dropped. An empty window.chrome
+     there (set before the script runs) lets those visits count. -->
+<script>
+  if (/Android/.test(navigator.userAgent) && /Chrome\//.test(navigator.userAgent) && !window.chrome) window.chrome = {};
+</script>
 <script defer src="https://assets.onedollarstats.com/stonks.js"></script>
 <!-- Vercel Web Analytics: privacy-friendly, real-time traffic insights -->
 <script>

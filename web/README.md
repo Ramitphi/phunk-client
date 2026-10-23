@@ -178,6 +178,12 @@ local `phunk ui` never loads it, and it ignores localhost anyway.
   never a username, fid or cast text.
 - The page's CSP allows `assets.onedollarstats.com` (the script) and
   `collector.onedollarstats.com` (where it sends events), in `vercel.json`.
+- The script drops a visit as a headless browser when it says "Chrome" but
+  has no `window.chrome`. Android WebViews are like that, and Farcaster
+  clients open the mini app in one. So `web/head.html` sets an empty
+  `window.chrome` on Android before the script loads; without it, the
+  `miniapp.phunk.social` dashboard misses every Android visit. Other bot
+  checks (webdriver, headless user agents) still apply.
 
 ### Product events
 
