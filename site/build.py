@@ -654,6 +654,9 @@ def build() -> None:
         page.headings = r.headings
         if page.out == "tutorial.html":
             body = add_asides(body, by_slug, page)
+            # Links to the writing chapter work on GitHub (one file); on the
+            # site that chapter is writing.html.
+            body = re.sub(r'href="#10-writing[^"]*"', 'href="writing.html"', body)
         elif page.out == "writing.html":
             body = aside_html(WRITING_ASIDES, by_slug, page) + body
         body = body.replace("<!-- concepts -->", concept_list(concepts, page))

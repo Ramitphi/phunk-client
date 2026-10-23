@@ -286,11 +286,16 @@ async for like in hub.reactions(3, "like", limit=10):
 
 This is the part most APIs hide. Every message carries a `signer`, the
 ed25519 public key that signed it. People don't sign with their wallet.
-Each app they log into asks them to add a new key for that app, on-chain,
-through Farcaster's KeyGateway contract on Optimism. The add event records
-**which app asked**.
+Each app they log into asks them to add a new key for that app, and the
+key's add record names **which app asked**. There are two ways to add one:
 
-The node serves those events:
+- **On-chain**, through Farcaster's KeyGateway contract on Optimism. Most
+  existing keys were made this way. It costs a small transaction.
+- **Gasless**, as a signed `KEY_ADD` message sent to any node. No
+  transaction. This is what [step 10](#10-writing-app-keys-casts-follows)
+  uses. These keys are covered [below](#which-key-is-whose).
+
+On-chain keys come with an event the node serves:
 
 ```sh
 curl -s "https://haatz.quilibrium.com/v1/onChainEventsByFid?fid=3&event_type=EVENT_TYPE_SIGNER"
@@ -349,8 +354,10 @@ async for cast in hub.casts(3, limit=20):
     print(await hub.app_name(app), cast.text[:50])
 ```
 
-`hub.keys(fid)` gives the whole history, including removals. Some things to
-know when reading it:
+### Which key is whose
+
+`hub.keys(fid)` gives the whole history, on-chain and gasless, including
+removals. Some things to know when reading it:
 
 - **REMOVE events carry no metadata.** Match them to the ADD with the same key.
 - **Off-chain ("gasless") keys** have no on-chain event at all. The node lists
@@ -692,8 +699,9 @@ A read node still accepts writes. Send a signed message to
 [gossips it to the validators](https://snapchain.farcaster.xyz/node-types#message-submission-and-the-mempool).
 It keeps no copy. The message lands in a block once a validator picks it
 up. If the gossip is lost, the message is gone, so check that it arrived
-and resubmit if not. `phunk` only reads, so this matters only when you
-start writing.
+and resubmit if not. This is the path `phunk post`, `like` and `follow`
+take in [step 10](#10-writing-app-keys-casts-follows): your client sends to
+your own node, and your node passes it on.
 
 That's the whole stack: a node, an HTTP API, and a few traps to avoid.
 Everything else (feeds, search, recommendations, graph analysis) is
@@ -1038,11 +1046,11 @@ from it:
 
 ```sh
 # whom fid 3 follows, newest first (repeat for a sample of them)
-curl "https://haatz.quilibrium.com/v1/linksByFid?fid=3&link_type=follow&reverse=true&pageSize=300"
+curl -s "https://haatz.quilibrium.com/v1/linksByFid?fid=3&link_type=follow&reverse=true&pageSize=300"
 # fid 3's latest casts: their parentUrl values are channels
-curl "https://haatz.quilibrium.com/v1/castsByFid?fid=3&reverse=true&pageSize=100"
+curl -s "https://haatz.quilibrium.com/v1/castsByFid?fid=3&reverse=true&pageSize=100"
 # who posts in /politics lately
-curl "https://haatz.quilibrium.com/v1/castsByParent?url=https://warpcast.com/~/channel/politics&reverse=true&pageSize=100"
+curl -s "https://haatz.quilibrium.com/v1/castsByParent?url=https://warpcast.com/~/channel/politics&reverse=true&pageSize=100"
 ```
 
 `phunk.recommend.suggest` does both and scores plainly: one point per
