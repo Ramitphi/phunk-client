@@ -77,6 +77,9 @@ function toast(msg, ms = 4000) {
   const t = $("#toast");
   t.replaceChildren(...codeify(msg));
   t.hidden = false;
+  t.classList.remove("fx-in");
+  t.getBoundingClientRect(); // restart the animation
+  t.classList.add("fx-in");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
@@ -84,6 +87,185 @@ function toast(msg, ms = 4000) {
 // "`phunk key add`" -> <code>phunk key add</code>
 function codeify(text) {
   return String(text).split("`").map((part, i) => (i % 2 ? h("code", {}, part) : part));
+}
+
+// ------------------------------------------------------------- tap cues
+// The launch video's cues, in the app: a ring where you tap, the button
+// springs into its new state, confetti for a follow, hearts for a like,
+// bills out of the money gun. "Reduce motion" turns the movement off.
+// Each cue has a haptic too: the Farcaster client's, where it has them,
+// else the phone's vibration on the plain site (Android browsers).
+
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// The same feel as a vibration pattern, in ms.
+const VIBRATE = { tap: 8, heavy: 24, pick: 5, success: [12, 60, 20], warning: [20, 60, 20], error: [30, 50, 30, 50, 30] };
+let hostHaptics = null; // a promise: can this client do haptics? asked once
+
+// "tap" (light), "heavy", "pick" (a selection tick), or a notification:
+// "success", "warning", "error".
+function buzz(kind) {
+  if (!miniapp) {
+    try { if (navigator.vibrate) navigator.vibrate(VIBRATE[kind] || 8); } catch { /* not here */ }
+    return;
+  }
+  hostHaptics = hostHaptics || Promise.resolve(miniapp.getCapabilities())
+    .then((c) => c.some((x) => x.startsWith("haptics."))).catch(() => false);
+  hostHaptics.then((ok) => {
+    if (!ok) return;
+    const hx = miniapp.haptics;
+    const p = kind === "tap" ? hx.impactOccurred("light")
+      : kind === "heavy" ? hx.impactOccurred("heavy")
+      : kind === "pick" ? hx.selectionChanged() : hx.notificationOccurred(kind);
+    return p;
+  }).catch(() => {});
+}
+
+// A ring that grows and fades where the finger was (or mid-button, from a keyboard).
+function ripple(ev, el) {
+  if (calm()) return;
+  const r = el.getBoundingClientRect();
+  const pointer = ev && ev.detail > 0 && (ev.clientX || ev.clientY);
+  const ring = h("span", { class: "fx-ripple", "aria-hidden": "true" });
+  ring.style.left = `${pointer ? ev.clientX : r.left + r.width / 2}px`;
+  ring.style.top = `${pointer ? ev.clientY : r.top + r.height / 2}px`;
+  document.body.append(ring);
+  setTimeout(() => ring.remove(), 700);
+}
+
+// Spring into a new state.
+function pop(el) {
+  if (calm() || !el) return;
+  el.classList.remove("fx-pop");
+  el.getBoundingClientRect(); // restart the animation
+  el.classList.add("fx-pop");
+  setTimeout(() => el.classList.remove("fx-pop"), 500);
+}
+
+// A follow, a like, a recast: pop, a burst, and a "done" buzz.
+function cheer(el, kind = "confetti") {
+  pop(el);
+  burst(kind, el, kind === "hearts" ? 9 : 18);
+  buzz("success");
+}
+
+// Particles on one canvas over the page, only while there are some.
+let fxLayer = null;
+const fxParts = [];
+
+// kind: "confetti", "hearts" or "bills"; from: an element or { x, y } on screen.
+function burst(kind, from, n) {
+  if (calm() || !from) return;
+  let x = from.x, y = from.y;
+  if (from instanceof Element) {
+    const r = from.getBoundingClientRect();
+    if (!r.width) return;
+    x = r.left + r.width / 2;
+    y = r.top + r.height / 2;
+  }
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  const edge = v("--edge");
+  const colors = [v("--cta"), edge, v("--hl"), "#fff4cc", "#28d02c", "#fffdf9", v("--red"), "#8ccbff"];
+  const font = v("--display");
+  const now = performance.now();
+  for (let i = 0; i < n; i++) {
+    const R = Math.random;
+    const p = { kind, x, y, edge, font, t0: now, rot: R() * 6, seed: R() };
+    if (kind === "confetti") {
+      const a = R() * Math.PI * 2, sp = 140 + R() * 380;
+      Object.assign(p, { life: 1.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 240, spin: (R() - 0.5) * 16,
+        size: 7 + R() * 8, color: colors[i % colors.length], shape: i % 3 });
+    } else if (kind === "hearts") {
+      Object.assign(p, { life: 1.3, vx: (R() - 0.5) * 220, vy: -230 - R() * 230, size: 12 + R() * 8,
+        color: v("--red"), rot: (R() - 0.5) * 0.8 });
+    } else {
+      const a = -1.15 + R() * 1.3, sp = 380 + R() * 380;
+      Object.assign(p, { life: 1.8, t0: now + i * 55, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: a,
+        spin: (R() - 0.5) * 9, size: 0.8 + R() * 0.6 });
+    }
+    fxParts.push(p);
+  }
+  if (!fxLayer) {
+    fxLayer = h("canvas", { class: "fx-layer", "aria-hidden": "true" });
+    document.body.append(fxLayer);
+    requestAnimationFrame(fxFrame);
+  }
+}
+
+function fxFrame(now) {
+  const dpr = window.devicePixelRatio || 1, w = window.innerWidth, ht = window.innerHeight;
+  if (fxLayer.width !== Math.round(w * dpr) || fxLayer.height !== Math.round(ht * dpr)) {
+    fxLayer.width = Math.round(w * dpr);
+    fxLayer.height = Math.round(ht * dpr);
+  }
+  const ctx = fxLayer.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, ht);
+  for (let i = fxParts.length - 1; i >= 0; i--) {
+    const p = fxParts[i], dt = (now - p.t0) / 1000;
+    if (dt > p.life) { fxParts.splice(i, 1); continue; }
+    if (dt >= 0) drawPart(ctx, p, dt);
+  }
+  if (fxParts.length) requestAnimationFrame(fxFrame);
+  else { fxLayer.remove(); fxLayer = null; }
+}
+
+function drawPart(ctx, p, dt) {
+  ctx.save();
+  ctx.strokeStyle = p.edge;
+  ctx.lineJoin = "round";
+  if (p.kind === "confetti") {
+    const d = (1 - Math.exp(-2.6 * dt)) / 2.6; // air slows them down
+    ctx.translate(p.x + p.vx * d, p.y + p.vy * d + 380 * dt * dt);
+    ctx.rotate(p.rot + p.spin * dt);
+    ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.5);
+    ctx.fillStyle = p.color;
+    ctx.lineWidth = 1.5;
+    const s = p.size;
+    if (p.shape === 0) { ctx.fillRect(-s / 2, -s / 4, s, s / 2); ctx.strokeRect(-s / 2, -s / 4, s, s / 2); }
+    else if (p.shape === 1) { ctx.beginPath(); ctx.arc(0, 0, s / 2.4, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    else {
+      ctx.font = `800 ${Math.round(s * 1.6)}px ${p.font}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 2;
+      ctx.strokeText("φ", 0, 0);
+      ctx.fillText("φ", 0, 0);
+    }
+  } else if (p.kind === "hearts") {
+    const s = p.size;
+    ctx.translate(p.x + p.vx * dt, p.y - 16 + p.vy * dt + 60 * dt * dt);
+    ctx.rotate(p.rot);
+    ctx.globalAlpha = Math.max(0, Math.min(1, 1.3 - dt));
+    ctx.beginPath();
+    ctx.moveTo(0, s * 0.35);
+    ctx.bezierCurveTo(-s * 0.9, -s * 0.25, -s * 0.45, -s * 0.95, 0, -s * 0.45);
+    ctx.bezierCurveTo(s * 0.45, -s * 0.95, s * 0.9, -s * 0.25, 0, s * 0.35);
+    ctx.closePath();
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    const bw = 40 * p.size, bh = 22 * p.size;
+    ctx.translate(p.x + p.vx * dt, p.y + p.vy * dt + 700 * dt * dt);
+    ctx.rotate(p.rot + p.spin * dt);
+    ctx.globalAlpha = Math.min(1, (p.life - dt) / 0.4);
+    ctx.lineWidth = 2;
+    ctx.fillStyle = "#bfefc0";
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 4); else ctx.rect(-bw / 2, -bh / 2, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#f7d15f";
+    ctx.fillRect(-bw * 0.32, -bh / 2 + 1, bw * 0.1, bh - 2);
+    ctx.strokeStyle = "#141414";
+    ctx.beginPath();
+    ctx.arc(0, 0, bh * 0.24, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function ago(ts) {
@@ -186,12 +368,34 @@ async function canSendToken() {
   try { return (await miniapp.getCapabilities()).includes("actions.sendToken"); } catch (e) { return false; }
 }
 
+// Where the bills come out: the money gun's nose (viewBox 280 x 184).
+function nozzle() {
+  const gun = document.querySelector("#tip-pane .money-gun");
+  const r = gun && gun.getBoundingClientRect();
+  return r && r.width ? { x: r.left + (r.width * 200) / 280, y: r.top + (r.height * 90) / 184 } : null;
+}
+
+// Fire: the gun kicks back, its own bills fly again, and a few more follow.
+function fire(bills) {
+  const gun = document.querySelector("#tip-pane .money-gun");
+  if (gun && !calm()) {
+    gun.classList.remove("fx-recoil");
+    gun.classList.add("fx-reload");
+    gun.getBoundingClientRect(); // restart the bills' animation
+    gun.classList.remove("fx-reload");
+    gun.classList.add("fx-recoil");
+    setTimeout(() => gun.classList.remove("fx-recoil"), 400);
+  }
+  burst("bills", nozzle(), bills);
+}
+
 async function sendTip(units, amount) {
   const tip = state.me.tip;
   track("Tip tapped", { amount });
+  fire(10);
   try {
     const r = await miniapp.actions.sendToken({ token: USDC_BASE, amount: units, recipientFid: Number(tip.fid) });
-    if (r && r.success) { track("Tip sent", { amount }); toast("Thank you! 💸"); }
+    if (r && r.success) { track("Tip sent", { amount }); fire(24); buzz("success"); toast("Thank you! 💸"); }
     else if (r && r.reason === "send_failed") {
       track("Tip failed", { amount, reason: "send failed" });
       toast("The send didn't go through. Nothing was sent.");
@@ -244,7 +448,7 @@ async function renderTip() {
     slider.setAttribute("aria-valuetext", `$${d}`);
     slider.style.setProperty("--fill", `${(100 * Number(slider.value)) / (SLIDER.length - 1)}%`);
   };
-  slider.addEventListener("input", show);
+  slider.addEventListener("input", () => { show(); buzz("pick"); });
   show();
   const form = h("form", { class: "tip-custom" },
     h("div", { class: "tip-range" }, slider,
@@ -288,6 +492,8 @@ async function renderAddApp() {
     track("Add phunk");
     try {
       await miniapp.actions.addMiniApp();
+      burst("confetti", add, 30);
+      buzz("success");
       box.replaceChildren();
       toast("Added. You'll get one short note a week.");
     } catch (e) {
@@ -394,6 +600,8 @@ function connectSheet(then) {
           store.set(KEY_STORE, k);
           track("Connect done");
           close();
+          burst("confetti", { x: window.innerWidth / 2, y: window.innerHeight * 0.4 }, 60);
+          buzz("success");
           toast("phunk is connected 🫡");
           renderAccount();
           return then && then();
@@ -402,6 +610,7 @@ function connectSheet(then) {
       if (open) { status.textContent = "Still waiting. Approve phunk in Farcaster, then tap again."; go.disabled = false; }
     } catch (e) {
       track("Connect failed", { reason: failure(e) });
+      buzz("error");
       const k = savedKey();
       if (k && k.state !== "completed") store.set(KEY_STORE, Object.assign(k, { state: "failed" }));
       status.textContent = `Couldn't connect: ${e.message}`;
@@ -537,8 +746,8 @@ function castCard(c) {
           like.classList.toggle("on", !on);
           like.setAttribute("aria-pressed", String(!on));
           like.textContent = on ? "Like" : "Liked";
-          if (on) track("Unliked"); else track("Liked");
-        } catch (e) { toast(e.message); } finally { like.disabled = false; }
+          if (on) { track("Unliked"); pop(like); } else { track("Liked"); cheer(like, "hearts"); }
+        } catch (e) { buzz("error"); toast(e.message); } finally { like.disabled = false; }
       }));
       return [like, open];
     }
@@ -553,7 +762,8 @@ function castCard(c) {
         btn.classList.toggle("on", !on);
         btn.setAttribute("aria-pressed", String(!on));
         btn.textContent = !on ? (kind === "like" ? "Liked" : "Recasted") : (kind === "like" ? "Like" : "Recast");
-      } catch (e) { toast(e.message); } finally { btn.disabled = false; }
+        if (on) pop(btn); else cheer(btn, kind === "like" ? "hearts" : "confetti");
+      } catch (e) { buzz("error"); toast(e.message); } finally { btn.disabled = false; }
     });
     return btn;
   };
@@ -591,6 +801,8 @@ function renderApps() {
     const cb = h("input", { type: "checkbox", value: a.name });
     cb.checked = !state.hidden.has(a.name.toLowerCase());
     cb.addEventListener("change", () => {
+      pop(cb.closest("label"));
+      buzz("pick");
       const k = a.name.toLowerCase();
       if (cb.checked) state.hidden.delete(k); else state.hidden.add(k);
       track("App filter", { change: cb.checked ? "show" : "hide" });
@@ -714,9 +926,10 @@ function personCard(p, i = 0) {
           p.following = true;
           follow.textContent = "Following";
           follow.classList.add("following");
+          cheer(follow);
           track("Followed", card);
           toast(`Following ${handle(p)}.`);
-        } catch (e) { toast(e.message); follow.disabled = false; }
+        } catch (e) { buzz("error"); toast(e.message); follow.disabled = false; }
       });
     }
     if (isPublic()) { track("Follow", card); return viewProfile(p); }
@@ -727,8 +940,9 @@ function personCard(p, i = 0) {
       p.following = true;
       follow.textContent = "Following";
       follow.classList.add("following");
+      cheer(follow);
       toast(`Following ${handle(p)}.`);
-    } catch (e) { toast(e.message); follow.disabled = false; }
+    } catch (e) { buzz("error"); toast(e.message); follow.disabled = false; }
   });
 
   const latest = p.latest && p.latest[0];
@@ -884,13 +1098,28 @@ function setTab(name) {
   // never opens halfway down because the last one was scrolled.
   const scroll = state.scroll || (state.scroll = {});
   const switching = name !== state.tab;
+  const from = state.tab;
   if (switching && state.tab) scroll[state.tab] = window.scrollY;
   state.tab = name;
   for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   for (const p of document.querySelectorAll(".pane")) p.classList.toggle("active", p.dataset.pane === name);
   if (name === "casts" && !state.feedLoaded) { state.feedLoaded = true; loadFeed(true); }
   if (switching) window.scrollTo(0, scroll[name] || 0);
+  if (switching && from) slideIn(name, from);
   if (name === "compose") $("#compose-text").focus({ preventScroll: true });
+}
+
+// The new tab slides in from the side of its button, as in the launch video.
+const TAB_ORDER = ["people", "casts", "compose", "you", "tip"];
+function slideIn(name, from) {
+  buzz("pick");
+  const pane = document.querySelector(`.pane[data-pane="${name}"]`);
+  if (!pane || calm()) return;
+  const cls = TAB_ORDER.indexOf(name) > TAB_ORDER.indexOf(from) ? "fx-from-right" : "fx-from-left";
+  pane.classList.remove("fx-from-right", "fx-from-left");
+  pane.getBoundingClientRect();
+  pane.classList.add(cls);
+  setTimeout(() => pane.classList.remove(cls), 400);
 }
 
 // Channels seen in casts and people's previews, as one-tap picks in Compose.
@@ -1070,6 +1299,16 @@ async function init() {
   $("#apps-all").addEventListener("click", () => setAllApps(true));
   $("#apps-none").addEventListener("click", () => setAllApps(false));
   $("#people-refresh").addEventListener("click", () => { track("Refresh", { pane: "people" }); loadPeople(true); });
+
+  // Tap cues on the action buttons: a ring where you tap, and a light tap back.
+  document.addEventListener("click", (ev) => {
+    const b = ev.target.closest && ev.target.closest(
+      ".pactions button, .actions button, .tip-grid button, .tip-custom button, .tip-nudge button, .connect-sheet .cta");
+    if (!b || b.disabled) return;
+    ripple(ev, b);
+    // The money gun kicks; everything else is a light tap.
+    buzz(b.closest(".tip-grid, .tip-custom") ? "heavy" : "tap");
+  }, true);
 
   // Inside a host, links leave through it (frames can't always open tabs).
   document.addEventListener("click", (ev) => {

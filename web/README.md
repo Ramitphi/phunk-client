@@ -104,6 +104,11 @@ the page:
 - once someone's people are on screen, offers **Add phunk**, which keeps it
   in their apps and turns on the weekly note (asked at most twice, never on
   the plain site),
+- gives taps the launch video's cues: a ring where you tap, confetti on a
+  follow, hearts on a like, bills out of the money gun, tabs that slide
+  in. Each one has a haptic too: the client's own (`sdk.haptics`, where
+  it has them), or the phone's vibration on the plain site. "Reduce
+  motion" turns the movement off and keeps the haptics,
 - hides the client's splash screen once the page is up.
 
 A cast with a phunk.social link shows a card with a **See your people**
