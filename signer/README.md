@@ -27,6 +27,10 @@ curl -s -X POST https://<your-signer>/api/sign-key-request \
 
 An approval is valid for one hour.
 
+The phunk.social mini app uses it too: its `/api/connect` asks the signer
+to approve the key a phone makes, so people can follow and like from the
+mini app (`web/README.md`).
+
 ## Deploy on Vercel
 
 The signer is its **own Vercel project**, apart from phunk.social. Vercel

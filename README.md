@@ -188,10 +188,12 @@ Without a key it is read-only and never asks for a seed phrase. It binds
 to 127.0.0.1 and refuses cross-origin POSTs. Plain HTML, CSS and JS, no
 build step. See [the tutorial](docs/TUTORIAL.md#11-a-web-client-phunk-ui).
 
-A hosted, read-only copy runs at [phunk.social](https://phunk.social): type
-a username, and Follow and Open take you to Farcaster. Inside a Farcaster
-client it is a mini app that shows your own people right away, and people
-who add it can get one short note a week about their people. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
+A hosted copy runs at [phunk.social](https://phunk.social): type a
+username, and Follow and Open take you to Farcaster. Inside a Farcaster
+client it is a mini app that shows your own people right away. Approve
+phunk once in your Farcaster app and you can follow and like from it, with
+no seed phrase. People who add it can get one short note a week about their
+people. `phunk ui --public` runs the same mode locally. See [`web/README.md`](web/README.md) to deploy
 it on Vercel.
 
 ## Which node

@@ -18,15 +18,16 @@ licensed, public.
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
 | `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |
-| `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS |
-| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode, also a Farcaster mini app at miniapp.phunk.social (manifest and images in `web/public/`), with OneDollarStats analytics on the hosted page only; see `web/README.md` |
+| `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS. `static/fc.js` builds and signs follows and likes in the page (mini app) |
+| `src/phunk/connect.py` | Follow and like in the mini app: `start` / `status` (a signed key request through `signer/` and Farcaster's API) and `check` (the relay passes only follows and likes) |
+| `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode plus `/api/connect` and `/api/submit` for follow and like, also a Farcaster mini app at miniapp.phunk.social (manifest and images in `web/public/`), with OneDollarStats analytics on the hosted page only; see `web/README.md` |
 | `src/phunk/__main__.py` | The `phunk` CLI |
 | `docs/TUTORIAL.md` | Step-by-step tutorial; every snippet should run as written |
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `signer/` | The app's signing service, its own Vercel project at sign.phunk.social (ASGI `app`, entrypoint in `signer/pyproject.toml`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only, kept out of the phunk.social project |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
 | `scripts/` | `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
-| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py` run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only) |
+| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py` run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only); `tests/js/fc_test.mjs` checks `fc.js` against the vectors (run by `test_web.py` when `node` is there) |
 | `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
 ## Commands

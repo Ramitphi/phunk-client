@@ -175,8 +175,10 @@ class UI:
     """
 
     def __init__(self, hub: Hub, *, fid: int | None = None, key=None, public: bool = False,
-                 casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None):
+                 casting: bool = CASTING, tip_fid: int | None = None, vote_rpc: str | None = None,
+                 connect: bool = False):
         self.hub = hub
+        self.connect = connect  # the hosted site can relay follows and likes signed in the page
         self.vote_rpc = vote_rpc  # Base JSON-RPC for the "voted NS" badge; None: no badge
         self.tip_fid = tip_fid
         self.fid = fid
@@ -358,7 +360,7 @@ class UI:
         # The hosted site keeps its node's address to itself.
         out = {"fid": self.fid, "can_write": self.writer is not None, "can_cast": self.casting,
                "node": None if self.public else self.hub.url,
-               "public": self.public, "help": hint}
+               "public": self.public, "help": hint, "can_connect": self.connect}
         if self.fid is not None:
             out["user"] = self.user_json(await self.user(self.fid))
         if self.tip_fid is not None:

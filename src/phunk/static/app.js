@@ -304,6 +304,121 @@ function viewCast(c) {
   openFarcaster(castPath(c));
 }
 
+// ------------------------------------------------- follow and like, in the mini app
+// The person approves a phunk key once in their Farcaster app; after that
+// the page signs follows and likes with it (fc.js) and the site relays them
+// to the node. The key is made here and never leaves this browser. Off the
+// mini app, or when the site has no signer, Follow and Like open Farcaster.
+
+const NOBLE_ED25519 = "https://esm.sh/@noble/ed25519@2.2.3";
+const NOBLE_BLAKE3 = "https://esm.sh/@noble/hashes@1.7.1/blake3";
+const KEY_STORE = "phunk-key"; // { fid, priv, pub, token, url, state, at }
+const liked = new Set(store.sget("liked", []));
+let cryptoLibs = null;
+
+async function libs() {
+  if (!cryptoLibs) {
+    const [ed, b3] = await Promise.all([import(NOBLE_ED25519), import(NOBLE_BLAKE3)]);
+    cryptoLibs = { ed, blake3: b3.blake3 };
+  }
+  return cryptoLibs;
+}
+const viewerFid = () => (miniapp && state.me && state.me.user ? Number(state.me.fid) : null);
+const canConnect = () => !!(isPublic() && state.me.can_connect && viewerFid() && window.phunkMsg);
+function savedKey() {
+  const k = store.get(KEY_STORE, null);
+  return k && k.fid === viewerFid() ? k : null;
+}
+const connected = () => { const k = savedKey(); return !!(k && k.state === "completed"); };
+
+// Sign one follow / unfollow / like / unlike and send it. args: the target.
+async function act(kind, ...args) {
+  const k = savedKey();
+  const key = { priv: phunkMsg.hexToBytes(k.priv), pub: phunkMsg.hexToBytes(k.pub) };
+  const msg = await phunkMsg[kind](viewerFid(), ...args, key, await libs());
+  return api("/api/submit", { message: phunkMsg.bytesToHex(msg) });
+}
+
+// Run `then` once phunk is connected; ask for the one-time approval first if needed.
+function withKey(then) {
+  if (connected()) return then();
+  connectSheet(then);
+}
+
+function connectSheet(then) {
+  track("Connect shown");
+  const status = h("p", { class: "muted small connect-status" });
+  // Shown once there's an approval link, in case the host didn't open it.
+  const againLink = h("a", { target: "_blank", rel: "noopener" }, "Didn't open? Open the approval");
+  const again = h("p", { class: "small", hidden: true }, againLink);
+  const go = h("button", { type: "button", class: "cta" }, "Approve in Farcaster");
+  const later = h("button", { type: "button", class: "ghost" }, "Not now");
+  const sheet = h("div", { class: "card connect-sheet", role: "dialog", "aria-modal": "true", "aria-label": "Connect phunk" },
+    h("h2", {}, "Follow and like from phunk"),
+    h("p", {}, "Approve phunk once in your Farcaster app. It gives this phone a key that can act on Farcaster for you; phunk only uses it to follow and like."),
+    h("p", { class: "muted small" }, "It can't move funds or change who owns your account. Remove it any time in Farcaster's settings."),
+    status, again, h("div", { class: "row" }, go, later));
+  const shade = h("div", { class: "connect-shade" }, sheet);
+  let open = true;
+  const close = () => { open = false; shade.remove(); };
+  shade.addEventListener("click", (ev) => { if (ev.target === shade) close(); });
+  later.addEventListener("click", () => { track("Connect skipped"); close(); });
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    status.textContent = "Getting phunk ready…";
+    try {
+      let k = savedKey();
+      if (!k || k.state === "failed" || (k.at && Date.now() - k.at > 50 * 60 * 1000 && k.state !== "completed")) {
+        const { ed } = await libs();
+        const priv = ed.utils.randomPrivateKey();
+        k = { fid: viewerFid(), priv: phunkMsg.bytesToHex(priv), pub: phunkMsg.bytesToHex(await ed.getPublicKeyAsync(priv)), state: "new" };
+      }
+      if (!k.token) {
+        const r = await api("/api/connect", { key: "0x" + k.pub });
+        Object.assign(k, { token: r.token, url: r.url || r.deeplink, state: "pending", at: Date.now() });
+        store.set(KEY_STORE, k);
+      }
+      status.textContent = "Approve phunk in Farcaster, then come back here.";
+      againLink.href = k.url;
+      again.hidden = false;
+      try { await miniapp.actions.openUrl(k.url); } catch { /* the link above still works */ }
+      // Wait for the approval: about 10 minutes, every 2 seconds.
+      for (let i = 0; i < 300 && open; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        let s;
+        try { s = await api(`/api/connect?token=${encodeURIComponent(k.token)}`); } catch (e) { if (e.status === 404) throw e; continue; }
+        if (s.state === "approved") status.textContent = "Approved. Adding the key to your account…";
+        if (s.state === "completed") {
+          if (s.fid && s.fid !== viewerFid()) throw new Error("That approval came from another account.");
+          k.state = "completed";
+          store.set(KEY_STORE, k);
+          track("Connect done");
+          close();
+          toast("phunk is connected 🫡");
+          renderAccount();
+          return then && then();
+        }
+      }
+      if (open) { status.textContent = "Still waiting. Approve phunk in Farcaster, then tap again."; go.disabled = false; }
+    } catch (e) {
+      track("Connect failed", { reason: failure(e) });
+      const k = savedKey();
+      if (k && k.state !== "completed") store.set(KEY_STORE, Object.assign(k, { state: "failed" }));
+      status.textContent = `Couldn't connect: ${e.message}`;
+      go.disabled = false;
+    }
+  });
+  document.body.append(shade);
+  go.focus();
+}
+
+function forgetKey() {
+  track("Disconnect");
+  try { localStorage.removeItem(KEY_STORE); } catch { /* private mode */ }
+  toast("phunk forgot its key on this phone. To remove it from your account too, see Farcaster's settings.", 7000);
+  renderAccount();
+}
+
 // Reply in the host's composer when we can; on the web, open the cast.
 function replyTo(c, text) {
   if (miniapp) return miniapp.actions.composeCast({ text: text || "", parent: { type: "cast", hash: c.hash } });
@@ -361,7 +476,7 @@ function composePath(text, channel) {
 // First release: follow and like. Casting, replies and recasts are coming soon.
 const canCast = () => !!(state.me && state.me.can_cast);
 
-const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and like") : "read-only");
+const power = (me) => (me.can_write ? (canCast() ? "can post" : "can follow and like") : connected() ? "can follow and like" : "read-only");
 
 function soon() {
   track("Casting soon");
@@ -408,7 +523,24 @@ function castCard(c) {
     if (isPublic()) {
       const open = h("button", { type: "button", class: "ghost open", title: "Open this cast in Farcaster" }, "Open");
       open.addEventListener("click", () => { track("Open"); viewCast(c); });
-      return open;
+      if (kind !== "like" || !canConnect()) return open;
+      const id = `${c.fid}:${c.hash}`;
+      const like = h("button", { type: "button", class: `ghost like${liked.has(id) ? " on" : ""}`, "aria-pressed": String(liked.has(id)) },
+        liked.has(id) ? "Liked" : "Like");
+      like.addEventListener("click", () => withKey(async () => {
+        const on = liked.has(id);
+        like.disabled = true;
+        try {
+          await act(on ? "unlike" : "like", c.fid, c.hash);
+          on ? liked.delete(id) : liked.add(id);
+          store.sset("liked", [...liked]);
+          like.classList.toggle("on", !on);
+          like.setAttribute("aria-pressed", String(!on));
+          like.textContent = on ? "Like" : "Liked";
+          if (on) track("Unliked"); else track("Liked");
+        } catch (e) { toast(e.message); } finally { like.disabled = false; }
+      }));
+      return [like, open];
     }
     const btn = h("button", { type: "button", class: `ghost ${kind}`, "aria-pressed": "false" },
       kind === "like" ? "Like" : "Recast");
@@ -571,8 +703,22 @@ function personCard(p, i = 0) {
 
   const follow = h("button", { type: "button", class: p.following ? "following" : null }, p.following ? "Following" : "Follow");
   if (p.following) follow.disabled = true;
-  if (isPublic()) follow.title = `Open ${handle(p)} in Farcaster`;
+  if (isPublic() && !canConnect()) follow.title = `Open ${handle(p)} in Farcaster`;
   follow.addEventListener("click", async () => {
+    if (isPublic() && canConnect()) {
+      track("Follow", card);
+      return withKey(async () => {
+        follow.disabled = true;
+        try {
+          await act("follow", p.fid);
+          p.following = true;
+          follow.textContent = "Following";
+          follow.classList.add("following");
+          track("Followed", card);
+          toast(`Following ${handle(p)}.`);
+        } catch (e) { toast(e.message); follow.disabled = false; }
+      });
+    }
     if (isPublic()) { track("Follow", card); return viewProfile(p); }
     if (!canAct) return needKey();
     follow.disabled = true;
@@ -772,7 +918,13 @@ function renderAccount() {
     rows.push(h("div", { class: "person-row" }, avatar(me.user), h("div", {},
       h("div", { class: "name" }, me.user.display_name || handle(me.user)),
       h("div", { class: "muted mono" }, `${handle(me.user)} · fid ${me.user.fid}`)),
-      h("span", { class: me.can_write ? "chip ok" : "chip warn" }, power(me))));
+      h("span", { class: me.can_write || connected() ? "chip ok" : "chip warn" }, power(me))));
+  }
+  if (canConnect() && connected()) {
+    const forget = h("button", { type: "button", class: "ghost small" }, "Forget");
+    forget.addEventListener("click", forgetKey);
+    rows.push(h("div", { class: "row between small" },
+      h("span", { class: "muted" }, "phunk keeps its key on this phone."), forget));
   }
   if (!viewingSelf()) {
     rows.push(h("p", { class: "muted small" },
