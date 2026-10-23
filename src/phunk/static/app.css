@@ -8,8 +8,11 @@
   --muted: #5e5a54;
   --line: #d5ccbe;
   --edge: #141414;
-  --shadow-color: var(--edge);
-  --shadow: 3px 3px 0 var(--shadow-color);
+  /* Depth: a soft lift for cards and sheets; a 2px ledge under the raised
+     controls (the big buttons, the + tab, the logo sticker, the money gun). */
+  --shadow: 0 1px 2px rgba(20, 20, 20, .05), 0 6px 16px -8px rgba(20, 20, 20, .18);
+  --ledge-color: var(--edge);
+  --ledge: 0 2px 0 var(--ledge-color);
   --cta: #7959ff;
   --cta-deep: #5d42d6;
   --cta-text: #ffffff;
@@ -40,7 +43,8 @@
     --muted: #b5aea4;
     --line: #3a3631;
     --edge: #cfc8bd;
-    --shadow-color: #866aff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 24px -10px rgba(0, 0, 0, .8);
+    --ledge-color: #4b3c9c;
     --cta: #866aff;
     --cta-deep: #6b52e6;
     --tint: #2a2342;
@@ -66,7 +70,8 @@
   --muted: #b5aea4;
   --line: #3a3631;
   --edge: #cfc8bd;
-  --shadow-color: #866aff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 24px -10px rgba(0, 0, 0, .8);
+  --ledge-color: #4b3c9c;
   --cta: #866aff;
   --cta-deep: #6b52e6;
   --tint: #2a2342;
@@ -119,9 +124,9 @@ button.cta {
   font-family: var(--display);
   font-size: 19px; font-weight: 800; letter-spacing: -0.01em;
   padding: 6px 22px; min-height: 46px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--ledge);
 }
-button.cta:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--edge); }
+button.cta:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 0 var(--ledge-color); }
 button.ghost {
   background: var(--card);
   color: var(--text);
@@ -210,7 +215,7 @@ code { font-family: var(--mono); font-size: 13px; }
 .tabs button[aria-selected="true"] { background: var(--tint); color: var(--tint-text); font-weight: 700; }
 .tabs .plus, .tabs .plus[aria-selected="true"] {
   margin-left: auto; background: var(--cta); color: #fff; border: 1.5px solid var(--edge);
-  box-shadow: var(--shadow); font-family: var(--display); font-weight: 800; padding: 4px 18px;
+  box-shadow: var(--ledge); font-family: var(--display); font-weight: 800; padding: 4px 18px;
 }
 .tabs .you-tab { display: none; }
 .tabs button[hidden] { display: none !important; }
@@ -221,7 +226,7 @@ code { font-family: var(--mono); font-size: 13px; }
 .hero { text-align: center; display: grid; justify-items: center; gap: 10px; padding: 24px 8px 20px; }
 .hero h1 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 36px; line-height: 1.04; letter-spacing: -0.04em; }
 .hero p { margin: 0; }
-.logo.big { width: 72px; height: 72px; font-size: 44px; border-width: 2px; box-shadow: var(--shadow); transform: rotate(-12deg); }
+.logo.big { width: 72px; height: 72px; font-size: 44px; border-width: 2px; box-shadow: var(--ledge); transform: rotate(-12deg); }
 .account .person-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .account .name { font-weight: 700; }
 .account p { margin: 10px 0 0; }
@@ -399,7 +404,7 @@ img.avatar { background: var(--chip); }
   background: var(--text); color: var(--bg);
   border: 1.5px solid var(--edge);
   padding: 10px 14px; border-radius: 12px; font-size: 14px; z-index: 10;
-  box-shadow: 3px 3px 0 var(--cta);
+  box-shadow: var(--shadow);
 }
 
 @media (max-width: 800px) {
@@ -431,7 +436,7 @@ img.avatar { background: var(--chip); }
   .tabs .plus, .tabs .plus[aria-selected="true"] {
     flex: 0 0 56px; height: 56px; min-height: 56px; margin: 0 8px; padding: 0; align-self: center;
     background: var(--cta); color: #fff; border: 1.5px solid var(--edge); border-radius: 18px;
-    box-shadow: var(--shadow); transform: rotate(-6deg);
+    box-shadow: var(--ledge); transform: rotate(-6deg);
   }
   .tabs .plus::before { width: 26px; height: 26px; }
   #compose-pane textarea { min-height: 200px; font-size: 18px; }
@@ -450,7 +455,7 @@ img.avatar { background: var(--chip); }
 
 /* The money gun (Tip tab): the You screen's hero with the gun as its sticker,
    then the amounts. The gun takes the theme like the logo does (purple, ink
-   edge, the theme's shadow); the cash and its band keep their colours in both
+   edge, the theme's ledge colour); the cash and its band keep their colours in both
    themes, like the .hl sticker. */
 #tip-pane { max-width: 480px; margin: 0 auto; }
 .tip-hero { padding-top: 4px; }
@@ -459,7 +464,7 @@ img.avatar { background: var(--chip); }
   display: block; width: 100%; max-width: 300px; height: auto; margin-bottom: 4px; overflow: visible;
   fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round;
 }
-.money-gun .mg-shade { fill: var(--shadow-color); stroke: none; }
+.money-gun .mg-shade { fill: var(--ledge-color); stroke: none; }
 .money-gun .mg-gun { fill: var(--cta); stroke: var(--edge); }
 .money-gun .mg-cash { fill: #bfefc0; stroke: var(--edge); }
 .money-gun .mg-band { fill: #f7d15f; stroke: var(--edge); }
@@ -501,11 +506,11 @@ img.avatar { background: var(--chip); }
 }
 .tip-range input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none; width: 26px; height: 26px; margin-top: -10.5px;
-  border-radius: 50%; background: var(--card); border: 2px solid var(--edge); box-shadow: 2px 2px 0 var(--edge);
+  border-radius: 50%; background: var(--card); border: 2px solid var(--edge); box-shadow: 0 1px 3px rgba(20, 20, 20, .25);
 }
 .tip-range input[type="range"]::-moz-range-thumb {
   width: 22px; height: 22px; border-radius: 50%; background: var(--card);
-  border: 2px solid var(--edge); box-shadow: 2px 2px 0 var(--edge);
+  border: 2px solid var(--edge); box-shadow: 0 1px 3px rgba(20, 20, 20, .25);
 }
 .tip-range input[type="range"]:focus-visible { outline: 2px solid var(--cta); outline-offset: 4px; border-radius: 8px; }
 /* Small cards at the end of a screen (the money gun's nudge, Add phunk): a
