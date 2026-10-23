@@ -1200,7 +1200,48 @@ function renderSummary() {
   if (s.not_following) extra.push(`${s.not_following} ${you === "You" ? "you don't follow" : you + " doesn't follow"}`);
   if (extra.length) line += " Of those, " + extra.join("; ") + ".";
   if (s.my_app) line += ` Posting from ${s.my_app === "own key" ? "their own key" : s.my_app}.`.replace("their own", you === "You" ? "your own" : "their own");
-  box.replaceChildren(h("p", {}, line));
+  let share = null;
+  if (shareUrl()) {
+    share = h("button", { type: "button", class: "ghost small share" }, viewingSelf() ? "Share my people" : "Share phunk");
+    share.addEventListener("click", () => { cheer(share); sharePeople(); });
+  }
+  box.replaceChildren(h("p", {}, line), share);
+}
+
+// ------------------------------------------------------------- share
+// A cast with the mini app attached, so whoever sees it can open phunk on
+// their own people. The link is the page's own mini app embed (web/head.html),
+// so local `phunk ui`, which has none, shows no button.
+function shareUrl() {
+  try {
+    const m = document.querySelector('meta[name="fc:miniapp"]');
+    return m ? JSON.parse(m.content).button.action.url : null;
+  } catch { return null; }
+}
+
+function shareText() {
+  if (!viewingSelf()) return `Peeked at ${whoLabel()}'s people on Farcaster 👀 Who do you talk to but don't follow? Find yours:`;
+  const s = state.summary || {};
+  const reconnect = state.cards.filter((c) => c.kind === "reconnect" && !state.dismissed.has(c.fid)).length;
+  const bits = [];
+  if (s.talked_to) bits.push(`talked with ${s.talked_to} people in ${s.days} days`);
+  if (reconnect) bits.push(`${reconnect} to reconnect with`);
+  return `Found my people on Farcaster 🫂${bits.length ? " " + bits.join(", ") + "." : ""} Find yours:`;
+}
+
+async function sharePeople() {
+  const url = shareUrl();
+  if (!url) return;
+  const text = shareText();
+  track("Share", { from: miniapp ? "miniapp" : "web", self: viewingSelf() ? "yes" : "no" });
+  if (miniapp) {
+    // The host's own composer: the person posts it, phunk never sees a key.
+    try { await miniapp.actions.composeCast({ text, embeds: [url] }); } catch { /* not this host */ }
+    return;
+  }
+  const q = new URLSearchParams({ text });
+  q.append("embeds[]", url);
+  window.open(`${FARCASTER}/~/compose?${q}`, "_blank", "noopener,noreferrer");
 }
 
 function renderPeople() {
