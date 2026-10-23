@@ -1432,6 +1432,10 @@ async function init() {
   renderTip();
   $("#lookup-name").value = state.who;
   renderWho();
+  // While approving keys is paused, a key saved before the pause can't be used
+  // here and Forget stays hidden, so drop it instead of leaving it in storage.
+  // (It may still be on the account: Farcaster → Settings → Connected apps.)
+  if (!canConnect()) { try { localStorage.removeItem(KEY_STORE); } catch { /* private mode */ } }
   restoreKey();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) restoreKey(); });
 

@@ -537,3 +537,66 @@ def test_tip_account_is_named_in_me_only_when_set(monkeypatch):
     for bad in ("", "0", "dwr", "-5"):
         monkeypatch.setenv("PHUNK_TIP_FID", bad)
         assert tip_fid_from_env() is None
+
+
+def test_public_feed_takes_only_the_page_windows_and_caps_follows(monkeypatch):
+    import phunk.ui
+
+    monkeypatch.setattr(phunk.ui, "PUBLIC_MAX_FOLLOWS", 2)
+
+    async def test(client, base, calls, submitted):
+        out = []
+        for hours in ("24", "168", "5", "100"):
+            async with client.get(f"{base}/api/feed", params={"who": "me", "hours": hours}) as r:
+                out.append((r.status, await r.json()))
+        return out, calls
+
+    out, calls = run(test, fid=None, public=True)
+    (s24, d24), (s168, d168), (s5, d5), (s100, d100) = out
+    assert s24 == 200 and s168 == 200
+    # Only the 2 most recent follows (alice, bob) are read; carol (3) isn't.
+    assert {c["hash"] for c in d24["casts"]} == {"c1", "c2"} and d24["capped"] is True
+    assert {q["fid"] for p, q in calls if p == "/v1/castsByFid"} == {"1", "2"}
+    assert all(q.get("reverse") == "true" for p, q in calls if p == "/v1/linksByFid")
+    assert (s5, d5) == (400, {"error": "hours must be 6, 24, 72 or 168"})
+    assert (s100, d100) == (400, {"error": "hours must be 6, 24, 72 or 168"})
+
+
+def test_local_feed_keeps_any_window_and_every_follow():
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/feed", params={"hours": "5"}) as r:
+            return r.status, await r.json()
+
+    status, body = run(test)
+    assert status == 200 and body["hours"] == 5 and "capped" not in body
+    assert {c["hash"] for c in body["casts"]} == {"c1", "c2", "c3"}
+
+
+def test_unicode_digits_and_stray_errors_get_plain_words():
+    from phunk.ui import BadRequest, answer
+
+    async def test(client, base, calls, submitted):
+        out = []
+        for path in ("/api/people?who=%C2%B2", "/api/feed?who=me&hours=%D9%A3",
+                     "/api/key?fid=%C2%B2&key=0x" + "ab" * 32):
+            async with client.get(base + path) as r:
+                out.append((r.status, (await r.json())["error"]))
+        return out
+
+    assert run(test, fid=None, public=True) == [
+        (404, "No Farcaster account called @²."),
+        (400, "hours must be a whole number"),
+        (400, "fid must be a positive number"),
+    ]
+
+    async def fails(e):
+        raise e
+
+    async def go():
+        return [await answer(fails(ValueError("invalid literal for int()")), public=True),
+                await answer(fails(ValueError("invalid literal for int()")), public=False),
+                await answer(fails(BadRequest("fid must be a positive number")), public=True)]
+
+    assert asyncio.run(go()) == [(400, {"error": "bad request"}),
+                                 (400, {"error": "invalid literal for int()"}),
+                                 (400, {"error": "fid must be a positive number"})]

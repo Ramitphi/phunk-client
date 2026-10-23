@@ -124,6 +124,8 @@ for phishing. So `SIGNER_URL` in `api/index.py` is set to `None` and
 profile and Open opens the cast in Farcaster (with confetti), and
 `/api/connect` and `/api/submit` answer 503. The signer refuses
 `"onchain": true`. Restore the commented lines there to turn it back on.
+While it's off, the page also deletes any key saved before the pause
+(`phunk-key` in `localStorage`).
 
 The design below is kept for when it returns. With a signer set up, people
 can follow and like right in the mini app.
@@ -338,6 +340,9 @@ To make it fast:
 
 1. Set `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`. A feed reads every
    account followed, one request each, so this is what makes Casts quick.
+   On the hosted site, `/api/feed` reads at most the 1,000 most recent
+   follows (it answers `"capped": true` then) and takes only `hours` of 6,
+   24, 72 or 168.
 2. Run the function next to the node: in Vercel, **Settings → Functions →
    Function Region**, pick the region closest to the server (for example
    `fra1` for a server in Germany, `iad1` for US East).

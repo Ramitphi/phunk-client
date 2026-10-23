@@ -144,6 +144,11 @@ async for cast in hub.casts(3, limit=5):
     print(cast.time, cast.text)        # .time is a UTC datetime
 ```
 
+`castsByFid` also returns a `MESSAGE_TYPE_CAST_REMOVE` for each deleted
+cast. `casts()` skips those and the casts they removed. Some accounts have
+deleted thousands, so with a `limit` it reads at most 5 pages (bigger ones
+once it meets deletions) and may return fewer casts than you asked for.
+
 To get everything since a date, pass `since`:
 
 ```python
@@ -801,6 +806,14 @@ phunk feed --only fireflyapp,"own key"
 ```python
 casts = await hub.feed(fid)                    # newest first
 apps = [await hub.app_of(c) for c in casts]    # who signed each
+```
+
+A feed costs one request per account followed. To bound it, read only the
+latest follows (`reverse=true` on `linksByFid`):
+
+```python
+latest = [f.target_fid async for f in hub.following(fid, limit=100, newest_first=True)]
+casts = await hub.feed(fid, follows=latest)    # the 100 most recent follows only
 ```
 
 ### "Sent from" your app
