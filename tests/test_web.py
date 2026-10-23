@@ -311,8 +311,9 @@ def fake_farcaster():
     async def signer(request):
         body = await request.json()
         got["signer"].append(body)
-        return web.json_response({"metadata": _metadata(APP_FID, "0x" + "12" * 20, APP_SIG, 190003600),
-                                  "request_fid": APP_FID, "deadline": 190003600})
+        deadline = 1900003600 if body.get("onchain") else 190003600  # Unix vs Farcaster time
+        return web.json_response({"metadata": _metadata(APP_FID, "0x" + "12" * 20, APP_SIG, deadline),
+                                  "request_fid": APP_FID, "deadline": deadline})
 
     async def create(request):
         body = await request.json()
@@ -383,9 +384,10 @@ def test_connect_opens_a_signed_key_request_for_the_app(connect_site):
     assert body["app_fid"] == APP_FID and body["deeplink"].startswith("farcaster://signed-key-request?token=0x")
     assert body["url"] == "https://client.farcaster.xyz/deeplinks/signed-key-request?token=" + body["token"]
     # The signer saw only the public key; Farcaster got the app's signature from its approval.
-    assert got["signer"] == [{"key": key}]
+    # It asks for an onchain approval: the Farcaster app adds the key on Optimism (Unix deadline).
+    assert got["signer"] == [{"key": key, "onchain": True}]
     assert got["requests"] == [{"key": key, "requestFid": APP_FID, "signature": "0x" + APP_SIG.hex(),
-                                "deadline": 190003600}]
+                                "deadline": 1900003600}]
     status, _, body = asgi(site.app, "GET", f"/api/connect?token={body['token']}")
     assert status == 200 and body == {"state": "completed", "fid": 9}
     # Bad input is refused before anything goes out.

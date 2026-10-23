@@ -238,6 +238,23 @@ def test_signer_approval_checks_out_and_matches_phunk_encoding():
     assert md == APP.sign_key_request(APP_FID, KEY.public_key, req.deadline)  # same as signing locally
 
 
+# From @farcaster/core 0.20.0: ViemLocalEip712Signer(0x33..33).signKeyRequest(
+#   {requestFid: 777n, key: 0x22 * 32, deadline: 1900003600n})
+ONCHAIN_SIG = ("73dc01cd7dc1d3dce0fec04881acea973ad889e8ec3bea51ba618c4b6fc7c57c"
+               "3459164c0853f4e2a57783d4b1e9690d1d6724be0e24c2070833e1b35716f02b1c")
+
+
+def test_signer_onchain_approval_matches_the_official_library():
+    """The Farcaster app adds keys on Optimism: validator domain, Unix deadline."""
+    out = signer_api.approve("0x" + "22" * 32, APP_FID, APP._account, now=1900000000, onchain=True)
+    req = decode_key_request(bytes.fromhex(out["metadata"][2:]))
+    assert APP.address == "0x5CbDd86a2FA8Dc4bDdd8a8f69dBa48572EeC07FB"
+    assert (req.request_fid, req.request_signer, req.deadline) == (APP_FID, APP.address.lower(), 1900003600)
+    assert req.signature.hex() == ONCHAIN_SIG
+    # The default stays the gasless KEY_ADD form, in Farcaster time.
+    assert signer_api.approve("0x" + "22" * 32, APP_FID, APP._account, now=1900000000)["deadline"] == 290544400
+
+
 def test_signer_asgi_app(monkeypatch):
     from test_web import asgi
 

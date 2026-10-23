@@ -35,6 +35,7 @@ FARCASTER_API = "https://api.farcaster.xyz"
 APPROVE_URL = "https://client.farcaster.xyz/deeplinks/signed-key-request?token="
 KEY_HEX = re.compile(r"^0x[0-9a-fA-F]{64}$")
 TOKEN = re.compile(r"^0x[0-9a-fA-F]{8,128}$")
+UNIX_2020 = 1577836800
 MAX_MESSAGE = 1024  # a follow or a like is ~150 bytes
 TIMEOUT = aiohttp.ClientTimeout(total=20)
 
@@ -71,7 +72,9 @@ async def start(session: aiohttp.ClientSession, signer_url: str, key: str,
     if not isinstance(key, str) or not KEY_HEX.match(key):
         raise ConnectError("key must be a 0x-prefixed 32-byte Ed25519 public key")
     try:
-        async with session.post(signer_url, json={"key": key}, timeout=TIMEOUT) as r:
+        # onchain: the Farcaster app adds the key on Optimism, which wants a
+        # Unix deadline and the SignedKeyRequestValidator's signature domain.
+        async with session.post(signer_url, json={"key": key, "onchain": True}, timeout=TIMEOUT) as r:
             approval = await _json(r)
             if r.status != 200 or not approval.get("metadata"):
                 raise ConnectError("the phunk signer is not answering; try again soon", 502)
@@ -81,6 +84,8 @@ async def start(session: aiohttp.ClientSession, signer_url: str, key: str,
         req = decode_key_request(bytes.fromhex(str(approval["metadata"]).removeprefix("0x")))
     except ValueError as e:
         raise ConnectError("the phunk signer sent something odd; try again soon", 502) from e
+    if req.deadline < UNIX_2020:  # a Farcaster-time deadline: the signer predates onchain mode
+        raise ConnectError("the phunk signer needs an update; try again soon", 502)
     body = {"key": key, "requestFid": req.request_fid, "signature": "0x" + req.signature.hex(),
             "deadline": req.deadline}
     try:
