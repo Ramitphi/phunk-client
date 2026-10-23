@@ -373,6 +373,7 @@ img.avatar { background: var(--chip); }
 /* People: one card per person, a kind chip, their latest casts. */
 .pane-title { margin: 4px 0 8px; font-family: var(--display); font-weight: 800; font-size: 32px; line-height: 1.1; letter-spacing: -0.035em; }
 .summary p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.summary .share { margin: -4px 0 14px; min-height: 40px; }
 .person { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; box-shadow: var(--shadow); }
 .person .avatar { width: 48px; height: 48px; font-size: 20px; }
 .person .bio { font-size: 13px; margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
