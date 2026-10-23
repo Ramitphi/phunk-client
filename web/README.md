@@ -117,6 +117,12 @@ button that opens `miniapp.phunk.social` (the `fc:miniapp` tag in
 
 ### Follow and like (optional)
 
+**Paused for now.** `SIGNER_URL` in `api/index.py` is set to `None` and
+`canConnect()` in `src/phunk/static/app.js` returns `false`, so Follow opens the
+profile and Open opens the cast in Farcaster (with confetti), and `/api/connect`
+and `/api/submit` answer 503. The signer refuses `"onchain": true`. Restore the
+commented lines there to turn it back on.
+
 With a signer set up, people can follow and like right in the mini app.
 Their first Follow or Like asks them to approve phunk once in their
 Farcaster app. After that the page signs follows and likes itself, and the

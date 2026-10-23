@@ -61,7 +61,11 @@ from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
 MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}/"
-SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
+# Paused: in-app follow and like (approving a phunk key) are off for now, so
+# /api/connect and /api/submit answer 503 even with PHUNK_SIGNER_URL set.
+# To turn them back on, restore this line:
+# SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
+SIGNER_URL = None
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),

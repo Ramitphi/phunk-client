@@ -266,6 +266,8 @@ def test_signer_asgi_app(monkeypatch):
     status, _, body = asgi(signer_api.app, "POST", "/api/sign-key-request", json.dumps({"key": KEY.public_hex}).encode())
     md = bytes.fromhex(body["metadata"][2:])
     assert status == 200 and check_key_request(md, KEY.public_key, app_fid=APP_FID, app_custody=APP.address)
+    onchain = json.dumps({"key": KEY.public_hex, "onchain": True}).encode()
+    assert asgi(signer_api.app, "POST", "/api/sign-key-request", onchain)[0] == 403  # paused
     assert asgi(signer_api.app, "POST", "/api/sign_key_request", b"nope")[0] == 400
     assert asgi(signer_api.app, "POST", "/api/sign-key-request", b"x" * 2000)[0] == 413
     assert asgi(signer_api.app, "GET", "/elsewhere")[0] == 404

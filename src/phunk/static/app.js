@@ -639,12 +639,16 @@ async function libs() {
   return cryptoLibs;
 }
 const viewerFid = () => (miniapp && state.me && state.me.user ? Number(state.me.fid) : null);
-const canConnect = () => !!(isPublic() && state.me.can_connect && viewerFid() && window.phunkMsg);
+// Paused: approving a phunk key in the mini app is off for now. Follow opens
+// the profile and Open opens the cast in Farcaster, with a confetti cue. The
+// approval flow below stays in place; to turn it back on, restore this line:
+// const canConnect = () => !!(isPublic() && state.me.can_connect && viewerFid() && window.phunkMsg);
+const canConnect = () => false;
 function savedKey() {
   const k = store.get(KEY_STORE, null);
   return k && k.fid === viewerFid() ? k : null;
 }
-const connected = () => { const k = savedKey(); return !!(k && k.state === "completed"); };
+const connected = () => { const k = canConnect() && savedKey(); return !!(k && k.state === "completed"); };
 
 // Is the saved key on the account? The node is the source of truth: an
 // approval often finishes while this page is closed (it sends people to the
@@ -867,7 +871,7 @@ function castCard(c) {
     // cast in Farcaster instead, and says so.
     if (isPublic()) {
       const open = h("button", { type: "button", class: "ghost open", title: "Open this cast in Farcaster" }, "Open");
-      open.addEventListener("click", () => { track("Open"); viewCast(c); });
+      open.addEventListener("click", () => { track("Open"); cheer(open); viewCast(c); });
       if (kind !== "like" || !canConnect()) return open;
       const id = `${c.fid}:${c.hash}`;
       const like = h("button", { type: "button", class: `ghost like${liked.has(id) ? " on" : ""}`, "aria-pressed": String(liked.has(id)) },
@@ -1086,7 +1090,7 @@ function personCard(p, i = 0) {
         if (ok) track("Followed", card);
       });
     }
-    if (isPublic()) { track("Follow", card); return viewProfile(p); }
+    if (isPublic()) { track("Follow", card); cheer(follow); return viewProfile(p); }
     if (!canAct) return needKey();
     await doFollow(() => api("/api/follow", { fid: p.fid, action: "follow" }));
   });
