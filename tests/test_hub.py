@@ -600,3 +600,26 @@ def test_feed_reads_only_the_follows_it_is_given():
     assert feed == ["c2"]
     assert [q["fid"] for p, q in calls if p == "/v1/castsByFid"] == ["2"]
     assert sum(1 for p, _ in calls if p == "/v1/linksByFid") == 1  # follows given: not read again
+
+
+def test_cli_node_error_hint():
+    """The CLI prints one line, not a traceback, and hints at a node that didn't answer."""
+    import aiohttp
+
+    from phunk.__main__ import _node_failed
+    from phunk.hub import NodeError, NotFound
+
+    def caused(e, cause):
+        e.__cause__ = cause
+        return e
+
+    down = caused(NodeError("/v1/info: ServerDisconnectedError"), aiohttp.ServerDisconnectedError())
+    msg = _node_failed("http://localhost:3381", down)
+    assert msg.startswith("phunk: /v1/info: ServerDisconnectedError\n")
+    assert "http://localhost:3381" in msg and "./node.sh status" in msg
+
+    # The node answered: no hint.
+    assert _node_failed("http://n", NotFound("/v1/userNameProofByName: no such name")) == \
+        "phunk: /v1/userNameProofByName: no such name"
+    http = caused(NodeError("/v1/info: HTTP 503"), aiohttp.ClientResponseError(None, (), status=503))
+    assert "node.sh" not in _node_failed("http://n", http)

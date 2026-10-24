@@ -25,7 +25,9 @@ import os
 import sys
 from pathlib import Path
 
-from .hub import DEFAULT_NODE, Hub
+import aiohttp
+
+from .hub import DEFAULT_NODE, Hub, NodeError, NotFound
 
 
 async def _fid(hub: Hub, who: str) -> int:
@@ -365,10 +367,24 @@ def main(argv=None) -> None:
                    help="preview casting, replies and likes in the page (coming soon; off by default)")
     u.add_argument("--public", action="store_true",
                    help="preview the hosted site: read-only, follows and replies open Farcaster")
+    args = p.parse_args(argv)
     try:
-        asyncio.run(run(p.parse_args(argv)))
+        asyncio.run(run(args))
     except KeyboardInterrupt:
         sys.exit(130)
+    except NodeError as e:
+        sys.exit(_node_failed(args.node, e))
+
+
+def _node_failed(node: str, e: NodeError) -> str:
+    """One line for a node error instead of a traceback, with a hint when
+    the node didn't answer at all (down, or still downloading its snapshot)."""
+    msg = f"phunk: {e}"
+    cause = e.__cause__
+    if cause is not None and not isinstance(e, NotFound) and not isinstance(cause, aiohttp.ClientResponseError):
+        msg += (f"\nThe node at {node} didn't answer. Is it up and synced? "
+                "On your own node, `./node.sh status` shows how far along it is.")
+    return msg
 
 
 if __name__ == "__main__":
