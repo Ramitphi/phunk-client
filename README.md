@@ -249,10 +249,11 @@ for example your own Snapchain at `http://localhost:3381`. On your own
 node, raise `rate=` and `concurrency=` (say 150 and 48): a feed is one
 request per account followed, so this is what makes it fast.
 
-To run your own read node, [`scripts/hetzner.sh`](scripts/hetzner.sh)
-rents a server and volume on Hetzner Cloud and prepares it (or run
-[`scripts/provision.sh`](scripts/provision.sh) on any fresh Ubuntu 22.04
-server), then [`scripts/node.sh`](scripts/node.sh) starts the node. To keep it for your own apps, put it
+To run your own read node, [`scripts/server.sh`](scripts/server.sh)
+rents a server with a 2 TB disk on Hetzner, DigitalOcean or AWS, or takes
+one you already have (`root@<ip>`), and prepares it with
+[`scripts/provision.sh`](scripts/provision.sh). Then
+[`scripts/node.sh`](scripts/node.sh) starts the node. To keep it for your own apps, put it
 behind [`scripts/gateway.sh`](scripts/gateway.sh): HTTPS, a token per app,
 a rate limit per token, gzip and a short cache. Then `./node.sh private`
 closes the node's own ports. Clients pass the token:

@@ -21,11 +21,11 @@ Three commands: get a server, start a node on it, read from the node.
 ### Get a server
 
 ```sh
-# on your own computer, with the hcloud CLI and a Hetzner API token in HCLOUD_TOKEN
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
+# on your own computer; hetzner, digitalocean, aws, or root@<ip> for a server you have
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
 ```
 
-This rents a server on Hetzner Cloud (8 CPU cores, 16 GB of RAM) with a 2 TB volume, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. It asks before it spends anything, and prints the server's address. Hetzner bills by the hour; `hetzner.sh destroy` deletes it all. Before you run it: install `hcloud` (`brew install hcloud` on macOS), make an API token (Hetzner Console → your project → Security → API tokens, Read & Write) and `export HCLOUD_TOKEN=<token>`. [Run your own node](tutorial.html#9-run-your-own-node) covers the details, what it costs, and how to use another provider.
+This rents an Ubuntu server with 16 GB of RAM and a 2 TB disk from your provider, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. Already have a server? Pass its login instead, like `root@203.0.113.9`. It asks before it spends anything and prints the server's address. Ending the command with `hetzner destroy` instead deletes it all. You need your provider's command-line tool and an API token, for Hetzner `hcloud` and `export HCLOUD_TOKEN=<token>`. [Run your own node](tutorial.html#9-run-your-own-node) lists what each provider needs and what it costs.
 :::
 ::: step
 ### Start a read node

@@ -445,56 +445,63 @@ the same HTTP API. It needs no API key and no account with anyone.
 | Network | a public IP; UDP 3382 open (gossip, to sync). TCP 3381 and 3383 only if others read from it |
 
 The database is 500–800 GB today and grows, so don't skimp on disk. Any
-provider works. Rough monthly prices (check before you rent):
+provider works. Rough monthly prices for 16 GB of RAM and 2 TB of disk
+(check before you rent):
 
-- **Hetzner Cloud**, which the script below rents for you: a `cpx42`
-  (8 cores, 16 GB) is about €70, and a 2 TB volume about €100. Billed by
-  the hour, so a one-day test costs a few euros.
-- **Dedicated server** (Hetzner, OVH, Latitude and similar): about $60–150,
-  but you order it by hand and it can take a day to arrive.
-- **Cloud VM plus a 2 TB volume** (AWS, GCP, DigitalOcean and similar):
-  about $200–400. Most of that is the disk.
+| Provider | Server | 2 TB disk | Billed |
+|---|---|---|---|
+| Hetzner Cloud (`cpx42`, 8 cores) | about €70 | about €100 | by the hour |
+| DigitalOcean (`s-8vcpu-16gb`) | about $96 | about $200 | by the hour |
+| AWS EC2 (`m6i.xlarge`, 4 cores) | about $140 | about $160 (gp3) | by the second |
+| A dedicated server (Hetzner, OVH, Latitude…) | $60–150 with disk | included | monthly; ordered by hand |
+
+A one-day test on any of the cloud ones costs a few dollars.
 
 ### Three commands
 
-**Command 0: rent and prepare the server.** On your own computer, install
-the [`hcloud` CLI](https://github.com/hetznercloud/cli) (`brew install
-hcloud` on macOS), make an API token (Hetzner Console → your project →
-Security → API tokens → Read & Write), and run
-[`scripts/hetzner.sh`](https://github.com/Ramitphi/phunk-client/blob/main/scripts/hetzner.sh):
+**Command 0: get and prepare the server.** On your own computer, run
+[`scripts/server.sh`](https://github.com/Ramitphi/phunk-client/blob/main/scripts/server.sh)
+with your provider's name, or with the login of a server you already have:
 
 ```sh
-export HCLOUD_TOKEN=<your token>
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
 ```
 
-It shows what it will create and asks before spending anything. Then it:
+| Where | Instead of `hetzner` | You need |
+|---|---|---|
+| Hetzner Cloud | `hetzner` | the [`hcloud` CLI](https://github.com/hetznercloud/cli) and `export HCLOUD_TOKEN=<token>` (Console → your project → Security → API tokens → Read & Write) |
+| DigitalOcean | `digitalocean` | the [`doctl` CLI](https://docs.digitalocean.com/reference/doctl/how-to/install/) and `export DIGITALOCEAN_ACCESS_TOKEN=<token>` (Control Panel → API) |
+| AWS | `aws` | the [`aws` CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), logged in (`aws configure`); it uses your region's default VPC |
+| Any other server | `root@<ip>` or `ubuntu@<ip>` | a fresh Ubuntu 22.04 server you can SSH into as root or a sudo user. Add `DATA_DEVICE=/dev/<disk>` in front of `bash` if the 2 TB disk is a second disk |
 
-1. uploads your SSH public key (`~/.ssh/id_ed25519.pub`; make one with
-   `ssh-keygen -t ed25519` if you have none)
-2. creates a 2 TB volume and a `cpx42` server running Ubuntu 22.04, in
-   Nuremberg
-3. logs in as root and runs
+All of them need an SSH key (`~/.ssh/id_ed25519.pub`; make one with
+`ssh-keygen -t ed25519`). The script shows what it will create and asks
+before spending anything. Then it:
+
+1. uploads your SSH public key to the provider
+2. creates an Ubuntu 22.04 server with 16 GB of RAM and a 2 TB data disk
+   (on AWS, the instance's own disk is 2 TB), and on AWS a security group
+   for SSH and the node's ports
+3. logs in and runs
    [`provision.sh`](https://github.com/Ramitphi/phunk-client/blob/main/scripts/provision.sh),
    which updates the system, installs Docker, creates a `snapchain` user
-   with your SSH key, and turns on the firewall
-4. mounts the volume at `/home/snapchain/snapchain`, where the node keeps
+   with your SSH key, turns on the firewall, and puts `node.sh` in its home
+4. mounts the data disk at `/home/snapchain/snapchain`, where the node keeps
    its database, and reboots if the updates need it
 
 It ends by printing the server's address and the next command. It is safe
 to run again; it reuses what it already made. Change the defaults with
-environment variables, for example `LOCATION=hel1` or `VOLUME_GB=1500`.
-`cpx42` exists in `nbg1` and `hel1`; in other locations use `TYPE=ccx23`
-(4 dedicated cores, 16 GB). To print the address again, or to delete the server and volume and stop
-the bill:
+environment variables in front of `bash`, for example `REGION=hel1`,
+`TYPE=ccx23` or `DISK_GB=1500`. To print the address again, or to delete
+the server and disk and stop the bill (put your provider's name):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash -s ip
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash -s destroy
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner ip
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner destroy
 ```
 
-**Somewhere else?** Rent any Ubuntu 22.04 server that meets the minimums,
-with your SSH key on it. Log in as root and run `provision.sh` yourself:
+**Prefer to do it by hand?** Rent any Ubuntu 22.04 server that meets the
+minimums, log in as root and run `provision.sh` yourself:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/provision.sh | sudo bash

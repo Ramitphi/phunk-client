@@ -28,11 +28,11 @@ Farcaster 上的每一条 cast（帖子）、每一次关注、每一份个人�
 ### 租一台服务器
 
 ```sh
-# 在你自己的电脑上运行，需要 hcloud 命令行工具，并把 Hetzner API token 放在 HCLOUD_TOKEN 里
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
+# 在你自己的电脑上运行；可选 hetzner、digitalocean、aws，或用 root@<IP> 指定你已有的服务器
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
 ```
 
-这条命令会在 Hetzner Cloud 上租一台服务器（8 核 CPU、16 GB 内存），外加一块 2 TB 的数据卷，然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。花钱之前它会先问你，最后打印出服务器的 IP 地址。Hetzner 按小时计费，运行 `hetzner.sh destroy` 会删除全部资源。运行之前：安装 `hcloud`（macOS 上用 `brew install hcloud`），在 Hetzner Console → 你的项目 → Security → API tokens 创建一个 Read & Write 的 token，然后 `export HCLOUD_TOKEN=<token>`。具体步骤、费用，以及如何改用其他云服务商，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
+这条命令会在你选择的云服务商那里租一台 Ubuntu 服务器（16 GB 内存，外加 2 TB 磁盘），然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。已经有服务器了？把它的登录地址传进去即可，比如 `root@203.0.113.9`。花钱之前它会先问你，最后打印出服务器的 IP 地址；把命令末尾换成 `hetzner destroy` 会删除全部资源。你需要对应云服务商的命令行工具和 API token，比如 Hetzner 需要 `hcloud` 和 `export HCLOUD_TOKEN=<token>`。每家云服务商需要什么、费用多少，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
 :::
 ::: step
 ### 启动读取节点
