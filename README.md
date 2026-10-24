@@ -250,7 +250,7 @@ node, raise `rate=` and `concurrency=` (say 150 and 48): a feed is one
 request per account followed, so this is what makes it fast.
 
 To run your own read node, [`scripts/server.sh`](scripts/server.sh)
-rents a server with a 2 TB disk on Hetzner, DigitalOcean or AWS, or takes
+rents a server with a 2 TB disk on AWS, DigitalOcean or Hetzner, or takes
 one you already have (`root@<ip>`), and prepares it with
 [`scripts/provision.sh`](scripts/provision.sh). Then
 [`scripts/node.sh`](scripts/node.sh) starts the node. To keep it for your own apps, put it

@@ -28,11 +28,11 @@ Farcaster 上的每一条 cast（帖子）、每一次关注、每一份个人�
 ### 租一台服务器
 
 ```sh
-# 在你自己的电脑上运行；可选 hetzner、digitalocean、aws，或用 root@<IP> 指定你已有的服务器
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
+# 在你自己的电脑上运行；<where> 可以是 aws、digitalocean、hetzner，或用 user@<IP> 指定你已有的服务器
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- <where>
 ```
 
-这条命令会在你选择的云服务商那里租一台 Ubuntu 服务器（16 GB 内存，外加 2 TB 磁盘），然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。已经有服务器了？把它的登录地址传进去即可，比如 `root@203.0.113.9`。花钱之前它会先问你，最后打印出服务器的 IP 地址；把命令末尾换成 `hetzner destroy` 会删除全部资源。你需要对应云服务商的命令行工具和 API token，比如 Hetzner 需要 `hcloud` 和 `export HCLOUD_TOKEN=<token>`。每家云服务商需要什么、费用多少，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
+这条命令会在你选择的云服务商那里租一台 Ubuntu 服务器（16 GB 内存，外加 2 TB 磁盘），然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。已经有服务器了？把它的登录地址传进去即可，比如 `root@203.0.113.9`。花钱之前它会先问你，最后打印出服务器的 IP 地址；用 `<where> destroy` 会删除它租的全部资源。用云服务商名字时，需要先装好对应的命令行工具并登录：`aws`（`aws configure`）、`doctl`（`export DIGITALOCEAN_ACCESS_TOKEN=<token>`）或 `hcloud`（`export HCLOUD_TOKEN=<token>`）。用已有服务器时，只需要能用 SSH 登录一台全新的 Ubuntu 22.04 服务器。每家云服务商需要什么、费用多少，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
 :::
 ::: step
 ### 启动读取节点

@@ -450,10 +450,10 @@ provider works. Rough monthly prices for 16 GB of RAM and 2 TB of disk
 
 | Provider | Server | 2 TB disk | Billed |
 |---|---|---|---|
-| Hetzner Cloud (`cpx42`, 8 cores) | about €70 | about €100 | by the hour |
-| DigitalOcean (`s-8vcpu-16gb`) | about $96 | about $200 | by the hour |
 | AWS EC2 (`m6i.xlarge`, 4 cores) | about $140 | about $160 (gp3) | by the second |
-| A dedicated server (Hetzner, OVH, Latitude…) | $60–150 with disk | included | monthly; ordered by hand |
+| DigitalOcean (`s-8vcpu-16gb`, 8 cores) | about $96 | about $200 | by the hour |
+| Hetzner Cloud (`cpx42`, 8 cores) | about €70 | about €100 | by the hour |
+| A dedicated server (OVH, Hetzner, Latitude…) | $60–150 with disk | included | monthly; ordered by hand |
 
 A one-day test on any of the cloud ones costs a few dollars.
 
@@ -464,15 +464,15 @@ A one-day test on any of the cloud ones costs a few dollars.
 with your provider's name, or with the login of a server you already have:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- <where>
 ```
 
-| Where | Instead of `hetzner` | You need |
+| `<where>` | Rents from | You need |
 |---|---|---|
-| Hetzner Cloud | `hetzner` | the [`hcloud` CLI](https://github.com/hetznercloud/cli) and `export HCLOUD_TOKEN=<token>` (Console → your project → Security → API tokens → Read & Write) |
-| DigitalOcean | `digitalocean` | the [`doctl` CLI](https://docs.digitalocean.com/reference/doctl/how-to/install/) and `export DIGITALOCEAN_ACCESS_TOKEN=<token>` (Control Panel → API) |
-| AWS | `aws` | the [`aws` CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), logged in (`aws configure`); it uses your region's default VPC |
-| Any other server | `root@<ip>` or `ubuntu@<ip>` | a fresh Ubuntu 22.04 server you can SSH into as root or a sudo user. Add `DATA_DEVICE=/dev/<disk>` in front of `bash` if the 2 TB disk is a second disk |
+| `aws` | AWS EC2 | the [`aws` CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), logged in (`aws configure`); it uses your region's default VPC |
+| `digitalocean` | DigitalOcean | the [`doctl` CLI](https://docs.digitalocean.com/reference/doctl/how-to/install/) and `export DIGITALOCEAN_ACCESS_TOKEN=<token>` (Control Panel → API) |
+| `hetzner` | Hetzner Cloud | the [`hcloud` CLI](https://github.com/hetznercloud/cli) and `export HCLOUD_TOKEN=<token>` (Console → your project → Security → API tokens → Read & Write) |
+| `root@<ip>` or `ubuntu@<ip>` | nobody: a server you already have, from any provider | a fresh Ubuntu 22.04 server you can SSH into as root or a sudo user. If the 2 TB disk is a second disk, put `DATA_DEVICE=/dev/<disk>` in front of `bash` |
 
 All of them need an SSH key (`~/.ssh/id_ed25519.pub`; make one with
 `ssh-keygen -t ed25519`). The script shows what it will create and asks
@@ -491,13 +491,14 @@ before spending anything. Then it:
 
 It ends by printing the server's address and the next command. It is safe
 to run again; it reuses what it already made. Change the defaults with
-environment variables in front of `bash`, for example `REGION=hel1`,
-`TYPE=ccx23` or `DISK_GB=1500`. To print the address again, or to delete
-the server and disk and stop the bill (put your provider's name):
+environment variables in front of `bash`: `REGION` (for example
+`eu-west-1` on AWS, `fra1` on DigitalOcean, `hel1` on Hetzner), `TYPE` (the
+server type, in your provider's names) or `DISK_GB` (say `1500`). To print
+the address again, or to delete the server and disk and stop the bill:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner ip
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner destroy
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- <where> ip
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- <where> destroy
 ```
 
 **Prefer to do it by hand?** Rent any Ubuntu 22.04 server that meets the

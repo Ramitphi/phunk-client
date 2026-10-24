@@ -21,11 +21,18 @@ Three commands: get a server, start a node on it, read from the node.
 ### Get a server
 
 ```sh
-# on your own computer; hetzner, digitalocean, aws, or root@<ip> for a server you have
-curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- hetzner
+# on your own computer; <where> is aws, digitalocean, hetzner, or user@<ip> for a server you already have
+curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/server.sh | bash -s -- <where>
 ```
 
-This rents an Ubuntu server with 16 GB of RAM and a 2 TB disk from your provider, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. Already have a server? Pass its login instead, like `root@203.0.113.9`. It asks before it spends anything and prints the server's address. Ending the command with `hetzner destroy` instead deletes it all. You need your provider's command-line tool and an API token, for Hetzner `hcloud` and `export HCLOUD_TOKEN=<token>`. [Run your own node](tutorial.html#9-run-your-own-node) lists what each provider needs and what it costs.
+| `<where>` | You need first |
+|---|---|
+| `aws` | the `aws` CLI, logged in (`aws configure`) |
+| `digitalocean` | the `doctl` CLI and `export DIGITALOCEAN_ACCESS_TOKEN=<token>` |
+| `hetzner` | the `hcloud` CLI and `export HCLOUD_TOKEN=<token>` |
+| `user@<ip>` | any fresh Ubuntu 22.04 server, from any provider, that you can SSH into as root or a sudo user |
+
+With a provider's name, it rents an Ubuntu server with 16 GB of RAM and a 2 TB disk. With a login, it uses the server you already have. Either way it then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. It asks before it spends anything and prints the server's address; `<where> destroy` deletes what it rented. [Run your own node](tutorial.html#9-run-your-own-node) has the details and what each option costs.
 :::
 ::: step
 ### Start a read node
