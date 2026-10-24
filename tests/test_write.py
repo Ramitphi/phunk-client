@@ -440,3 +440,25 @@ def test_revoke_key_with_custody_uses_the_user_nonce():
     assert body[1] == [bytes.fromhex(other[2:])] and signer != body[1][0]
     assert body[3] == [proto.REMOVE_BY_CUSTODY] and body[5] == [5]
     assert body[2] == [CUSTODY.sign_key_remove(FID, body[1][0], 5, body[4][0])]
+
+
+def test_cli_post_prints_fid_hash_and_where_to_check(monkeypatch, capsys):
+    # `phunk post` prints FID:HASH (what `phunk like` takes) and a castById URL.
+    import argparse
+
+    from phunk.__main__ import run_write
+
+    monkeypatch.setenv("PHUNK_FID", "1234")
+    monkeypatch.setenv("PHUNK_APP_KEY", KEY.private_hex)
+    args = argparse.Namespace(cmd="post", text="hello", reply_to=None, channel=None, embed=None)
+
+    async def test(hub, submitted):
+        await run_write(hub, args)
+        out = capsys.readouterr().out.splitlines()
+        assert len(submitted) == 1
+        assert out[0].startswith("posted 1234:0x")
+        h = out[0].split(":", 1)[1]
+        assert out[1].endswith(f"/v1/castById?fid=1234&hash={h}")
+        assert out[1].startswith("check:  http://127.0.0.1:")
+
+    asyncio.run(with_node(test))

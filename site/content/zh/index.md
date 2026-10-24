@@ -28,11 +28,11 @@ Farcaster 上的每一条 cast（帖子）、每一次关注、每一份个人�
 ### 租一台服务器
 
 ```sh
-# 在你自己的电脑上运行，需要 hcloud 命令行工具和 Hetzner API token
+# 在你自己的电脑上运行，需要 hcloud 命令行工具，并把 Hetzner API token 放在 HCLOUD_TOKEN 里
 curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
 ```
 
-这条命令会在 Hetzner Cloud 上租一台服务器（8 核 CPU、16 GB 内存），外加一块 2 TB 的数据卷，然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。花钱之前它会先问你，最后打印出服务器的 IP 地址。Hetzner 按小时计费，运行 `hetzner.sh destroy` 会删除全部资源。具体步骤、费用，以及如何改用其他云服务商，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
+这条命令会在 Hetzner Cloud 上租一台服务器（8 核 CPU、16 GB 内存），外加一块 2 TB 的数据卷，然后把它配置好：安装 Docker，创建一个带有你 SSH 公钥的 `snapchain` 用户，并打开防火墙。花钱之前它会先问你，最后打印出服务器的 IP 地址。Hetzner 按小时计费，运行 `hetzner.sh destroy` 会删除全部资源。运行之前：安装 `hcloud`（macOS 上用 `brew install hcloud`），在 Hetzner Console → 你的项目 → Security → API tokens 创建一个 Read & Write 的 token，然后 `export HCLOUD_TOKEN=<token>`。具体步骤、费用，以及如何改用其他云服务商，见英文教程的 [Run your own node](/tutorial.html#9-run-your-own-node) 一节。
 :::
 ::: step
 ### 启动读取节点
@@ -52,13 +52,14 @@ ssh -t snapchain@<服务器IP> ./node.sh start      # 之后用 ./node.sh status
 pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client' && phunk --node http://localhost:3381 whois dwr
 ```
 
-这条命令安装 `phunk-client`，并从你的节点读取 dwr 的个人资料。可以在服务器上运行，也可以把 `localhost` 换成服务器的地址。当 `/v1/info` 里每个分片的 `blockDelay` 都是个位数时，节点就同步好了。
+等 `./node.sh status` 显示每个分片都已同步（in sync）之后再运行这一步。这条命令安装 `phunk-client`，并从你的节点读取 dwr 的个人资料。可以登录服务器（`ssh snapchain@<服务器IP>`）后运行，也可以在自己电脑上运行，把 `localhost` 换成服务器的地址。
 
 要写入数据，先给一个**测试账号**添加应用密钥（app key），再通过同一个节点发帖：
 
 ```sh
-phunk --node http://localhost:3381 key add
-phunk --node http://localhost:3381 post "hello from my own node"
+export PHUNK_NODE=http://localhost:3381   # 之后的 phunk 命令都通过你的节点
+phunk key add
+phunk post "hello from my own node"
 ```
 
 `key add` 会向你要这个账号的助记词（seed phrase），只用一次，之后只保存新生成的应用密钥。添加应用密钥不需要 gas，也不需要链上交易。写入的消息先交给你的读取节点，节点检查无误后转发给验证者节点（validator），由它们打包进区块。
@@ -109,7 +110,7 @@ phunk feed --hide warpcast       # 隐藏某个客户端发的 cast
 ## 深入学习（英文）
 
 <ul class="cards">
-<li><a href="../tutorial.html"><strong>Tutorial：从节点读取 Farcaster</strong><span>八个短小的步骤，从一条 curl 命令一直到找出每条 cast 是哪个应用签名的。大约 30 分钟。</span></a></li>
+<li><a href="../tutorial.html"><strong>Tutorial：从节点读取 Farcaster</strong><span>从一条 curl 命令一直到找出每条 cast 是哪个应用签名的，再到运行自己的节点。阅读大约 30 分钟。</span></a></li>
 <li><a href="../writing.html"><strong>Writing to the network：写入网络</strong><span>添加无需 gas 的应用密钥，然后通过自己的节点发帖、点赞、关注。</span></a></li>
 <li><a href="../concepts/index.html"><strong>Concepts：概念</strong><span>FID、托管地址、应用密钥、消息、节点和存储租金，每个一页。</span></a></li>
 <li><a href="../concepts/seed-phrases.html"><strong>Seed phrases are dangerous：助记词很危险</strong><span>在任何脚本向你要助记词之前，先读这一页。</span></a></li>

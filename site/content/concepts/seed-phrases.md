@@ -17,7 +17,7 @@ Some Farcaster scripts, including ones that create accounts or add keys, ask for
 
 ## Use a test account
 
-Make a new wallet for development and register a new FID with it. Fund it with only what the script needs (the Snapchain docs put registration and a storage unit at about $10 of ETH on OP Mainnet). Never point a script at the wallet that holds your real account or your savings.
+The simplest test account is a second account made in the Farcaster app: it comes with storage, and the app's settings show its recovery phrase. Or make a new wallet and register a new FID with it, funded with only what that needs (the Snapchain docs put registration and a storage unit at about $10 of ETH on OP Mainnet). Never point a script at the wallet that holds your real account or your savings.
 
 If something goes wrong with a test account, you lose a test account.
 

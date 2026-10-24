@@ -14,7 +14,7 @@ A **validator** proposes blocks and votes on them. Only nodes whose keys are in 
 
 A **read node** follows the chain without voting. It fetches decided blocks from peers, checks their signatures against the validator set, and applies them. It ends up with the same state as a validator, a moment later. Anyone can run one, and it serves the full HTTP and gRPC APIs.
 
-That is the node in the [quickstart](../index.html#quickstart). It needs 16 GB of RAM, 4 CPU cores, 2 TB of disk and ports 3381 to 3383 open.
+That is the node in the [quickstart](../index.html#quickstart). It needs 16 GB of RAM, 4 CPU cores, 2 TB of disk and UDP port 3382 open to sync. Open TCP 3381 (HTTP) and 3383 (gRPC) only if others read from it.
 
 Hypersnap is a compatible build that serves the same API. The public node this site uses, `haatz.quilibrium.com`, runs it.
 
@@ -42,7 +42,7 @@ Submitting straight to a validator puts the message in that validator's own memp
 | Consensus | Proposes and votes | Never votes; applies decided blocks |
 | Submitted messages | Kept in its mempool, put in blocks | Checked, then relayed to validators |
 | `mempoolSize` in `/v1/info` | A real count | `4294967295` on shards 1 and 2, meaning "not reported" |
-| Restarting it | Removes a vote; one at a time | Safe at any time |
+| Restarting it | Removes a vote; one at a time | Safe once the snapshot has downloaded (see below) |
 
 ## Is my node in sync?
 

@@ -21,11 +21,11 @@ Three commands: get a server, start a node on it, read from the node.
 ### Get a server
 
 ```sh
-# on your own computer, with the hcloud CLI and a Hetzner API token
+# on your own computer, with the hcloud CLI and a Hetzner API token in HCLOUD_TOKEN
 curl -fsSL https://raw.githubusercontent.com/Ramitphi/phunk-client/main/scripts/hetzner.sh | bash
 ```
 
-This rents a server on Hetzner Cloud (8 CPU cores, 16 GB of RAM) with a 2 TB volume, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. It asks before it spends anything, and prints the server's address. Hetzner bills by the hour; `hetzner.sh destroy` deletes it all. [Run your own node](tutorial.html#9-run-your-own-node) covers the setup, what it costs, and how to use another provider.
+This rents a server on Hetzner Cloud (8 CPU cores, 16 GB of RAM) with a 2 TB volume, then sets it up: Docker, a `snapchain` user with your SSH key, and the firewall. It asks before it spends anything, and prints the server's address. Hetzner bills by the hour; `hetzner.sh destroy` deletes it all. Before you run it: install `hcloud` (`brew install hcloud` on macOS), make an API token (Hetzner Console → your project → Security → API tokens, Read & Write) and `export HCLOUD_TOKEN=<token>`. [Run your own node](tutorial.html#9-run-your-own-node) covers the details, what it costs, and how to use another provider.
 :::
 ::: step
 ### Start a read node
@@ -34,42 +34,51 @@ This rents a server on Hetzner Cloud (8 CPU cores, 16 GB of RAM) with a 2 TB vol
 ssh -t snapchain@<server-ip> ./node.sh start      # then ./node.sh status to watch it sync
 ```
 
-This installs Snapchain under Docker, downloads a snapshot of the network (several hundred GB, a few hours), then syncs the blocks made since. A read node follows the chain and serves the API. It does not vote on blocks. [Read nodes and validators](concepts/nodes.md) explains the difference.
+The first start asks two things: type `Yes` to agree that a node earns no rewards, then press Enter to skip the FID question. It installs Snapchain under Docker, downloads a snapshot of the network (several hundred GB, a few hours), then syncs the blocks made since. **Don't restart the node while the snapshot downloads**: the shards not yet downloaded would sync from block 1 instead, which takes months. A read node follows the chain and serves the API. It does not vote on blocks. [Read nodes and validators](concepts/nodes.md) explains the difference.
 :::
 ::: step
 ### Read from it
+
+Once `./node.sh status` says every shard is in sync, log in (`ssh snapchain@<server-ip>`) and run:
 
 ```sh
 pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client' && phunk --node http://localhost:3381 whois dwr
 ```
 
-This installs `phunk-client` and reads dwr's profile from your node. Run it on the server, or swap `localhost` for the server's address. The node is ready when every shard's `blockDelay` in `/v1/info` is in single digits.
+This installs `phunk-client` and reads dwr's profile from your node. To run it from your own computer instead, swap `localhost` for the server's address.
 
 To write, add an app key for a **test account** and post through the same node:
 
 ```sh
-phunk --node http://localhost:3381 key add
-phunk --node http://localhost:3381 post "hello from my own node"
+export PHUNK_NODE=http://localhost:3381
+phunk key add
+phunk post "hello from my own node"
 ```
 
-`key add` asks for the account's seed phrase, uses it once and keeps only the new app key. Read [Seed phrases are dangerous](concepts/seed-phrases.md) first, and [Writing to the network](writing.html) for what happens underneath.
+`key add` asks for the account's seed phrase, uses it once and keeps only the new app key. Your post goes to your node, which checks it and passes it on to the validators. [Writing to the network](writing.html) covers following, liking and filtering the feed by app.
 :::
+:::
+
+::: warning Seed phrases are dangerous
+A seed phrase is the whole account: whoever has it can take it. Try this with a **test account** only, never your main one. Only paste a seed phrase into software from developers you trust, and prefer apps that use delegated signer authorization, so they never see it. Read [Seed phrases are dangerous](concepts/seed-phrases.md) first.
 :::
 
 ::: note No server yet?
-Skip the first two steps. A public node answers the same API, and the client uses one by default. Three commands:
+Skip the first two steps. A public node answers the same API, and the client uses one by default:
 
 ```sh
 pip install git+https://github.com/Ramitphi/phunk-client
 phunk whois dwr
 phunk feed dwr --hide warpcast
 ```
+
+If `pip` says "externally-managed-environment" (macOS with Homebrew, Ubuntu 24.04, Debian 12), make a virtual environment first: `python3 -m venv ~/.phunk && . ~/.phunk/bin/activate`.
 :::
 
 ## Learn it properly
 
 <ul class="cards">
-<li><a href="tutorial.html"><strong>Tutorial: reading Farcaster from a node</strong><span>Eight short steps, from one curl to working out which app signed each cast. About 30 minutes.</span></a></li>
+<li><a href="tutorial.html"><strong>Tutorial: reading Farcaster from a node</strong><span>From one curl to working out which app signed each cast, then running your own node. About 30 minutes to read.</span></a></li>
 <li><a href="writing.html"><strong>Writing to the network</strong><span>Add a gasless app key, then post, like and follow through your own node. Build a feed filtered by app.</span></a></li>
 <li><a href="concepts/index.html"><strong>Concepts</strong><span>FIDs, custody addresses, app keys, messages, nodes and storage rent. One short page each.</span></a></li>
 <li><a href="concepts/seed-phrases.html"><strong>Seed phrases are dangerous</strong><span>Read this before any script asks for one.</span></a></li>
