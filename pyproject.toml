@@ -7,12 +7,14 @@ name = "phunk-client"
 version = "0.1.0"
 description = "Read and write Farcaster straight from a Snapchain / Hypersnap node. No API key, no Neynar."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+# Table form, not the SPDX string: the string makes hatchling import
+# packaging.licenses, which breaks on older pips (Ubuntu 22.04's pip 22.0).
+license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = ["aiohttp>=3.9"]
 keywords = ["farcaster", "snapchain", "hypersnap", "hub", "social graph"]
 classifiers = [
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Framework :: AsyncIO",
     "Topic :: Internet",
