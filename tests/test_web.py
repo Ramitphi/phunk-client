@@ -70,11 +70,10 @@ def fake_node():
 @pytest.fixture
 def site(fake_node, monkeypatch):
     """api/index.py, loaded fresh and pointed at the fake node."""
-    monkeypatch.setenv("PHUNK_NODE", fake_node)
-    monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.NODE, mod.RATE = fake_node, 1000.0
     yield mod
     if mod._loop is not None:
         asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
@@ -188,12 +187,10 @@ def test_site_errors_never_show_the_node_token_or_url(monkeypatch, caplog):
 
     runner, port = asyncio.run_coroutine_threadsafe(start(), loop).result()
     url, token = f"http://127.0.0.1:{port}", "tok-very-secret-123"
-    monkeypatch.setenv("PHUNK_NODE", url)
-    monkeypatch.setenv("PHUNK_NODE_TOKEN", token)
-    monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site_busy", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.NODE, mod.NODE_TOKEN, mod.RATE = url, token, 1000.0
     try:
         _, ui = mod._start()
         ui.hub.retries = 2  # retry once, then give up
@@ -224,6 +221,20 @@ def test_site_errors_are_plain_words(site):
                           ("/api/owner?fid=abc", "fid must be a positive number"),
                           ("/api/key?fid=abc&key=0x" + "ab" * 32, "fid must be a positive number")]:
         assert site.respond(target) == (400, {"error": error}, "no-store"), target
+
+
+def test_site_reads_the_public_node_for_now(monkeypatch):
+    """PHUNK_NODE and friends are paused: the site reads the public node at its
+    default pace, and a gateway token in the environment is never sent."""
+    monkeypatch.setenv("PHUNK_NODE", "https://node.example")
+    monkeypatch.setenv("PHUNK_NODE_TOKEN", "tok-very-secret-123")
+    monkeypatch.setenv("PHUNK_RATE", "150")
+    monkeypatch.setenv("PHUNK_CONCURRENCY", "48")
+    spec = importlib.util.spec_from_file_location("phunk_site_public", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert (mod.NODE, mod.NODE_TOKEN, mod.RATE, mod.CONCURRENCY) == (
+        "https://haatz.quilibrium.com", None, 20.0, 12)
 
 
 def test_vercel_runs_the_weekly_digest():
@@ -432,11 +443,10 @@ def connect_site(fake_node, fake_farcaster, monkeypatch):
     base, got = fake_farcaster
     monkeypatch.setenv("PHUNK_SIGNER_URL", f"{base}/sign")
     monkeypatch.setenv("PHUNK_FARCASTER_API", base)
-    monkeypatch.setenv("PHUNK_NODE", fake_node)
-    monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.NODE, mod.RATE = fake_node, 1000.0
     mod.SIGNER_URL = f"{base}/sign"  # the site pauses it; these tests check the flow itself
     yield mod, got
     if mod._loop is not None:
@@ -459,10 +469,10 @@ def test_connect_is_off_without_a_signer(site):
 
 def test_connect_is_paused_even_with_a_signer(fake_node, monkeypatch):
     monkeypatch.setenv("PHUNK_SIGNER_URL", "https://sign.example/api/sign-key-request")
-    monkeypatch.setenv("PHUNK_NODE", fake_node)
     spec = importlib.util.spec_from_file_location("phunk_site_paused", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.NODE = fake_node
     assert mod.SIGNER_URL is None
     assert _post(mod.app, "/api/connect", {"key": "0x" + "22" * 32})[0] == 503
     assert _post(mod.app, "/api/submit", {"message": V["like"]["message"]})[0] == 503
