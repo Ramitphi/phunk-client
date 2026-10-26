@@ -109,7 +109,7 @@ the page:
   gun, tabs that slide in. Each one has a haptic too: the client's own (`sdk.haptics`, where
   it has them), or the phone's vibration on the plain site. "Reduce
   motion" turns the movement off and keeps the haptics,
-- offers **Share with frens** above the cards: a cast with the mini app
+- offers **Share on Farcaster** above the cards: a cast with the mini app
   attached, opened in the client's own composer (on the plain site, in
   Farcaster's). The person posts it; phunk holds no key. The link is the
   page's `fc:miniapp` embed, so local `phunk ui` shows no button,
@@ -293,7 +293,7 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Load more` | More casts | `mode`: `next page` or `wider window` |
 | `App filter` | An app is shown or hidden | `change`: `show`, `hide`, `show all`, `hide all` |
 | `Open` | Open on a cast (opens it in Farcaster) | |
-| `Share` | Share with frens: a cast with the mini app attached, in the host's composer (mini app) or Farcaster's (web) | `from`: `miniapp` or `web`; `self`: `yes` or `no` |
+| `Share` | Share on Farcaster: a cast with the mini app attached, in the host's composer (mini app) or Farcaster's (web) | `from`: `miniapp` or `web`; `self`: `yes` or `no` |
 | `Liked`, `Unliked` | Like / unlike went through (mini app, connected) | |
 | `Connect shown` | The one-time approval sheet opens (Follow or Like before phunk is connected) | |
 | `Connect skipped` | Not now on that sheet | |
