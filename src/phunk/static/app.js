@@ -1202,7 +1202,7 @@ function renderSummary() {
   if (s.my_app) line += ` Posting from ${s.my_app === "own key" ? "their own key" : s.my_app}.`.replace("their own", you === "You" ? "your own" : "their own");
   let share = null;
   if (shareUrl()) {
-    share = h("button", { type: "button", class: "ghost small share" }, viewingSelf() ? "Share my people" : "Share phunk");
+    share = h("button", { type: "button", class: "ghost small share" }, viewingSelf() ? "Share with frens" : "Share phunk");
     share.addEventListener("click", () => { cheer(share); sharePeople(); });
   }
   box.replaceChildren(h("p", {}, line), share);
