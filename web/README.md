@@ -52,6 +52,9 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
      and `PHUNK_TIP_FID` (the fid the money gun in the Tip tab tips; unset, there is no button).
      `PHUNK_BASE_RPC` (Base JSON-RPC for the "Voted NS" stamp, default
      `https://mainnet.base.org`; `off` hides it).
+   - Paused for now: the site reads the public node and ignores `PHUNK_NODE`,
+     `PHUNK_NODE_TOKEN`, `PHUNK_RATE` and `PHUNK_CONCURRENCY` (see `NODE` in
+     `api/index.py` to turn them back on).
    - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
      `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
      Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
