@@ -11,6 +11,7 @@
     phunk key revoke             # the saved key removes itself; no seed phrase
     phunk post "hello from my own node"
     phunk feed --hide warpcast   # who you follow, minus one app
+    phunk path dwr vitalik.eth   # who could introduce them: mutual-follow paths
     phunk follow dwr
     phunk ui                     # local web client on http://127.0.0.1:8008
 """
@@ -26,6 +27,8 @@ import sys
 from pathlib import Path
 
 from .hub import DEFAULT_NODE, Hub
+from .path import MAX_FOLLOWING, MAX_FOLLOWS, paths
+from .people import TALK_DAYS
 
 
 async def _fid(hub: Hub, who: str) -> int:
@@ -231,6 +234,45 @@ async def run_feed(hub: Hub, args) -> None:
             break
 
 
+def _n(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+async def run_path(hub: Hub, args) -> None:
+    start, end = await asyncio.gather(_fid(hub, args.start), _fid(hub, args.end))
+    avoid = await asyncio.gather(*(_fid(hub, w.strip()) for w in (args.avoid or "").split(",") if w.strip()))
+    found = await paths(hub, start, end, max_hops=args.hops, limit=args.n, avoid=set(avoid))
+    fids = {f for p in found.paths for f in p.fids} | {start, end}
+    users = await asyncio.gather(*(hub.user(f) for f in fids), return_exceptions=True)
+    names = {u.fid: f"@{u.username}" for u in users if not isinstance(u, Exception) and u.username}
+
+    def name(fid: int) -> str:
+        return names.get(fid, f"fid {fid}")
+
+    a, b = name(start), name(end)
+    if found.hops is None:
+        print(f"No path of up to {args.hops} mutual follows between {a} and {b}.")
+    elif found.hops == 1:
+        print(f"{a} and {b} follow each other.")
+    else:
+        more = f", showing {len(found.paths)}" if found.total > len(found.paths) else ""
+        print(f"{a} to {b}: {found.hops} steps, {_n(found.total, 'path')}{more}. "
+              "Every step is a mutual follow.")
+        for i, p in enumerate(found.paths, 1):
+            print(f"{i:3}. " + " <-> ".join(name(f) for f in p.fids))
+            first, last = p.via[0], p.via[-1]
+            talks = [f"{a} talked with {name(first)} {p.talks[0]}x"] if p.talks[0] else []
+            talks += [f"{b} with {name(last)} {p.talks[1]}x"] if p.talks[1] else []
+            if talks:
+                print(f"     {'; '.join(talks)} (last {TALK_DAYS} days)")
+    notes = [f"Read {found.lists} follow lists."]
+    if found.skipped:
+        notes.append(f"Left out {_n(found.skipped, 'account')} following more than {MAX_FOLLOWING}.")
+    if found.partial:
+        notes.append(f"Only the newest {MAX_FOLLOWS} follows of each end were read.")
+    print("\n" + " ".join(notes))
+
+
 async def run_ui(hub: Hub, args) -> None:
     from .onchain import base_rpc_from_env
     from .ui import serve, tip_fid_from_env
@@ -263,6 +305,8 @@ async def run(args) -> None:
             await run_write(hub, args)
         elif args.cmd == "feed":
             await run_feed(hub, args)
+        elif args.cmd == "path":
+            await run_path(hub, args)
         elif args.cmd == "info":
             info = await hub.info()
             print(json.dumps({k: info.get(k) for k in ("dbStats", "numShards")}, indent=2))
@@ -349,6 +393,16 @@ def main(argv=None) -> None:
     f.add_argument("--hours", type=int, default=24)
     f.add_argument("--only", help="only these apps, comma-separated (e.g. warpcast,fireflyapp)")
     f.add_argument("--hide", help="hide these apps, comma-separated")
+
+    pa = sub.add_parser("path", help="who could introduce two people: paths of mutual follows",
+                        description="The shortest paths from START to END where every step is a "
+                                    "mutual follow, up to 3 steps, warmest first. Reads about one "
+                                    "follow list per account the two of them follow.")
+    pa.add_argument("start", help="username or fid")
+    pa.add_argument("end", help="username or fid")
+    pa.add_argument("-n", type=int, default=10, help="paths to show (default 10)")
+    pa.add_argument("--hops", type=int, default=3, choices=(1, 2, 3), help="longest path (default 3)")
+    pa.add_argument("--avoid", help="never go through these, comma-separated usernames or fids")
 
     u = sub.add_parser("ui", help="local web client: people to connect with, then casts",
                        description="Serve a small web client on this machine. With an app key "

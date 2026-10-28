@@ -89,6 +89,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `app_of(message)`, `app_name(app_fid)` | | which app signed a cast, like or follow |
 | `feed(fid, since=, limit=, follows=)` | `/v1/linksByFid` + `/v1/castsByFid` | recent casts from everyone `fid` follows (or just `follows`), newest first |
 | `recommend.suggest(hub, fid)` | `/v1/linksByFid`, `/v1/castsByFid`, `/v1/castsByParent` | people to follow: friends of friends and shared channels, each with its reasons |
+| `path.paths(hub, start, end, avoid=)` | `/v1/linksByFid` (+ casts and reactions, to rank) | who could introduce whom: the shortest paths of mutual follows, up to 3 steps, warmest first |
 | `fid_by_address(address)` | `/v1/onChainIdRegistryEventByAddress` | the fid a custody address owns |
 | `eth_addresses(fid)` | `/v1/verificationsByFid` | every Ethereum address the account verified (the primary one is just one of them) |
 | `signers(fid, requester_fids=)` | `/v1/signersByFid` | active keys, `currentUserNonce`, and each app's nonce (`requesterFidNonces`) |
@@ -188,6 +189,7 @@ phunk post "hello" --channel https://warpcast.com/~/channel/politics
 phunk like 3:0x<hash>
 phunk follow dwr
 phunk feed --hide warpcast         # who you follow, filtered by app
+phunk path dwr vitalik.eth         # who could introduce them: paths of mutual follows
 phunk ui                           # local web client: people to connect with, then casts
 ```
 
