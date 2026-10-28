@@ -727,3 +727,34 @@ def test_paths_stops_early_for_mutuals_and_says_when_there_is_none():
     assert direct.hops == 1 and [p.fids for p in direct.paths] == [(1, 9)] and direct.lists == 2
     assert reads == 2  # mutuals already: no one else's list, no casts
     assert none.hops is None and none.paths == [] and none.total == 0
+
+
+def test_paths_two_steps_read_only_whom_both_follow():
+    from phunk.path import paths
+
+    # 1 follows 2, 3, 5; 9 follows 2, 6. Only 2 is followed by both, and is
+    # a mutual of both: a 2-step path that needs one more list, not four.
+    g = _graph((1, 5), (9, 6), mutual=[(1, 2), (2, 9), (1, 3), (3, 6), (6, 9)])
+
+    async def links(request):
+        fid = int(request.query["fid"])
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def nothing(request):
+        return web.json_response({"messages": []})
+
+    async def test(hub, calls):
+        two = await paths(hub, 1, 9)
+        read_two = sorted(q["fid"] for p, q in calls if p == "/v1/linksByFid")
+        calls.clear()
+        three = await paths(hub, 1, 9, avoid={2})  # no 2 steps without 2: read everyone
+        read_three = sorted(q["fid"] for p, q in calls if p == "/v1/linksByFid")
+        return two, read_two, three, read_three
+
+    two, read_two, three, read_three = run({"/v1/linksByFid": links, "/v1/castsByFid": nothing,
+                                            "/v1/reactionsByFid": nothing}, test)
+    assert [p.fids for p in two.paths] == [(1, 2, 9)] and two.lists == 3
+    assert read_two == ["1", "2", "9"]
+    assert [p.fids for p in three.paths] == [(1, 3, 6, 9)] and three.lists == 6
+    assert read_three == ["1", "2", "3", "5", "6", "9"]

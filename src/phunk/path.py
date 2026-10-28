@@ -3,11 +3,12 @@
 A step counts only when both accounts follow each other. Paths stop at 3
 steps (you, A, B, them): a longer chain is too long for an intro.
 
-What it reads: whom you follow, and whom each of them follows (that is how
-it knows who follows you back). The same for the other person. Those lists
-also say whether a friend of yours and a friend of theirs follow each other,
-so 3 steps need nothing more: about one request per account the two of you
-follow.
+What it reads: whom you follow, and whom the other person follows. For 2
+steps, the lists of the accounts you both follow (a go-between follows you
+both back), often a few dozen requests. Only when that finds nothing, the
+list of every account either of you follows. Those lists also say whether a
+friend of yours and a friend of theirs follow each other, so 3 steps need
+nothing more: about one request per account the two of you follow.
 
 Accounts that follow thousands make most short paths, and almost never
 introduce anyone, so go-betweens who follow more than `MAX_FOLLOWING` are
@@ -128,21 +129,34 @@ async def paths(hub: Hub, start: int, end: int, *, max_hops: int = MAX_HOPS, lim
     """The shortest mutual-follow paths from `start` to `end`, warmest first.
     Nobody in `avoid` is a go-between.
 
-    About one request per account the two of them follow (cut at
-    `max_follows` each), plus a few for who talked with whom."""
+    2 steps first: a go-between there is someone both of them follow, so
+    only those accounts' lists are read (often a few dozen requests). Only
+    when that finds nothing does 3 steps read a list for every account
+    either of them follows (cut at `max_follows` each). Plus a few requests
+    for who talked with whom."""
     fa, fb = await asyncio.gather(_follows(hub, start, max_follows), _follows(hub, end, max_follows))
     follows = {start: fa, end: fb}
     out = Found(start, end, None, lists=2, partial=max(len(fa), len(fb)) >= max_follows)
-    if max_hops >= 2 and not (end in fa and start in fb):
-        others = sorted((fa | fb) - {start, end})
-        # One more than the cap is enough to know someone follows too many.
-        sets = await asyncio.gather(*(_follows(hub, f, max_following + 1) for f in others))
-        follows.update(zip(others, sets))
-        out.lists += len(others)
-    skip = {f for f, s in follows.items() if f not in (start, end) and len(s) > max_following}
-    out.skipped = len(skip)
 
-    found = find(start, end, follows, max_hops=max_hops, skip=skip | set(avoid))
+    async def read(fids: set[int]) -> None:
+        todo = sorted(fids - set(follows))
+        # One more than the cap is enough to know someone follows too many.
+        sets = await asyncio.gather(*(_follows(hub, f, max_following + 1) for f in todo))
+        follows.update(zip(todo, sets))
+        out.lists += len(todo)
+
+    def search(hops: int) -> list[tuple[int, ...]]:
+        skip = {f for f, s in follows.items() if f not in (start, end) and len(s) > max_following}
+        out.skipped = len(skip)
+        return find(start, end, follows, max_hops=hops, skip=skip | set(avoid))
+
+    found = search(1)
+    if not found and max_hops >= 2:
+        await read((fa & fb) - {start, end})
+        found = search(2)
+    if not found and max_hops >= 3:
+        await read((fa | fb) - {start, end})
+        found = search(3)
     if not found:
         return out
     talked_start = talked_end = collections.Counter()

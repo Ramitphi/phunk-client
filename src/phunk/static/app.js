@@ -31,6 +31,7 @@ const state = {
   dismissed: new Set(store.get("dismissed", [])),
   feedSeq: 0,
   peopleSeq: 0,
+  pathSeq: 0,
   feedLoaded: false,
   channels: new Set(),
   tab: "people",
@@ -1262,6 +1263,7 @@ function renderPeople() {
 async function loadPeople(refresh = false) {
   const box = $("#people");
   const seq = ++state.peopleSeq;
+  loadPath();
   if (!canBrowse()) {
     box.replaceChildren(h("div", { class: "card empty" }, lookupPrompt()));
     $("#summary").replaceChildren();
@@ -1290,6 +1292,118 @@ async function loadPeople(refresh = false) {
     track("People failed", { reason: failure(e), took: secs(performance.now() - started) });
     box.replaceChildren(h("div", { class: "card empty" }, `Could not load people: ${e.message}`));
   }
+}
+
+// -------------------------------------------------------------- paths
+// Who could introduce you to the account you're looking at: the shortest
+// chain of mutual follows, from /api/path. Shown when phunk knows who you
+// are (inside a Farcaster client, or `phunk ui` with a key) and you're
+// looking at someone else.
+
+const myFid = () => (state.me && state.me.fid ? Number(state.me.fid) : null);
+const times = (n) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+
+function pathHead() {
+  return h("div", { class: "why" }, h("span", { class: "kind path" }, "How you're connected"));
+}
+
+async function loadPath() {
+  const box = $("#path");
+  const seq = ++state.pathSeq;
+  const me = myFid();
+  if (!me || !state.who || viewingSelf() || !canBrowse()) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  box.replaceChildren(h("section", { class: "card pathcard" }, pathHead(),
+    h("p", { class: "muted small" }, h("span", { class: "spinner" }),
+      `Looking for people who could introduce you to ${whoLabel()}…`)));
+  const started = performance.now();
+  try {
+    const d = await api(`/api/path?${new URLSearchParams({ from: String(me), to: state.who })}`);
+    if (seq !== state.pathSeq) return;
+    track("Path", { hops: d.hops ? String(d.hops) : "none", took: secs(performance.now() - started) });
+    box.replaceChildren(pathCard(d));
+  } catch (e) {
+    if (seq !== state.pathSeq) return;
+    track("Path failed", { reason: failure(e) });
+    box.hidden = true;
+    box.replaceChildren();
+  }
+}
+
+function pathCard(d) {
+  const user = (f) => d.users[String(f)] || { fid: f };
+  const them = handle(user(d.to));
+  const card = h("section", { class: "card pathcard", "aria-label": `How you're connected to ${them}` }, pathHead());
+  if (d.hops === 1) {
+    card.append(h("p", { class: "path-line" }, `You and ${them} follow each other.`));
+    return card;
+  }
+  if (!d.hops) {
+    card.append(
+      h("p", { class: "path-line" }, d.reach >= 3
+        ? `No chain of mutual follows to ${them} yet.`
+        : `No one you both follow follows you both back yet.`),
+      h("p", { class: "muted small" }, `Follow a few people ${them} talks with, and check again later.`));
+    return card;
+  }
+  const n = d.total;
+  card.append(h("p", { class: "path-line" }, d.hops === 2
+    ? `${n} ${n === 1 ? "person" : "people"} could introduce you to ${them}`
+    : `${n} ${n === 1 ? "chain" : "chains"} of friends lead to ${them}`));
+  const rows = d.paths.map((p, i) => pathRow(p, i, d, user));
+  rows.slice(1).forEach((r) => { r.hidden = true; });
+  card.append(h("ol", { class: "paths" }, rows));
+  const hiddenCount = rows.length - 1;
+  if (hiddenCount > 0) {
+    const more = h("button", { type: "button", class: "ghost small" }, `Show ${hiddenCount} more`);
+    more.addEventListener("click", () => {
+      track("Path more", {});
+      rows.forEach((r) => { r.hidden = false; });
+      more.replaceWith(n > rows.length ? h("p", { class: "muted small" }, `and ${n - rows.length} more`) : "");
+    });
+    card.append(more);
+  }
+  return card;
+}
+
+function pathRow(p, i, d, user) {
+  const via = p.fids.slice(1, -1).map(user);
+  const steps = p.fids.flatMap((f, j) => {
+    const u = user(f);
+    let step;
+    if (f === d.from) {
+      step = h("span", { class: "step you" }, avatar(u), h("span", {}, "You"));
+    } else {
+      step = h("button", { type: "button", class: "step", title: `Open ${handle(u)}` }, avatar(u), h("span", {}, handle(u)));
+      step.addEventListener("click", () => { track("Path profile", {}); viewProfile(u); });
+    }
+    return j ? [h("span", { class: "link", title: "follow each other" }, "⇄"), step] : [step];
+  });
+  const why = [];
+  if (p.talks[0]) why.push(`You talked with ${handle(via[0])} ${times(p.talks[0])} lately.`);
+  if (p.talks[1]) why.push(`${handle(user(d.to))} talked with ${handle(via[via.length - 1])} ${times(p.talks[1])} lately.`);
+  const ask = h("button", { type: "button" }, `Ask ${handle(via[0])} for an intro`);
+  ask.addEventListener("click", () => {
+    track("Intro ask", { hops: String(p.fids.length - 1), slot: slot(i) });
+    cheer(ask);
+    compose(introText(p, user));
+  });
+  return h("li", { class: "path-row" }, h("div", { class: "chain" }, steps),
+    why.length ? h("p", { class: "muted small" }, why.join(" ")) : null,
+    h("div", { class: "pactions" }, ask));
+}
+
+// The cast that asks for the intro, to the first person on the path.
+function introText(p, user) {
+  const at = (u) => (u.username ? `@${u.username}` : handle(u));
+  const [, first, ...rest] = p.fids.map(user);
+  const them = rest[rest.length - 1];
+  if (rest.length === 1) return `${at(first)} hey! Would you introduce me to ${at(them)}? 🫂`;
+  return `${at(first)} hey! Would you introduce me to ${at(rest[0])}? I'd love to get to know ${at(them)} 🫂`;
 }
 
 // ------------------------------------------------------------------ setup

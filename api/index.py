@@ -10,6 +10,7 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET /api/people?who=dwr
     GET /api/feed?who=dwr&hours=24
     GET /api/suggestions?who=dwr
+    GET /api/path?from=dwr&to=vitalik.eth   who could introduce them
     POST /api/webhook         the mini app's signed add / remove events
     POST /api/connect         {"key": "0x..."}: start approving a key made in the page
     GET  /api/connect?token=  where that approval stands
@@ -84,12 +85,15 @@ CONCURRENCY = 12
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
-          "submit": connect.RateLimit(60, 60)}
+          "submit": connect.RateLimit(60, 60),
+          # A path lookup can read hundreds of follow lists; the CDN answers repeats.
+          "path": connect.RateLimit(20, 600)}
 CACHE = {
     "/api/me": "public, max-age=300, s-maxage=3600",
     "/api/people": "public, max-age=60, s-maxage=600, stale-while-revalidate=3600",
     "/api/feed": "public, max-age=60, s-maxage=300, stale-while-revalidate=1800",
     "/api/suggestions": "public, max-age=60, s-maxage=600, stale-while-revalidate=3600",
+    "/api/path": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
 }
 
 # One event loop on a background thread for the life of the instance, so the
@@ -286,6 +290,8 @@ async def app(scope, receive, send):
         else:
             status, body = 405, {"error": "GET only"}
         cache = "no-store"
+    elif path == "/api/path" and scope["method"] in ("GET", "HEAD") and not LIMITS["path"].allow(_client_ip(scope)):
+        status, body, cache = 429, {"error": "slow down a little and try again in a few minutes"}, "no-store"
     elif scope["method"] in ("GET", "HEAD"):
         target = scope["path"] + ("?" + scope["query_string"].decode("latin-1") if scope.get("query_string") else "")
         status, body, cache = await respond_async(target)

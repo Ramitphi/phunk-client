@@ -276,6 +276,10 @@ That is about one request per account the two of you follow. One step
 further would mean reading the lists of everyone *they* follow too: about a
 million requests instead of a thousand.
 
+2 steps are cheaper still, so `paths` tries them first. A go-between on a
+2-step path is someone you both follow, so only those accounts' lists are
+read, often a few dozen. The full read happens only when that finds nothing.
+
 ```python
 import asyncio
 from phunk import Hub

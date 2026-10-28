@@ -385,6 +385,26 @@ img.avatar { background: var(--chip); }
 .kind.reconnect { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-edge); }
 .kind.circle { background: var(--tint); color: var(--tint-text); }
 .kind.bridge { background: var(--blue-bg); color: var(--blue-text); }
+.kind.path { background: var(--green-bg); color: var(--green-text); border-color: var(--green-text); }
+
+/* How you're connected: the chain of mutual follows to the account looked up. */
+.pathcard { box-shadow: var(--shadow); }
+.pathcard .why { margin: 0 0 8px; }
+.pathcard > p { margin: 0 0 10px; }
+.path-line { font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: -0.02em; line-height: 1.2; text-wrap: balance; }
+.paths { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 10px; }
+.path-row { display: grid; gap: 8px; min-width: 0; background: var(--bg); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.path-row p { margin: 0; }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.chain .step {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 34px;
+  padding: 2px 10px 2px 2px; border-radius: 999px; border: 1.5px solid var(--edge);
+  background: var(--card); color: var(--text); font-weight: 650; font-size: 14px;
+}
+.chain .step.you { background: var(--tint); color: var(--tint-text); }
+.chain .step .avatar { width: 28px; height: 28px; font-size: 13px; border-width: 1px; flex: none; }
+.chain .step > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chain .link { color: var(--muted); font-weight: 800; }
 .previews { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-bottom: 12px; }
 .preview { min-width: 0; overflow-wrap: anywhere; background: var(--bg); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 10px; }
 .preview .text { margin: 2px 0 0; font-size: 14px; }
