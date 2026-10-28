@@ -1264,7 +1264,6 @@ function renderPeople() {
 async function loadPeople(refresh = false) {
   const box = $("#people");
   const seq = ++state.peopleSeq;
-  loadPath();
   if (!canBrowse()) {
     box.replaceChildren(h("div", { class: "card empty" }, lookupPrompt()));
     $("#summary").replaceChildren();
@@ -1296,10 +1295,9 @@ async function loadPeople(refresh = false) {
 }
 
 // -------------------------------------------------------------- paths
-// Who could introduce you to the account you're looking at: the shortest
-// chain of mutual follows, from /api/path. Shown when phunk knows who you
-// are (inside a Farcaster client, or `phunk ui` with a key) and you're
-// looking at someone else.
+// Who could introduce you to someone: the shortest chain of mutual follows,
+// from /api/path. On the You tab, when phunk knows who you are (inside a
+// Farcaster client, or `phunk ui` with a key).
 
 const myFid = () => (state.me && state.me.fid ? Number(state.me.fid) : null);
 const times = (n) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
@@ -1308,30 +1306,39 @@ function pathHead() {
   return h("div", { class: "why" }, h("span", { class: "kind path" }, "How you're connected"));
 }
 
-async function loadPath() {
+async function loadPath(target) {
   const box = $("#path");
   const seq = ++state.pathSeq;
   const me = myFid();
-  if (!me || !state.who || viewingSelf() || !canBrowse()) {
+  target = (target || "").trim().replace(/^@/, "");
+  if (!me || !target) {
     box.hidden = true;
     box.replaceChildren();
     return;
   }
+  const label = /^\d+$/.test(target) ? `fid ${target}` : `@${target}`;
   box.hidden = false;
   box.replaceChildren(h("section", { class: "card pathcard" }, pathHead(),
     h("p", { class: "muted small" }, h("span", { class: "spinner" }),
-      `Looking for people who could introduce you to ${whoLabel()}…`)));
+      `Looking for people who could introduce you to ${label}…`)));
   const started = performance.now();
+  const show = (card) => {
+    box.replaceChildren(card);
+    box.scrollIntoView({ block: "start", behavior: calm() ? "auto" : "smooth" });
+  };
   try {
-    const d = await api(`/api/path?${new URLSearchParams({ from: String(me), to: state.who })}`);
+    const d = await api(`/api/path?${new URLSearchParams({ from: String(me), to: target })}`);
     if (seq !== state.pathSeq) return;
     track("Path", { hops: d.hops ? String(d.hops) : "none", took: secs(performance.now() - started) });
-    box.replaceChildren(pathCard(d));
+    show(pathCard(d));
   } catch (e) {
     if (seq !== state.pathSeq) return;
     track("Path failed", { reason: failure(e) });
-    box.hidden = true;
-    box.replaceChildren();
+    const why = e.status === 404 ? e.message
+      : e.status === 400 ? "That's you. Try someone else."
+      : e.status === 429 ? "That's a lot of lookups. Try again in a few minutes."
+      : "Couldn't check right now. Try again in a minute.";
+    show(h("section", { class: "card pathcard" }, pathHead(), h("p", { class: "path-line" }, why)));
   }
 }
 
@@ -1503,6 +1510,7 @@ function renderAccount() {
   }
   box.replaceChildren(...rows);
   box.hidden = !rows.length;
+  $("#reach").hidden = !myFid();
 }
 
 function renderWho() {
@@ -1606,6 +1614,12 @@ async function init() {
     lookUp($("#lookup-name").value);
   });
   $("#lookup-me").addEventListener("click", () => { track("Back to me"); lookUp(""); });
+  $("#reach").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const name = $("#reach-name").value.trim().replace(/^@/, "");
+    track("Path lookup", { by: /^\d+$/.test(name) ? "fid" : name ? "username" : "empty" });
+    if (name) loadPath(name);
+  });
 
   $("#compose-close").addEventListener("click", () => setTab(state.lastTab));
   $("#compose-channel").addEventListener("input", renderChannelPicks);

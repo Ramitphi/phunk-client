@@ -27,6 +27,15 @@
       <p class="muted">No API key. No middleman. A Snapchain node and one small client.</p>
     </div>
     <div id="account" class="card account" hidden></div>
+    <form id="reach" class="lookup reach" hidden>
+      <label for="reach-name">Who could introduce you?</label>
+      <div class="row">
+        <input id="reach-name" placeholder="anyone, e.g. vitalik.eth" autocomplete="off" autocapitalize="off">
+        <button type="submit" class="cta">Find</button>
+      </div>
+      <p class="muted small">A chain of people where every step is a mutual follow.</p>
+    </form>
+    <div id="path" aria-live="polite" hidden></div>
     <form id="lookup" class="lookup">
       <label for="lookup-name">See anyone's people</label>
       <div class="row">
@@ -51,7 +60,6 @@
   <section id="people-pane" class="pane" data-pane="people">
     <h1 class="pane-title">Your <span class="hl">people</span></h1>
     <div id="summary" class="summary"></div>
-    <div id="path" aria-live="polite" hidden></div>
     <div id="people" class="people" aria-live="polite"></div>
     <div class="row between muted small foot">
       <span id="people-status"></span>
