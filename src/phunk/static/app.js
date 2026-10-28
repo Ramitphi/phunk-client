@@ -1357,7 +1357,8 @@ function pathCard(d) {
     : `${n} ${n === 1 ? "chain" : "chains"} of friends lead to ${them}`));
   const rows = d.paths.map((p, i) => pathRow(p, i, d, user));
   rows.slice(1).forEach((r) => { r.hidden = true; });
-  card.append(h("ol", { class: "paths" }, rows));
+  card.append(h("ol", { class: "paths" }, rows),
+    h("p", { class: "muted small" }, "Asking opens a private message in Farcaster. Nothing is posted."));
   const hiddenCount = rows.length - 1;
   if (hiddenCount > 0) {
     const more = h("button", { type: "button", class: "ghost small" }, `Show ${hiddenCount} more`);
@@ -1387,24 +1388,27 @@ function pathRow(p, i, d, user) {
   const why = [];
   if (p.talks[0]) why.push(`You talked with ${handle(via[0])} ${times(p.talks[0])} lately.`);
   if (p.talks[1]) why.push(`${handle(user(d.to))} talked with ${handle(via[via.length - 1])} ${times(p.talks[1])} lately.`);
-  const ask = h("button", { type: "button" }, `Ask ${handle(via[0])} for an intro`);
+  const ask = h("button", { type: "button", title: `Opens a private message to ${handle(via[0])}` },
+    `Ask ${handle(via[0])} for an intro`);
   ask.addEventListener("click", () => {
     track("Intro ask", { hops: String(p.fids.length - 1), slot: slot(i) });
     cheer(ask);
-    compose(introText(p, user));
+    // A private message (a Direct Cast), not a public cast: Farcaster's
+    // message composer, filled in. The person sends it; phunk holds no key.
+    openFarcaster(`/~/inbox/create/${encodeURIComponent(via[0].fid)}?text=${encodeURIComponent(introText(p, user))}`);
   });
   return h("li", { class: "path-row" }, h("div", { class: "chain" }, steps),
     why.length ? h("p", { class: "muted small" }, why.join(" ")) : null,
     h("div", { class: "pactions" }, ask));
 }
 
-// The cast that asks for the intro, to the first person on the path.
+// The private message that asks the first person on the path for the intro.
 function introText(p, user) {
   const at = (u) => (u.username ? `@${u.username}` : handle(u));
-  const [, first, ...rest] = p.fids.map(user);
+  const [, , ...rest] = p.fids.map(user);
   const them = rest[rest.length - 1];
-  if (rest.length === 1) return `${at(first)} hey! Would you introduce me to ${at(them)}? 🫂`;
-  return `${at(first)} hey! Would you introduce me to ${at(rest[0])}? I'd love to get to know ${at(them)} 🫂`;
+  if (rest.length === 1) return `Hey! Would you introduce me to ${at(them)}? phunk says you two follow each other 🫂`;
+  return `Hey! Would you introduce me to ${at(rest[0])}? I'd love to get to know ${at(them)}, and phunk says you two follow each other 🫂`;
 }
 
 // ------------------------------------------------------------------ setup

@@ -117,8 +117,9 @@ the page:
   the viewer is): the people who could introduce them, each step a mutual
   follow (`GET /api/path`, `phunk.path`). On the public node it looks for
   2 steps only, which read just the accounts both of them follow; on your
-  own node, 3. **Ask for an intro** opens a cast to the first person on the
-  path in the client's composer. Lookups are cached on the CDN for an hour
+  own node, 3. **Ask for an intro** opens a private message (a Direct Cast)
+  to the first person on the path, filled in, through Farcaster's
+  `/~/inbox/create/<fid>?text=` link; nothing is posted publicly. Lookups are cached on the CDN for an hour
   and limited to 20 per visitor every 10 minutes,
 - offers **Share on Farcaster** above the cards: a cast with the mini app
   attached, opened in the client's own composer (on the plain site, in
@@ -308,7 +309,7 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Path failed` | It doesn't (the card hides) | `reason` |
 | `Path more` | Show more paths | |
 | `Path profile` | A person on a path is tapped (opens their profile) | |
-| `Intro ask` | Ask for an intro (opens the composer) | `hops`, `slot` |
+| `Intro ask` | Ask for an intro (opens a private message to the first person on the path) | `hops`, `slot` |
 | `Share` | Share on Farcaster: a cast with the mini app attached, in the host's composer (mini app) or Farcaster's (web) | `from`: `miniapp` or `web`; `self`: `yes` or `no` |
 | `Liked`, `Unliked` | Like / unlike went through (mini app, connected) | |
 | `Connect shown` | The one-time approval sheet opens (Follow or Like before phunk is connected) | |
