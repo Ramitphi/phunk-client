@@ -223,18 +223,24 @@ def test_site_errors_are_plain_words(site):
         assert site.respond(target) == (400, {"error": error}, "no-store"), target
 
 
-def test_site_reads_the_public_node_for_now(monkeypatch):
-    """PHUNK_NODE and friends are paused: the site reads the public node at its
-    default pace, and a gateway token in the environment is never sent."""
-    monkeypatch.setenv("PHUNK_NODE", "https://node.example")
+def test_site_reads_the_node_from_the_environment(monkeypatch):
+    """PHUNK_NODE and friends pick the node, so switching is a Vercel setting."""
+    monkeypatch.setenv("PHUNK_NODE", "https://node.example/")
     monkeypatch.setenv("PHUNK_NODE_TOKEN", "tok-very-secret-123")
     monkeypatch.setenv("PHUNK_RATE", "150")
     monkeypatch.setenv("PHUNK_CONCURRENCY", "48")
-    spec = importlib.util.spec_from_file_location("phunk_site_public", ROOT / "api" / "index.py")
+    spec = importlib.util.spec_from_file_location("phunk_site_env", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert (mod.NODE, mod.NODE_TOKEN, mod.RATE, mod.CONCURRENCY) == (
-        "https://haatz.quilibrium.com", None, 20.0, 12)
+        "https://node.example", "tok-very-secret-123", 150.0, 48)
+    # Unset, the public node at its default pace.
+    assert mod.node_from_env({}) == ("https://haatz.quilibrium.com", None, 20.0, 12)
+    # Pointed at the public node, the gateway token stays home and the pace is capped.
+    env = {"PHUNK_NODE": "https://HAATZ.quilibrium.com/", "PHUNK_NODE_TOKEN": "tok-very-secret-123",
+           "PHUNK_RATE": "150", "PHUNK_CONCURRENCY": "48"}
+    assert mod.node_from_env(env) == ("https://HAATZ.quilibrium.com", None, 20.0, 12)
+    assert mod.node_from_env({**env, "PHUNK_RATE": "5", "PHUNK_CONCURRENCY": "4"})[2:] == (5.0, 4)
 
 
 def test_vercel_runs_the_weekly_digest():

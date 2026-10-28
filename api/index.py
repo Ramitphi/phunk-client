@@ -21,7 +21,8 @@ Settings (environment variables, optional):
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
-                       (these four are paused: the site reads the public node, see NODE)
+                       (pointed at the public node, the token is never sent there
+                       and the pace stays at its defaults)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -70,17 +71,24 @@ MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}
 # To turn them back on, restore this line:
 # SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
 SIGNER_URL = None
-# Paused: the site reads the public node, whatever PHUNK_NODE says, while our
-# own node catches up. The rate and concurrency are the public node's defaults,
-# and the gateway token stays home. To read your own node again, restore these:
-# NODE = os.environ.get("PHUNK_NODE") or DEFAULT_NODE
-# NODE_TOKEN = os.environ.get("PHUNK_NODE_TOKEN") or None
-# RATE = float(os.environ.get("PHUNK_RATE") or 20)
-# CONCURRENCY = int(os.environ.get("PHUNK_CONCURRENCY") or 12)
-NODE = DEFAULT_NODE  # https://haatz.quilibrium.com
-NODE_TOKEN = None
-RATE = 20.0
-CONCURRENCY = 12
+
+
+def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
+    """(node, token, rate, concurrency) from PHUNK_NODE and friends.
+
+    Switch nodes from Vercel's settings alone: the public node while your own
+    one catches up, your gateway once it's in sync. The public node never gets
+    the gateway token, and never more than its default pace."""
+    node = (env.get("PHUNK_NODE") or DEFAULT_NODE).strip().rstrip("/")
+    token = env.get("PHUNK_NODE_TOKEN") or None
+    rate = float(env.get("PHUNK_RATE") or 20)
+    concurrency = int(env.get("PHUNK_CONCURRENCY") or 12)
+    if urlsplit(node).hostname == urlsplit(DEFAULT_NODE).hostname:
+        token, rate, concurrency = None, min(rate, 20.0), min(concurrency, 12)
+    return node, token, rate, concurrency
+
+
+NODE, NODE_TOKEN, RATE, CONCURRENCY = node_from_env()
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
