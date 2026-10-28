@@ -1206,7 +1206,8 @@ function renderSummary() {
     share = h("button", { type: "button", class: "ghost small share" }, "Share on Farcaster");
     share.addEventListener("click", () => { cheer(share); sharePeople(); });
   }
-  box.replaceChildren(h("p", {}, line), share);
+  // No share link (local `phunk ui`): leave the button out, not the text "null".
+  box.replaceChildren(...[h("p", {}, line), share].filter(Boolean));
 }
 
 // ------------------------------------------------------------- share
