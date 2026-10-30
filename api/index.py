@@ -21,6 +21,8 @@ Settings (environment variables, optional):
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
+                       (pointed at the public node, the token is never sent there
+                       and the pace stays at its defaults)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -69,6 +71,23 @@ MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}
 # To turn them back on, restore this line:
 # SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
 SIGNER_URL = None
+
+
+def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
+    """(node, token, rate, concurrency) from PHUNK_NODE and friends.
+
+    Switch nodes from Vercel's settings alone: the public node while your own
+    one catches up, your gateway once it's in sync. The public node never gets
+    the gateway token, and never more than its default pace."""
+    node = (env.get("PHUNK_NODE") or DEFAULT_NODE).strip().rstrip("/")
+    token = env.get("PHUNK_NODE_TOKEN") or None
+    rate = float(env.get("PHUNK_RATE") or 20)
+    concurrency = int(env.get("PHUNK_CONCURRENCY") or 12)
+    if urlsplit(node).hostname == urlsplit(DEFAULT_NODE).hostname:
+        token, rate, concurrency = None, min(rate, 20.0), min(concurrency, 12)
+    return node, token, rate, concurrency
+
+
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
@@ -96,10 +115,8 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
             threading.Thread(target=loop.run_forever, name="phunk", daemon=True).start()
 
             async def make() -> UI:
-                hub = Hub(os.environ.get("PHUNK_NODE") or DEFAULT_NODE,
-                          rate=float(os.environ.get("PHUNK_RATE") or 20),
-                          concurrency=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
-                          token=os.environ.get("PHUNK_NODE_TOKEN") or None)
+                node, token, rate, concurrency = node_from_env()
+                hub = Hub(node, rate=rate, concurrency=concurrency, token=token)
                 await hub.__aenter__()
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),
                           connect=SIGNER_URL is not None)

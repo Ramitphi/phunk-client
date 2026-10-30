@@ -52,6 +52,9 @@ vercel dev -L              # both services, routed as on Vercel, on :3000
      and `PHUNK_TIP_FID` (the fid the money gun in the Tip tab tips; unset, there is no button).
      `PHUNK_BASE_RPC` (Base JSON-RPC for the "Voted NS" stamp, default
      `https://mainnet.base.org`; `off` hides it).
+   - Pointed at the public node, the site never sends it `PHUNK_NODE_TOKEN`
+     and keeps to its default pace (20 a second, 12 in flight), whatever
+     `PHUNK_RATE` and `PHUNK_CONCURRENCY` say.
    - For your own node behind `scripts/gateway.sh`: `PHUNK_NODE=https://<gateway-domain>`,
      `PHUNK_NODE_TOKEN` (from `sudo ./gateway.sh token add phunk-social`; mark it
      Sensitive), `PHUNK_RATE=150` and `PHUNK_CONCURRENCY=48`.
@@ -329,6 +332,10 @@ slow or down.
 - Each function instance keeps its own in-memory caches and talks to the
   node at `PHUNK_RATE` requests a second at most. If the public node starts
   refusing, point `PHUNK_NODE` at your own node (`scripts/node.sh`).
+- To switch nodes, change `PHUNK_NODE` in Vercel and redeploy; there's no
+  code change. While your own node catches up (`./node.sh status`), set it to
+  `https://haatz.quilibrium.com`. Once every shard is in sync, set it back to
+  your gateway.
 - **Refresh** re-reads the node only for results over a minute old, so a
   script sending `refresh=1` in a loop gets the cached answer. `/api/me`
   doesn't say which node the site reads from.

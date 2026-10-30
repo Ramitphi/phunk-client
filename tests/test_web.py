@@ -226,6 +226,30 @@ def test_site_errors_are_plain_words(site):
         assert site.respond(target) == (400, {"error": error}, "no-store"), target
 
 
+def test_site_never_sends_the_gateway_token_to_the_public_node(monkeypatch):
+    """The node comes from PHUNK_NODE and friends. Pointed at the public node,
+    the gateway token stays home and the pace stays at the public defaults."""
+    spec = importlib.util.spec_from_file_location("phunk_site_env", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    own = {"PHUNK_NODE": "https://node.example/", "PHUNK_NODE_TOKEN": "tok-very-secret-123",
+           "PHUNK_RATE": "150", "PHUNK_CONCURRENCY": "48"}
+    assert mod.node_from_env(own) == ("https://node.example", "tok-very-secret-123", 150.0, 48)
+    assert mod.node_from_env({}) == ("https://haatz.quilibrium.com", None, 20.0, 12)
+    public = dict(own, PHUNK_NODE="https://HAATZ.quilibrium.com/")
+    assert mod.node_from_env(public) == ("https://HAATZ.quilibrium.com", None, 20.0, 12)
+    assert mod.node_from_env(dict(public, PHUNK_RATE="5", PHUNK_CONCURRENCY="4"))[2:] == (5.0, 4)
+    # The site's own connection follows it: no Authorization header for the public node.
+    for k, v in dict(own, PHUNK_NODE="https://haatz.quilibrium.com").items():
+        monkeypatch.setenv(k, v)
+    _, ui = mod._start()
+    try:
+        assert ui.hub.url == "https://haatz.quilibrium.com" and "Authorization" not in ui.hub._headers
+    finally:
+        asyncio.run_coroutine_threadsafe(ui.hub.close(), mod._loop).result()
+        mod._loop.call_soon_threadsafe(mod._loop.stop)
+
+
 def test_vercel_runs_the_weekly_digest():
     config = json.loads((ROOT / "vercel.json").read_text())
     assert config["crons"] == [{"path": "/api/cron/digest", "schedule": "0 16 * * 2"}]
