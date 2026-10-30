@@ -1334,8 +1334,9 @@ async function loadPath(target) {
   } catch (e) {
     if (seq !== state.pathSeq) return;
     track("Path failed", { reason: failure(e) });
-    const why = e.status === 404 ? e.message
-      : e.status === 400 ? "That's you. Try someone else."
+    const why = e.status === 400 && /two different accounts/.test(e.message) ? "That's you. Try someone else."
+      : e.status === 404 ? e.message
+      : e.status === 400 ? "Couldn't look that name up. Check the spelling and try again."
       : e.status === 429 ? "That's a lot of lookups. Try again in a few minutes."
       : "Couldn't check right now. Try again in a minute.";
     show(h("section", { class: "card pathcard" }, pathHead(), h("p", { class: "path-line" }, why)));
@@ -1343,6 +1344,15 @@ async function loadPath(target) {
 }
 
 function pathCard(d) {
+  const card = pathCardBody(d);
+  if (d.capped && d.hops !== 1) {
+    card.append(h("p", { class: "muted small" },
+      `Checked the newest ${d.checked.toLocaleString("en-US")} follows on each side, so there may be more.`));
+  }
+  return card;
+}
+
+function pathCardBody(d) {
   const user = (f) => d.users[String(f)] || { fid: f };
   const them = handle(user(d.to));
   const card = h("section", { class: "card pathcard", "aria-label": `How you're connected to ${them}` }, pathHead());

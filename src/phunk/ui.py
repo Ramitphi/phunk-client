@@ -34,7 +34,7 @@ from aiohttp import web
 from .hub import DEFAULT_NODE, Hub, NodeError, NotFound
 from .models import Cast, User
 from .onchain import holders
-from .path import paths
+from .path import MAX_FOLLOWS, paths
 from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
@@ -247,7 +247,9 @@ class UI:
 
     def _fresh(self, hit, ttl: int, refresh: bool) -> bool:
         """Is a cached (time, future) still good to serve?"""
-        if not hit or (hit[1].done() and hit[1].exception()):
+        # A request that timed out cancels what it was waiting on; that is
+        # stale too (and .exception() on it would raise).
+        if not hit or (hit[1].done() and (hit[1].cancelled() or hit[1].exception())):
             return False
         return time.monotonic() - hit[0] < (self.min_refresh if refresh else ttl)
 
@@ -469,17 +471,21 @@ class UI:
         if start == end:
             raise BadRequest("pick two different accounts")
         key = (start, end)
+        max_follows = PUBLIC_MAX_FOLLOWS if self.public else MAX_FOLLOWS
         hit = self._paths.get(key)
         if not self._fresh(hit, PATH_TTL, q.get("refresh") == "1"):
-            max_follows = PUBLIC_MAX_FOLLOWS if self.public else 5000
             hit = (time.monotonic(), asyncio.ensure_future(
                 paths(self.hub, start, end, max_hops=self.path_hops, limit=PATH_SHOWN, max_follows=max_follows)))
             self._paths[key] = hit
             _trim(self._paths, MAX_WINDOWS)
-        found = await hit[1]
+        # Shielded: if this request times out, the shared lookup keeps going
+        # for the next one.
+        found = await asyncio.shield(hit[1])
         fids = list(dict.fromkeys([start, end, *(f for p in found.paths for f in p.fids)]))
         users = await asyncio.gather(*(self.user(f) for f in fids))
         return {"from": start, "to": end, "hops": found.hops, "reach": self.path_hops, "total": found.total,
+                # true: one of them follows more than `checked`; only the newest were read
+                "capped": found.partial, "checked": max_follows,
                 "paths": [{"fids": list(p.fids), "talks": list(p.talks)} for p in found.paths],
                 "users": {str(u.fid): {"fid": u.fid, "username": u.username, "display_name": u.display_name,
                                        "pfp": u.pfp} for u in users}}

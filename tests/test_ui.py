@@ -631,3 +631,53 @@ def test_path_stays_at_two_steps_on_the_public_node():
     assert UI(hub, public=True).path_hops == 2
     assert UI(hub).path_hops == 3
     assert UI(Hub("http://localhost:3381"), public=True).path_hops == 3
+
+
+def test_path_endpoint_says_when_the_follow_cap_cut_anything(monkeypatch):
+    import phunk.ui
+
+    monkeypatch.setattr(phunk.ui, "MAX_FOLLOWS", 2)  # "me" follows 3
+
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/path", params={"from": "me", "to": "bob"}) as r:
+            return r.status, await r.json()
+
+    status, body = run(test)
+    assert status == 200 and body["capped"] is True and body["checked"] == 2
+
+
+def test_a_timed_out_path_lookup_keeps_going_and_a_cancelled_one_is_retried(monkeypatch):
+    import phunk.ui
+    from phunk.models import User
+    from phunk.path import Found
+
+    calls = []
+
+    async def slow(hub, start, end, **kw):
+        calls.append(start)
+        if len(calls) == 1:
+            await asyncio.sleep(30)
+        return Found(start, end, None)
+
+    monkeypatch.setattr(phunk.ui, "paths", slow)
+
+    async def main():
+        async with Hub("http://127.0.0.1:9") as hub:  # never contacted
+            ui = UI(hub)
+            for f in (1, 2):  # names already cached: no node needed
+                done = asyncio.get_running_loop().create_future()
+                done.set_result(User(fid=f))
+                ui._users[f] = done
+            first = asyncio.ensure_future(ui.path_json({"from": "1", "to": "2"}))
+            await asyncio.sleep(0.05)
+            first.cancel()  # the hosted site's timeout
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            shared = ui._paths[(1, 2)][1]
+            kept_going = not shared.cancelled()
+            shared.cancel()  # had it been cancelled anyway, the next request starts over
+            await asyncio.sleep(0)
+            return kept_going, await ui.path_json({"from": "1", "to": "2"})
+
+    kept_going, out = asyncio.run(main())
+    assert kept_going and out["hops"] is None and calls == [1, 1]

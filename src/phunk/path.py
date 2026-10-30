@@ -55,7 +55,7 @@ class Found:
     paths: list[Path] = field(default_factory=list)  # the shortest ones, warmest first
     total: int = 0  # shortest paths found, before the limit
     lists: int = 0  # follow lists read
-    partial: bool = False  # an end follows more than MAX_FOLLOWS; only the newest were read
+    partial: bool = False  # an end follows more than max_follows; only the newest were read
     skipped: int = 0  # go-betweens left out for following too many
 
 
@@ -101,9 +101,17 @@ def rank(found: list[tuple[int, ...]], *, talked_start: collections.Counter, tal
     return out
 
 
+async def _newest(hub: Hub, fid: int, limit: int) -> list[int]:
+    """Whom `fid` follows, newest first, at most `limit`. Node errors raise:
+    for either end of a path, a failed read must not look like "follows nobody"."""
+    return list(dict.fromkeys([f.target_fid async for f in hub.following(fid, limit=limit, newest_first=True)]))
+
+
 async def _follows(hub: Hub, fid: int, limit: int) -> set[int]:
+    """A go-between's follows. If the node fails on one, that person just
+    can't be a go-between this time; the search goes on without them."""
     try:
-        return {f.target_fid async for f in hub.following(fid, limit=limit, newest_first=True)}
+        return set(await _newest(hub, fid, limit))
     except NodeError:
         return set()
 
@@ -133,10 +141,17 @@ async def paths(hub: Hub, start: int, end: int, *, max_hops: int = MAX_HOPS, lim
     only those accounts' lists are read (often a few dozen requests). Only
     when that finds nothing does 3 steps read a list for every account
     either of them follows (cut at `max_follows` each). Plus a few requests
-    for who talked with whom."""
-    fa, fb = await asyncio.gather(_follows(hub, start, max_follows), _follows(hub, end, max_follows))
+    for who talked with whom.
+
+    If the node fails on either end's list, NodeError: an unread list is not
+    "follows nobody". A go-between whose list fails is just left out."""
+    if start == end:
+        return Found(start, end, None)
+    # One more than the cap says whether the cap cut anything.
+    la, lb = await asyncio.gather(_newest(hub, start, max_follows + 1), _newest(hub, end, max_follows + 1))
+    fa, fb = set(la[:max_follows]), set(lb[:max_follows])
     follows = {start: fa, end: fb}
-    out = Found(start, end, None, lists=2, partial=max(len(fa), len(fb)) >= max_follows)
+    out = Found(start, end, None, lists=2, partial=max(len(la), len(lb)) > max_follows)
 
     async def read(fids: set[int]) -> None:
         todo = sorted(fids - set(follows))

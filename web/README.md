@@ -116,8 +116,9 @@ the page:
   just the accounts both of you follow; on your own node, 3. **Ask for an
   intro** opens a private message (a Direct Cast) to the first person on the
   path, filled in, through Farcaster's `/~/inbox/create/<fid>?text=` link;
-  nothing is posted publicly. Lookups are cached on the CDN for an hour and
-  limited to 20 per visitor every 10 minutes,
+  nothing is posted publicly. It reads each person's newest 1,000 follows
+  and says so when someone follows more. Lookups are cached on the CDN for an
+  hour and limited to 20 per visitor every 10 minutes,
 - offers **Share on Farcaster** above the cards: a cast with the mini app
   attached, opened in the client's own composer (on the plain site, in
   Farcaster's). The person posts it; phunk holds no key. The link is the

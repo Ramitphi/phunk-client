@@ -758,3 +758,63 @@ def test_paths_two_steps_read_only_whom_both_follow():
     assert read_two == ["1", "2", "9"]
     assert [p.fids for p in three.paths] == [(1, 3, 6, 9)] and three.lists == 6
     assert read_three == ["1", "2", "3", "5", "6", "9"]
+
+
+def _links_node(g, broken=()):
+    """linksByFid from a follow graph; fids in `broken` answer 403."""
+    async def links(request):
+        fid = int(request.query["fid"])
+        if fid in broken:
+            return web.Response(status=403)
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def nothing(request):
+        return web.json_response({"messages": []})
+
+    return {"/v1/linksByFid": links, "/v1/castsByFid": nothing, "/v1/reactionsByFid": nothing}
+
+
+def test_paths_same_account_reads_nothing():
+    from phunk.path import paths
+
+    async def test(hub, calls):
+        return await paths(hub, 3, 3), list(calls)
+
+    found, calls = run(_links_node(_graph(mutual=[(3, 4)])), test)
+    assert found.hops is None and found.paths == [] and calls == []
+
+
+def test_paths_a_failed_end_is_an_error_but_a_failed_go_between_is_skipped():
+    import pytest
+
+    from phunk import NodeError
+    from phunk.path import paths
+
+    g = _graph(mutual=[(1, 2), (2, 9), (1, 3), (3, 9)])
+
+    async def end_fails(hub, calls):
+        with pytest.raises(NodeError):
+            await paths(hub, 1, 9)  # not "no path": we never read 9's follows
+        return True
+
+    async def go_between_fails(hub, calls):
+        return await paths(hub, 1, 9)
+
+    assert run(_links_node(g, broken={9}), end_fails)
+    found = run(_links_node(g, broken={2}), go_between_fails)
+    assert [p.fids for p in found.paths] == [(1, 3, 9)]
+
+
+def test_paths_says_when_the_follow_cap_cut_anything():
+    from phunk.path import paths
+
+    exact = _graph(mutual=[(1, 2), (2, 9), (1, 3)])            # 1 follows exactly 2
+    over = _graph((1, 5), mutual=[(1, 2), (2, 9), (1, 3)])     # 1 follows 3
+
+    async def test(hub, calls):
+        return await paths(hub, 1, 9, max_follows=2)
+
+    assert run(_links_node(exact), test).partial is False
+    capped = run(_links_node(over), test)
+    assert capped.partial is True and capped.hops == 2
