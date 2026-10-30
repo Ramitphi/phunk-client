@@ -550,3 +550,14 @@ def test_page_signs_follows_and_likes_like_the_official_library():
     out = subprocess.run([node_bin, str(ROOT / "tests" / "js" / "fc_test.mjs")], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
     assert out.stdout.count("ok ") >= 9
+
+
+def test_path_is_cached_by_the_cdn_and_rate_limited_per_ip(site):
+    status, headers, body = asgi(site.app, "GET", "/api/path?from=me&to=alice", headers=[("x-forwarded-for", "1.2.3.4")])
+    assert status == 200 and body["hops"] == 1 and "s-maxage" in headers["cache-control"]
+    for _ in range(19):
+        asgi(site.app, "GET", "/api/path?from=me&to=alice", headers=[("x-forwarded-for", "1.2.3.4")])
+    status, headers, body = asgi(site.app, "GET", "/api/path?from=me&to=alice", headers=[("x-forwarded-for", "1.2.3.4")])
+    assert status == 429 and headers["cache-control"] == "no-store"
+    # Someone else still gets an answer.
+    assert asgi(site.app, "GET", "/api/path?from=me&to=alice", headers=[("x-forwarded-for", "5.6.7.8")])[0] == 200

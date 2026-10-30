@@ -252,6 +252,57 @@ print(nx.pagerank(G))
 
 [`examples/mutuals.py`](../examples/mutuals.py) compares two people's follows.
 
+### A path to someone
+
+Who could introduce you to someone? Count a step only when both accounts
+follow each other, and stop at 3 steps: you, a friend, their friend, them.
+A longer chain is too long for an intro.
+
+Search from both ends and meet in the middle. Read whom each of you
+follows, then whom each of those accounts follows:
+
+```sh
+curl -s "https://haatz.quilibrium.com/v1/linksByFid?fid=3&link_type=follow&pageSize=1000"
+# then the same for every fid in that list, and for the other person
+```
+
+Those lists hold everything 3 steps need:
+
+- 1 step: you follow each other.
+- 2 steps: someone you both follow, who follows you both back.
+- 3 steps: a friend of yours and a friend of theirs who follow each other.
+
+That is about one request per account the two of you follow. One step
+further would mean reading the lists of everyone *they* follow too: about a
+million requests instead of a thousand.
+
+2 steps are cheaper still, so `paths` tries them first. A go-between on a
+2-step path is someone you both follow, so only those accounts' lists are
+read, often a few dozen. The full read happens only when that finds nothing.
+
+```python
+import asyncio
+from phunk import Hub
+from phunk.path import paths
+
+async def main():
+    async with Hub() as hub:
+        a, b = await hub.fid_by_name("dwr"), await hub.fid_by_name("vitalik.eth")
+        found = await paths(hub, a, b)
+        print(found.hops, [p.fids for p in found.paths])
+
+asyncio.run(main())
+```
+
+It prints `1 [(3, 5650)]`: they follow each other. From the command line:
+`phunk path dwr vitalik.eth`.
+
+Accounts that follow thousands make most short paths and rarely introduce
+anyone, so a go-between who follows more than 5,000 is left out. `avoid=`
+(`--avoid` in the command) leaves out anyone else. Paths come warmest
+first: how often each end replied to, mentioned, liked or recast its
+go-between in the last 90 days.
+
 ## 6. Channels, replies, reactions
 
 **Channels** aren't a separate object on the protocol. A channel cast is a

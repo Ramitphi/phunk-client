@@ -600,3 +600,84 @@ def test_unicode_digits_and_stray_errors_get_plain_words():
     assert asyncio.run(go()) == [(400, {"error": "bad request"}),
                                  (400, {"error": "invalid literal for int()"}),
                                  (400, {"error": "fid must be a positive number"})]
+
+
+def test_path_endpoint_finds_who_could_introduce(monkeypatch):
+    # bob (2) follows alice (1) back, and alice follows both me (9) and bob:
+    # me -> alice -> bob, every step a mutual follow.
+    monkeypatch.setitem(FOLLOWS, 2, [link(2, 1), link(2, 50)])
+
+    async def test(client, base, calls, submitted):
+        out = []
+        for params in ({"from": "me", "to": "bob"}, {"from": "me", "to": "alice"}, {"from": "me", "to": "me"},
+                       {"from": "me", "to": "nobody-here"}):
+            async with client.get(f"{base}/api/path", params=params) as r:
+                out.append((r.status, await r.json()))
+        return out
+
+    (s1, two), (s2, direct), (s3, same), (s4, missing) = run(test)
+    assert s1 == 200 and two["hops"] == 2 and two["total"] == 1 and two["reach"] == 3
+    assert two["paths"] == [{"fids": [9, 1, 2], "talks": [1, 0]}]  # me replied to alice once (m4)
+    assert two["users"]["1"]["username"] == "alice" and set(two["users"]) == {"9", "1", "2"}
+    assert s2 == 200 and direct["hops"] == 1 and direct["paths"][0]["fids"] == [9, 1]
+    assert (s3, same) == (400, {"error": "pick two different accounts"})
+    assert s4 == 404
+
+
+def test_path_stays_at_two_steps_on_the_public_node():
+    from phunk import Hub
+
+    hub = Hub()  # the public node; no request is made
+    assert UI(hub, public=True).path_hops == 2
+    assert UI(hub).path_hops == 3
+    assert UI(Hub("http://localhost:3381"), public=True).path_hops == 3
+
+
+def test_path_endpoint_says_when_the_follow_cap_cut_anything(monkeypatch):
+    import phunk.ui
+
+    monkeypatch.setattr(phunk.ui, "MAX_FOLLOWS", 2)  # "me" follows 3
+
+    async def test(client, base, calls, submitted):
+        async with client.get(f"{base}/api/path", params={"from": "me", "to": "bob"}) as r:
+            return r.status, await r.json()
+
+    status, body = run(test)
+    assert status == 200 and body["capped"] is True and body["checked"] == 2
+
+
+def test_a_timed_out_path_lookup_keeps_going_and_a_cancelled_one_is_retried(monkeypatch):
+    import phunk.ui
+    from phunk.models import User
+    from phunk.path import Found
+
+    calls = []
+
+    async def slow(hub, start, end, **kw):
+        calls.append(start)
+        if len(calls) == 1:
+            await asyncio.sleep(30)
+        return Found(start, end, None)
+
+    monkeypatch.setattr(phunk.ui, "paths", slow)
+
+    async def main():
+        async with Hub("http://127.0.0.1:9") as hub:  # never contacted
+            ui = UI(hub)
+            for f in (1, 2):  # names already cached: no node needed
+                done = asyncio.get_running_loop().create_future()
+                done.set_result(User(fid=f))
+                ui._users[f] = done
+            first = asyncio.ensure_future(ui.path_json({"from": "1", "to": "2"}))
+            await asyncio.sleep(0.05)
+            first.cancel()  # the hosted site's timeout
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            shared = ui._paths[(1, 2)][1]
+            kept_going = not shared.cancelled()
+            shared.cancel()  # had it been cancelled anyway, the next request starts over
+            await asyncio.sleep(0)
+            return kept_going, await ui.path_json({"from": "1", "to": "2"})
+
+    kept_going, out = asyncio.run(main())
+    assert kept_going and out["hops"] is None and calls == [1, 1]

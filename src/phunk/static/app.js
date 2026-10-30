@@ -31,6 +31,7 @@ const state = {
   dismissed: new Set(store.get("dismissed", [])),
   feedSeq: 0,
   peopleSeq: 0,
+  pathSeq: 0,
   feedLoaded: false,
   channels: new Set(),
   tab: "people",
@@ -1205,7 +1206,8 @@ function renderSummary() {
     share = h("button", { type: "button", class: "ghost small share" }, "Share on Farcaster");
     share.addEventListener("click", () => { cheer(share); sharePeople(); });
   }
-  box.replaceChildren(h("p", {}, line), share);
+  // No share link (local `phunk ui`): leave the button out, not the text "null".
+  box.replaceChildren(...[h("p", {}, line), share].filter(Boolean));
 }
 
 // ------------------------------------------------------------- share
@@ -1290,6 +1292,140 @@ async function loadPeople(refresh = false) {
     track("People failed", { reason: failure(e), took: secs(performance.now() - started) });
     box.replaceChildren(h("div", { class: "card empty" }, `Could not load people: ${e.message}`));
   }
+}
+
+// -------------------------------------------------------------- paths
+// Who could introduce you to someone: the shortest chain of mutual follows,
+// from /api/path. On the You tab, when phunk knows who you are (inside a
+// Farcaster client, or `phunk ui` with a key).
+
+const myFid = () => (state.me && state.me.fid ? Number(state.me.fid) : null);
+const times = (n) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+
+function pathHead() {
+  return h("div", { class: "why" }, h("span", { class: "kind path" }, "How you're connected"));
+}
+
+async function loadPath(target) {
+  const box = $("#path");
+  const seq = ++state.pathSeq;
+  const me = myFid();
+  target = (target || "").trim().replace(/^@/, "");
+  if (!me || !target) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  const label = /^\d+$/.test(target) ? `fid ${target}` : `@${target}`;
+  box.hidden = false;
+  box.replaceChildren(h("section", { class: "card pathcard" }, pathHead(),
+    h("p", { class: "muted small" }, h("span", { class: "spinner" }),
+      `Looking for people who could introduce you to ${label}…`)));
+  const started = performance.now();
+  const show = (card) => {
+    box.replaceChildren(card);
+    box.scrollIntoView({ block: "start", behavior: calm() ? "auto" : "smooth" });
+  };
+  try {
+    const d = await api(`/api/path?${new URLSearchParams({ from: String(me), to: target })}`);
+    if (seq !== state.pathSeq) return;
+    track("Path", { hops: d.hops ? String(d.hops) : "none", took: secs(performance.now() - started) });
+    show(pathCard(d));
+  } catch (e) {
+    if (seq !== state.pathSeq) return;
+    track("Path failed", { reason: failure(e) });
+    const why = e.status === 400 && /two different accounts/.test(e.message) ? "That's you. Try someone else."
+      : e.status === 404 ? e.message
+      : e.status === 400 ? "Couldn't look that name up. Check the spelling and try again."
+      : e.status === 429 ? "That's a lot of lookups. Try again in a few minutes."
+      : "Couldn't check right now. Try again in a minute.";
+    show(h("section", { class: "card pathcard" }, pathHead(), h("p", { class: "path-line" }, why)));
+  }
+}
+
+function pathCard(d) {
+  const card = pathCardBody(d);
+  if (d.capped && d.hops !== 1) {
+    card.append(h("p", { class: "muted small" },
+      `Checked the newest ${d.checked.toLocaleString("en-US")} follows on each side, so there may be more.`));
+  }
+  return card;
+}
+
+function pathCardBody(d) {
+  const user = (f) => d.users[String(f)] || { fid: f };
+  const them = handle(user(d.to));
+  const card = h("section", { class: "card pathcard", "aria-label": `How you're connected to ${them}` }, pathHead());
+  if (d.hops === 1) {
+    card.append(h("p", { class: "path-line" }, `You and ${them} follow each other.`));
+    return card;
+  }
+  if (!d.hops) {
+    card.append(
+      h("p", { class: "path-line" }, d.reach >= 3
+        ? `No chain of mutual follows to ${them} yet.`
+        : `No one you both follow follows you both back yet.`),
+      h("p", { class: "muted small" }, `Follow a few people ${them} talks with, and check again later.`));
+    return card;
+  }
+  const n = d.total;
+  card.append(h("p", { class: "path-line" }, d.hops === 2
+    ? `${n} ${n === 1 ? "person" : "people"} could introduce you to ${them}`
+    : `${n} ${n === 1 ? "chain" : "chains"} of friends lead to ${them}`));
+  const rows = d.paths.map((p, i) => pathRow(p, i, d, user));
+  rows.slice(1).forEach((r) => { r.hidden = true; });
+  card.append(h("ol", { class: "paths" }, rows),
+    h("p", { class: "muted small" }, "Asking opens a private message in Farcaster. Nothing is posted."));
+  const hiddenCount = rows.length - 1;
+  if (hiddenCount > 0) {
+    const more = h("button", { type: "button", class: "ghost small" }, `Show ${hiddenCount} more`);
+    more.addEventListener("click", () => {
+      track("Path more", {});
+      rows.forEach((r) => { r.hidden = false; });
+      more.replaceWith(n > rows.length ? h("p", { class: "muted small" }, `and ${n - rows.length} more`) : "");
+    });
+    card.append(more);
+  }
+  return card;
+}
+
+function pathRow(p, i, d, user) {
+  const via = p.fids.slice(1, -1).map(user);
+  const steps = p.fids.flatMap((f, j) => {
+    const u = user(f);
+    let step;
+    if (f === d.from) {
+      step = h("span", { class: "step you" }, avatar(u), h("span", {}, "You"));
+    } else {
+      step = h("button", { type: "button", class: "step", title: `Open ${handle(u)}` }, avatar(u), h("span", {}, handle(u)));
+      step.addEventListener("click", () => { track("Path profile", {}); viewProfile(u); });
+    }
+    return j ? [h("span", { class: "link", title: "follow each other" }, "⇄"), step] : [step];
+  });
+  const why = [];
+  if (p.talks[0]) why.push(`You talked with ${handle(via[0])} ${times(p.talks[0])} lately.`);
+  if (p.talks[1]) why.push(`${handle(user(d.to))} talked with ${handle(via[via.length - 1])} ${times(p.talks[1])} lately.`);
+  const ask = h("button", { type: "button", title: `Opens a private message to ${handle(via[0])}` },
+    `Ask ${handle(via[0])} for an intro`);
+  ask.addEventListener("click", () => {
+    track("Intro ask", { hops: String(p.fids.length - 1), slot: slot(i) });
+    cheer(ask);
+    // A private message (a Direct Cast), not a public cast: Farcaster's
+    // message composer, filled in. The person sends it; phunk holds no key.
+    openFarcaster(`/~/inbox/create/${encodeURIComponent(via[0].fid)}?text=${encodeURIComponent(introText(p, user))}`);
+  });
+  return h("li", { class: "path-row" }, h("div", { class: "chain" }, steps),
+    why.length ? h("p", { class: "muted small" }, why.join(" ")) : null,
+    h("div", { class: "pactions" }, ask));
+}
+
+// The private message that asks the first person on the path for the intro.
+function introText(p, user) {
+  const at = (u) => (u.username ? `@${u.username}` : handle(u));
+  const [, , ...rest] = p.fids.map(user);
+  const them = rest[rest.length - 1];
+  if (rest.length === 1) return `Hey! Would you introduce me to ${at(them)}? phunk says you two follow each other 🫂`;
+  return `Hey! Would you introduce me to ${at(rest[0])}? I'd love to get to know ${at(them)}, and phunk says you two follow each other 🫂`;
 }
 
 // ------------------------------------------------------------------ setup
@@ -1384,6 +1520,7 @@ function renderAccount() {
   }
   box.replaceChildren(...rows);
   box.hidden = !rows.length;
+  $("#reach").hidden = !myFid();
 }
 
 function renderWho() {
@@ -1487,6 +1624,12 @@ async function init() {
     lookUp($("#lookup-name").value);
   });
   $("#lookup-me").addEventListener("click", () => { track("Back to me"); lookUp(""); });
+  $("#reach").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const name = $("#reach-name").value.trim().replace(/^@/, "");
+    track("Path lookup", { by: /^\d+$/.test(name) ? "fid" : name ? "username" : "empty" });
+    if (name) loadPath(name);
+  });
 
   $("#compose-close").addEventListener("click", () => setTab(state.lastTab));
   $("#compose-channel").addEventListener("input", renderChannelPicks);

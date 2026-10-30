@@ -18,6 +18,7 @@ licensed, public.
 | `src/phunk/timeutil.py` | Farcaster epoch (2021-01-01) conversions |
 | `src/phunk/recommend.py` | People to follow: `score` (pure) and `suggest` (reads the node) |
 | `src/phunk/people.py` | The people feed (main screen of `phunk ui`): reconnect / circle / bridge cards. `build()` is pure; `people_feed()` reads the node |
+| `src/phunk/path.py` | Who could introduce two people: `paths()` finds the shortest mutual-follow paths, up to 3 steps, by reading one follow list per account either end follows (meet in the middle). `find()` and `rank()` are pure. Behind `/api/path` and "Who could introduce you?" on the You tab of the mini app |
 | `src/phunk/ui.py`, `src/phunk/static/` | `phunk ui`: local aiohttp web client and its plain HTML/CSS/JS. `static/fc.js` builds and signs follows and likes in the page (mini app) |
 | `src/phunk/connect.py` | Follow and like in the mini app: `start` / `status` (a signed key request through `signer/` and Farcaster's API) and `check` (the relay passes only follows and likes) |
 | `api/index.py`, `vercel.json`, `web/` | phunk.social: one Vercel project with two services (`web` static page, `api` read API), `phunk ui` in public (read-only) mode plus `/api/connect` and `/api/submit` for follow and like, also a Farcaster mini app at miniapp.phunk.social (manifest and images in `web/public/`), with OneDollarStats analytics on the hosted page only; see `web/README.md` |

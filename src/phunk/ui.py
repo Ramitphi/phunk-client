@@ -31,9 +31,10 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
-from .hub import Hub, NodeError, NotFound
+from .hub import DEFAULT_NODE, Hub, NodeError, NotFound
 from .models import Cast, User
 from .onchain import holders
+from .path import MAX_FOLLOWS, paths
 from .people import people_feed
 from .recommend import Suggestion, suggest
 from .timeutil import to_unix
@@ -77,6 +78,8 @@ NODE_BUSY = "the node is busy; try again in a minute"
 # per feed (the most recently followed).
 PUBLIC_HOURS = (6, 24, 72, 168)
 PUBLIC_MAX_FOLLOWS = 1000
+PATH_TTL = 600  # a pair's paths
+PATH_SHOWN = 5  # paths sent to the page
 
 
 class NoSuchAccount(NotFound):
@@ -234,12 +237,19 @@ class UI:
         self._suggest: dict[int, tuple[float, asyncio.Future]] = {}
         self._people: dict[int, tuple[float, asyncio.Future]] = {}
         self._fids: dict[str, tuple[float, asyncio.Future]] = {}
+        self._paths: dict[tuple[int, int], tuple[float, asyncio.Future]] = {}
+        # 3-step paths read a list per account either end follows: fine on
+        # your own node, too much for the shared public one. 2 steps read
+        # only the accounts both follow.
+        self.path_hops = 2 if public and hub.url.rstrip("/") == DEFAULT_NODE else 3
         self.followed_here: set[int] = set()  # keep them out of suggestions
         self.min_refresh = PUBLIC_MIN_REFRESH if public else 0
 
     def _fresh(self, hit, ttl: int, refresh: bool) -> bool:
         """Is a cached (time, future) still good to serve?"""
-        if not hit or (hit[1].done() and hit[1].exception()):
+        # A request that timed out cancels what it was waiting on; that is
+        # stale too (and .exception() on it would raise).
+        if not hit or (hit[1].done() and (hit[1].cancelled() or hit[1].exception())):
             return False
         return time.monotonic() - hit[0] < (self.min_refresh if refresh else ttl)
 
@@ -454,6 +464,32 @@ class UI:
         return dict(await self.people(fid, refresh=q.get("refresh") == "1"), fid=fid)
 
 
+    async def path_json(self, q) -> dict:
+        """Who could introduce `from` to `to`: the shortest paths of mutual
+        follows (up to `path_hops` steps), warmest first, with the people on them."""
+        start, end = await asyncio.gather(self.who(q.get("from")), self.who(q.get("to")))
+        if start == end:
+            raise BadRequest("pick two different accounts")
+        key = (start, end)
+        max_follows = PUBLIC_MAX_FOLLOWS if self.public else MAX_FOLLOWS
+        hit = self._paths.get(key)
+        if not self._fresh(hit, PATH_TTL, q.get("refresh") == "1"):
+            hit = (time.monotonic(), asyncio.ensure_future(
+                paths(self.hub, start, end, max_hops=self.path_hops, limit=PATH_SHOWN, max_follows=max_follows)))
+            self._paths[key] = hit
+            _trim(self._paths, MAX_WINDOWS)
+        # Shielded: if this request times out, the shared lookup keeps going
+        # for the next one.
+        found = await asyncio.shield(hit[1])
+        fids = list(dict.fromkeys([start, end, *(f for p in found.paths for f in p.fids)]))
+        users = await asyncio.gather(*(self.user(f) for f in fids))
+        return {"from": start, "to": end, "hops": found.hops, "reach": self.path_hops, "total": found.total,
+                # true: one of them follows more than `checked`; only the newest were read
+                "capped": found.partial, "checked": max_follows,
+                "paths": [{"fids": list(p.fids), "talks": list(p.talks)} for p in found.paths],
+                "users": {str(u.fid): {"fid": u.fid, "username": u.username, "display_name": u.display_name,
+                                       "pfp": u.pfp} for u in users}}
+
     async def owner_json(self, q) -> dict:
         """Who owns an account (custody address) and its key nonce: what
         authorizing a gasless KEY_ADD needs."""
@@ -476,7 +512,7 @@ class UI:
 
 GET_ROUTES = {"/api/me": UI.me_json, "/api/feed": UI.feed_json,
               "/api/suggestions": UI.suggestions_json, "/api/people": UI.people_json,
-              "/api/owner": UI.owner_json, "/api/key": UI.key_json}
+              "/api/path": UI.path_json, "/api/owner": UI.owner_json, "/api/key": UI.key_json}
 
 
 async def answer(coro, *, public: bool = False) -> tuple[int, dict]:

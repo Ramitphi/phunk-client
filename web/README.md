@@ -112,6 +112,16 @@ the page:
   gun, tabs that slide in. Each one has a haptic too: the client's own (`sdk.haptics`, where
   it has them), or the phone's vibration on the plain site. "Reduce
   motion" turns the movement off and keeps the haptics,
+- has **Who could introduce you?** on the You tab, in the mini app (where
+  the client says who the viewer is): type anyone and see the people who
+  could introduce you, each step a mutual follow (`GET /api/path`,
+  `phunk.path`). On the public node it looks for 2 steps only, which read
+  just the accounts both of you follow; on your own node, 3. **Ask for an
+  intro** opens a private message (a Direct Cast) to the first person on the
+  path, filled in, through Farcaster's `/~/inbox/create/<fid>?text=` link;
+  nothing is posted publicly. It reads each person's newest 1,000 follows
+  and says so when someone follows more. Lookups are cached on the CDN for an
+  hour and limited to 20 per visitor every 10 minutes,
 - offers **Share on Farcaster** above the cards: a cast with the mini app
   attached, opened in the client's own composer (on the plain site, in
   Farcaster's). The person posts it; phunk holds no key. The link is the
@@ -296,6 +306,12 @@ are `0`, `1-5`, `6-15` or `16+`; `slot` is a card's place on the page,
 | `Load more` | More casts | `mode`: `next page` or `wider window` |
 | `App filter` | An app is shown or hidden | `change`: `show`, `hide`, `show all`, `hide all` |
 | `Open` | Open on a cast (opens it in Farcaster) | |
+| `Path lookup` | Find in Who could introduce you? (You tab) | `by`: `username`, `fid` or `empty` |
+| `Path` | How you're connected arrives | `hops`: `1`, `2`, `3` or `none`; `took` |
+| `Path failed` | It doesn't (the card hides) | `reason` |
+| `Path more` | Show more paths | |
+| `Path profile` | A person on a path is tapped (opens their profile) | |
+| `Intro ask` | Ask for an intro (opens a private message to the first person on the path) | `hops`, `slot` |
 | `Share` | Share on Farcaster: a cast with the mini app attached, in the host's composer (mini app) or Farcaster's (web) | `from`: `miniapp` or `web`; `self`: `yes` or `no` |
 | `Liked`, `Unliked` | Like / unlike went through (mini app, connected) | |
 | `Connect shown` | The one-time approval sheet opens (Follow or Like before phunk is connected) | |

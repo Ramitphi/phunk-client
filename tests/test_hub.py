@@ -600,3 +600,221 @@ def test_feed_reads_only_the_follows_it_is_given():
     assert feed == ["c2"]
     assert [q["fid"] for p, q in calls if p == "/v1/castsByFid"] == ["2"]
     assert sum(1 for p, _ in calls if p == "/v1/linksByFid") == 1  # follows given: not read again
+
+
+# ------------------------------------------------------------------ paths
+
+def _graph(*edges, mutual=()):
+    """{fid: set it follows} from one-way edges and mutual pairs."""
+    g = {}
+    for a, b in edges:
+        g.setdefault(a, set()).add(b)
+    for a, b in mutual:
+        g.setdefault(a, set()).add(b)
+        g.setdefault(b, set()).add(a)
+    return g
+
+
+def test_path_counts_only_mutual_follows():
+    from phunk.path import find
+
+    assert find(1, 9, _graph(mutual=[(1, 9)])) == [(1, 9)]
+    # One way is not a step: 1 follows 9, 9 doesn't follow back.
+    assert find(1, 9, _graph((1, 9))) == []
+    # 1 and 9 both follow 5 (and 5 follows 9), but 5 doesn't follow 1 back.
+    assert find(1, 9, _graph((1, 5), mutual=[(5, 9)])) == []
+    assert find(1, 1, _graph(mutual=[(1, 2)])) == []
+
+
+def test_path_returns_only_the_shortest():
+    from phunk.path import find
+
+    g = _graph(mutual=[(1, 2), (2, 9), (1, 3), (3, 4), (4, 9), (1, 5), (5, 9)])
+    assert find(1, 9, g) == [(1, 2, 9), (1, 5, 9)]
+    assert find(1, 9, g, max_hops=1) == []
+
+
+def test_path_three_steps_meet_in_the_middle():
+    from phunk.path import find
+
+    # 1's friends: 2, 3. 9's friends: 7, 8. Only 3 and 8 follow each other;
+    # 2 follows 7 but 7 doesn't follow back.
+    g = _graph((2, 7), mutual=[(1, 2), (1, 3), (9, 7), (9, 8), (3, 8)])
+    assert find(1, 9, g) == [(1, 3, 8, 9)]
+    assert find(1, 9, g, max_hops=2) == []
+    # A go-between to skip (a mass follower, or someone you'd rather not ask).
+    assert find(1, 9, g, skip={8}) == []
+    g2 = _graph(mutual=[(1, 2), (2, 9), (1, 3), (3, 8), (8, 9)])
+    assert find(1, 9, g2, skip={2}) == [(1, 3, 8, 9)]
+
+
+def test_path_rank_warmest_first_then_pickiest():
+    import collections
+
+    from phunk.path import rank
+
+    found = [(1, 2, 9), (1, 3, 9), (1, 4, 9), (1, 5, 9)]
+    talked_start = collections.Counter({3: 3, 4: 1})
+    talked_end = collections.Counter({4: 2, 5: 0})
+    ranked = rank(found, talked_start=talked_start, talked_end=talked_end,
+                  following={2: 900, 3: 50, 4: 300, 5: 100})
+    # 3 and 4 tie on talks (3+0, 1+2); 4 talked with both ends, so it wins.
+    # 2 and 5 have none; 5 follows fewer, so its follow back means more.
+    assert [p.via for p in ranked] == [(4,), (3,), (5,), (2,)]
+    assert ranked[0].talks == (1, 2) and ranked[0].hops == 2 and ranked[-1].busy == 900
+
+
+def test_paths_reads_one_list_per_follow_and_skips_mass_followers():
+    import datetime as dt
+
+    from phunk.path import paths
+    from phunk.timeutil import from_datetime
+
+    now = from_datetime(dt.datetime.now(dt.timezone.utc))
+    # 1 and 9 share friends 2, 3 and 4. 4 follows everyone (a mass
+    # follower, 6 follows with the cap at 4). 1 replied to 3 twice lately.
+    g = _graph((4, 10), (4, 11), (4, 12), (4, 13),
+               mutual=[(1, 2), (2, 9), (1, 3), (3, 9), (1, 4), (4, 9)])
+
+    async def links(request):
+        fid = int(request.query["fid"])
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def casts(request):
+        fid = int(request.query["fid"])
+        out = [msg(f"c{i}", fid=1, ts=now - 60 * i, castAddBody={"text": "hi", "parentCastId": {"fid": 3, "hash": "0x"}})
+               for i in (1, 2)] if fid == 1 else []
+        return web.json_response({"messages": out})
+
+    async def nothing(request):
+        return web.json_response({"messages": []})
+
+    async def test(hub, calls):
+        found = await paths(hub, 1, 9, max_following=4)
+        avoided = await paths(hub, 1, 9, max_following=4, avoid={3})
+        return found, avoided, calls
+
+    found, avoided, calls = run({"/v1/linksByFid": links, "/v1/castsByFid": casts,
+                                 "/v1/reactionsByFid": nothing}, test)
+    assert found.hops == 2 and found.total == 2 and found.skipped == 1
+    assert [p.via for p in found.paths] == [(3,), (2,)]  # 1 talked with 3
+    assert found.paths[0].talks == (2, 0)
+    # 1 and 9, then one list for each account they follow (2, 3, 4).
+    assert found.lists == 5
+    first_run = [q["fid"] for p, q in calls if p == "/v1/linksByFid"][:5]
+    assert sorted(first_run) == ["1", "2", "3", "4", "9"]
+    assert [p.via for p in avoided.paths] == [(2,)]
+
+
+def test_paths_stops_early_for_mutuals_and_says_when_there_is_none():
+    from phunk.path import paths
+
+    g = _graph((5, 6), mutual=[(1, 9), (5, 7)])
+
+    async def links(request):
+        fid = int(request.query["fid"])
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def test(hub, calls):
+        direct = await paths(hub, 1, 9)
+        reads = len(calls)
+        none = await paths(hub, 5, 6)
+        return direct, reads, none
+
+    direct, reads, none = run({"/v1/linksByFid": links}, test)
+    assert direct.hops == 1 and [p.fids for p in direct.paths] == [(1, 9)] and direct.lists == 2
+    assert reads == 2  # mutuals already: no one else's list, no casts
+    assert none.hops is None and none.paths == [] and none.total == 0
+
+
+def test_paths_two_steps_read_only_whom_both_follow():
+    from phunk.path import paths
+
+    # 1 follows 2, 3, 5; 9 follows 2, 6. Only 2 is followed by both, and is
+    # a mutual of both: a 2-step path that needs one more list, not four.
+    g = _graph((1, 5), (9, 6), mutual=[(1, 2), (2, 9), (1, 3), (3, 6), (6, 9)])
+
+    async def links(request):
+        fid = int(request.query["fid"])
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def nothing(request):
+        return web.json_response({"messages": []})
+
+    async def test(hub, calls):
+        two = await paths(hub, 1, 9)
+        read_two = sorted(q["fid"] for p, q in calls if p == "/v1/linksByFid")
+        calls.clear()
+        three = await paths(hub, 1, 9, avoid={2})  # no 2 steps without 2: read everyone
+        read_three = sorted(q["fid"] for p, q in calls if p == "/v1/linksByFid")
+        return two, read_two, three, read_three
+
+    two, read_two, three, read_three = run({"/v1/linksByFid": links, "/v1/castsByFid": nothing,
+                                            "/v1/reactionsByFid": nothing}, test)
+    assert [p.fids for p in two.paths] == [(1, 2, 9)] and two.lists == 3
+    assert read_two == ["1", "2", "9"]
+    assert [p.fids for p in three.paths] == [(1, 3, 6, 9)] and three.lists == 6
+    assert read_three == ["1", "2", "3", "5", "6", "9"]
+
+
+def _links_node(g, broken=()):
+    """linksByFid from a follow graph; fids in `broken` answer 403."""
+    async def links(request):
+        fid = int(request.query["fid"])
+        if fid in broken:
+            return web.Response(status=403)
+        return web.json_response({"messages": [msg(f"l{fid}-{t}", fid=fid, linkBody={"targetFid": t})
+                                               for t in sorted(g.get(fid, ()))]})
+
+    async def nothing(request):
+        return web.json_response({"messages": []})
+
+    return {"/v1/linksByFid": links, "/v1/castsByFid": nothing, "/v1/reactionsByFid": nothing}
+
+
+def test_paths_same_account_reads_nothing():
+    from phunk.path import paths
+
+    async def test(hub, calls):
+        return await paths(hub, 3, 3), list(calls)
+
+    found, calls = run(_links_node(_graph(mutual=[(3, 4)])), test)
+    assert found.hops is None and found.paths == [] and calls == []
+
+
+def test_paths_a_failed_end_is_an_error_but_a_failed_go_between_is_skipped():
+    import pytest
+
+    from phunk import NodeError
+    from phunk.path import paths
+
+    g = _graph(mutual=[(1, 2), (2, 9), (1, 3), (3, 9)])
+
+    async def end_fails(hub, calls):
+        with pytest.raises(NodeError):
+            await paths(hub, 1, 9)  # not "no path": we never read 9's follows
+        return True
+
+    async def go_between_fails(hub, calls):
+        return await paths(hub, 1, 9)
+
+    assert run(_links_node(g, broken={9}), end_fails)
+    found = run(_links_node(g, broken={2}), go_between_fails)
+    assert [p.fids for p in found.paths] == [(1, 3, 9)]
+
+
+def test_paths_says_when_the_follow_cap_cut_anything():
+    from phunk.path import paths
+
+    exact = _graph(mutual=[(1, 2), (2, 9), (1, 3)])            # 1 follows exactly 2
+    over = _graph((1, 5), mutual=[(1, 2), (2, 9), (1, 3)])     # 1 follows 3
+
+    async def test(hub, calls):
+        return await paths(hub, 1, 9, max_follows=2)
+
+    assert run(_links_node(exact), test).partial is False
+    capped = run(_links_node(over), test)
+    assert capped.partial is True and capped.hops == 2
