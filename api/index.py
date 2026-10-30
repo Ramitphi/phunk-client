@@ -22,7 +22,6 @@ Settings (environment variables, optional):
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
-                       (these four are paused: the site reads the public node, see NODE)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -71,17 +70,6 @@ MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}
 # To turn them back on, restore this line:
 # SIGNER_URL = os.environ.get("PHUNK_SIGNER_URL") or None
 SIGNER_URL = None
-# Paused: the site reads the public node, whatever PHUNK_NODE says, while our
-# own node catches up. The rate and concurrency are the public node's defaults,
-# and the gateway token stays home. To read your own node again, restore these:
-# NODE = os.environ.get("PHUNK_NODE") or DEFAULT_NODE
-# NODE_TOKEN = os.environ.get("PHUNK_NODE_TOKEN") or None
-# RATE = float(os.environ.get("PHUNK_RATE") or 20)
-# CONCURRENCY = int(os.environ.get("PHUNK_CONCURRENCY") or 12)
-NODE = DEFAULT_NODE  # https://haatz.quilibrium.com
-NODE_TOKEN = None
-RATE = 20.0
-CONCURRENCY = 12
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
@@ -112,7 +100,10 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
             threading.Thread(target=loop.run_forever, name="phunk", daemon=True).start()
 
             async def make() -> UI:
-                hub = Hub(NODE, rate=RATE, concurrency=CONCURRENCY, token=NODE_TOKEN)
+                hub = Hub(os.environ.get("PHUNK_NODE") or DEFAULT_NODE,
+                          rate=float(os.environ.get("PHUNK_RATE") or 20),
+                          concurrency=int(os.environ.get("PHUNK_CONCURRENCY") or 12),
+                          token=os.environ.get("PHUNK_NODE_TOKEN") or None)
                 await hub.__aenter__()
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),
                           connect=SIGNER_URL is not None)
