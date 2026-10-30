@@ -88,7 +88,6 @@ def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
     return node, token, rate, concurrency
 
 
-NODE, NODE_TOKEN, RATE, CONCURRENCY = node_from_env()
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
@@ -116,7 +115,8 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
             threading.Thread(target=loop.run_forever, name="phunk", daemon=True).start()
 
             async def make() -> UI:
-                hub = Hub(NODE, rate=RATE, concurrency=CONCURRENCY, token=NODE_TOKEN)
+                node, token, rate, concurrency = node_from_env()
+                hub = Hub(node, rate=rate, concurrency=concurrency, token=token)
                 await hub.__aenter__()
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),
                           connect=SIGNER_URL is not None)
