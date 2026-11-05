@@ -352,6 +352,9 @@ slow or down.
   code change. While your own node catches up (`./node.sh status`), set it to
   `https://haatz.quilibrium.com`. Once every shard is in sync, set it back to
   your gateway.
+- Right now `PUBLIC_NODE_ONLY = True` in `api/index.py` keeps the site on
+  `https://haatz.quilibrium.com` whatever `PHUNK_NODE` says, while our own
+  node is down. Set it to `False` to read `PHUNK_NODE` again.
 - **Refresh** re-reads the node only for results over a minute old, so a
   script sending `refresh=1` in a loop gets the cached answer. `/api/me`
   doesn't say which node the site reads from.
