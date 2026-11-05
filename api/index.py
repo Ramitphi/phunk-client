@@ -24,6 +24,7 @@ Settings (environment variables, optional):
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
                        (pointed at the public node, the token is never sent there
                        and the pace stays at its defaults)
+                       (paused: PUBLIC_NODE_ONLY below keeps the site on the public node)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -89,6 +90,12 @@ def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
     return node, token, rate, concurrency
 
 
+# Paused: our own node is down, so the site reads the public node whatever
+# PHUNK_NODE says, with no token and at the public node's default pace.
+# To read PHUNK_NODE again, set this back to False.
+PUBLIC_NODE_ONLY = True
+
+
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 # Per instance, per IP: start a few approvals, poll their status, send follows and likes.
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
@@ -119,7 +126,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
             threading.Thread(target=loop.run_forever, name="phunk", daemon=True).start()
 
             async def make() -> UI:
-                node, token, rate, concurrency = node_from_env()
+                node, token, rate, concurrency = node_from_env({} if PUBLIC_NODE_ONLY else os.environ)
                 hub = Hub(node, rate=rate, concurrency=concurrency, token=token)
                 await hub.__aenter__()
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),

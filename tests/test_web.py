@@ -75,6 +75,7 @@ def site(fake_node, monkeypatch):
     spec = importlib.util.spec_from_file_location("phunk_site", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     yield mod
     if mod._loop is not None:
         asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
@@ -194,6 +195,7 @@ def test_site_errors_never_show_the_node_token_or_url(monkeypatch, caplog):
     spec = importlib.util.spec_from_file_location("phunk_site_busy", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     try:
         _, ui = mod._start()
         ui.hub.retries = 2  # retry once, then give up
@@ -241,6 +243,23 @@ def test_site_never_sends_the_gateway_token_to_the_public_node(monkeypatch):
     assert mod.node_from_env(dict(public, PHUNK_RATE="5", PHUNK_CONCURRENCY="4"))[2:] == (5.0, 4)
     # The site's own connection follows it: no Authorization header for the public node.
     for k, v in dict(own, PHUNK_NODE="https://haatz.quilibrium.com").items():
+        monkeypatch.setenv(k, v)
+    _, ui = mod._start()
+    try:
+        assert ui.hub.url == "https://haatz.quilibrium.com" and "Authorization" not in ui.hub._headers
+    finally:
+        asyncio.run_coroutine_threadsafe(ui.hub.close(), mod._loop).result()
+        mod._loop.call_soon_threadsafe(mod._loop.stop)
+
+
+def test_site_can_be_held_on_the_public_node(monkeypatch):
+    """PUBLIC_NODE_ONLY: the public node whatever PHUNK_NODE says, and the token stays home."""
+    spec = importlib.util.spec_from_file_location("phunk_site_public", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "PUBLIC_NODE_ONLY", True)
+    for k, v in {"PHUNK_NODE": "https://node.example", "PHUNK_NODE_TOKEN": "tok-very-secret-123",
+                 "PHUNK_RATE": "150", "PHUNK_CONCURRENCY": "48"}.items():
         monkeypatch.setenv(k, v)
     _, ui = mod._start()
     try:
@@ -461,6 +480,7 @@ def connect_site(fake_node, fake_farcaster, monkeypatch):
     spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     mod.SIGNER_URL = f"{base}/sign"  # the site pauses it; these tests check the flow itself
     yield mod, got
     if mod._loop is not None:
