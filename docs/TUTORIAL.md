@@ -572,11 +572,16 @@ ssh -t snapchain@<ip> ./node.sh start
 [`snapchain.sh`](https://snapchain.farcaster.xyz/guides/managing-a-node),
 the same one the
 [bootstrap one-liner](https://snapchain.farcaster.xyz/guides/running-a-node)
-installs. Everything lives in `~/snapchain`. On the first start it asks two
-things:
-
-To agree that you get no rewards for running a node. Type `Yes`. To run it
+installs. Everything lives in `~/snapchain`. On the first start it asks you
+to agree that you get no rewards for running a node. Type `Yes`. To run it
 without the question, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` first.
+
+Since 0.16 the official image has no shell, but the official
+`docker-compose.yml` still starts the node through `/bin/bash`. A node
+started by `snapchain.sh` alone then restarts over and over, and its log says
+`exec /bin/bash failed`. `node.sh` writes the node's `config.toml` in a small
+step before every start, and runs the node without a shell. If your node hit
+this, download the latest `node.sh` and run `./node.sh start`.
 
 The other commands:
 
@@ -595,6 +600,8 @@ week or so, and when `./node.sh status` says a protocol upgrade is due (a
 node too old for one stops following the chain). It keeps the running
 version, upgrades, and waits up to 15 minutes for the node to answer and
 catch up. If it doesn't, it goes back to the old version and exits with 3.
+Going back only helps until the next protocol upgrade is active: an older
+version can't follow the chain after that, so then fix forward instead.
 
 To snapshot the data disk first, set `SNAPCHAIN_SNAPSHOT_CMD` to your
 provider's command for it. Snapshots of a 2 TB disk cost money every month,

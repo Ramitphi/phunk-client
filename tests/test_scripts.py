@@ -1,6 +1,8 @@
 """scripts/node.sh upgrade and rollback, offline: docker, curl and crontab
 are stand-ins on PATH that log what they're asked and answer from a state
-file, so no node, Docker or network is needed."""
+file, so no node, Docker or network is needed. `id` says we're not root and
+`sudo` keeps the environment, so every run takes node.sh's sudo path (as on
+CI) and still reaches the stand-ins, never the real crontab."""
 import os
 import shutil
 import subprocess
@@ -48,6 +50,9 @@ esac
 if [ "$1" = "-l" ]; then cat "$FAKE/crontab" 2>/dev/null; else cat > "$FAKE/crontab"; fi
 ''',
     "sleep": "#!/bin/bash\nexit 0\n",
+    "id": '#!/bin/bash\nif [ "$1" = -u ]; then echo 1000; else exec /usr/bin/id "$@"; fi\n',
+    # Drop sudo's own flags (-n), keep PATH and FAKE: unlike the real one.
+    "sudo": '#!/bin/bash\nwhile [ "${1#-}" != "$1" ]; do shift; done\nexec "$@"\n',
 }
 
 # The official script, as far as node.sh uses it: "upgrade" swaps the node to
@@ -58,7 +63,6 @@ if [ "$1" = upgrade ]; then
   cat "$FAKE/after" > "$FAKE/state"
   echo "image: farcasterxyz/snapchain:latest (new)" > "$(dirname "$0")/docker-compose.yml"
   echo "✅ Upgrade complete."
-  sleep 1000
 fi
 '''
 
@@ -158,3 +162,19 @@ def test_start_does_not_upgrade(node):
     code, out = run("start")
     assert code == 0, out
     assert "compose up -d --pull missing snapchain statsd grafana" in (fake / "log").read_text()
+
+
+def test_rollback_keeps_the_no_shell_start_from_0_16(node):
+    """An official compose file that writes config.toml through bash (0.16+):
+    the rolled-back node still starts without a shell, and pinned, in one block."""
+    run, fake, node_dir = node
+    (node_dir / "docker-compose.yml").write_text(
+        "services:\n  snapchain:\n    image: farcasterxyz/snapchain:latest (old)\n"
+        "    entrypoint:\n      - /bin/bash\n      - -c\n      - |\n"
+        "        cat > config.toml <<EOF\n        http_address = \"0.0.0.0:3381\"\n        EOF\n")
+    code, out = run("upgrade", after="down", SNAPCHAIN_UPGRADE_WAIT="1")
+    assert code == 3, out
+    override = (node_dir / "docker-compose.override.yml").read_text()
+    assert "  snapchain-config:" in override and override.count("  snapchain:") == 1
+    block = override.split("  snapchain:")[1]
+    assert "image: phunk/snapchain-rollback:previous" in block and 'entrypoint: ["/app/snapchain"]' in block

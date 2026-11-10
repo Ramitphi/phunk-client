@@ -28,6 +28,10 @@
 #     one if it doesn't. "./node.sh status" says when a protocol upgrade is due.
 #   - with "private", keeps the APIs (3381, 3383) on 127.0.0.1 too, so the
 #     only way in is gateway.sh's HTTPS gateway, which wants a token
+#   - starts the node without a shell: since 0.16 the image has none, but the
+#     official docker-compose.yml still starts it through /bin/bash, so it
+#     restarts forever ("exec /bin/bash failed"). A one-off busybox job
+#     writes the same config.toml before every start (see write_override)
 #
 # Settings (environment variables):
 #   SNAPCHAIN_AGREE_NO_REWARDS=yes  agree that the node earns no rewards
@@ -53,6 +57,8 @@ NODE_DIR="${SNAPCHAIN_DIR:-$HOME/snapchain}"
 API="${SNAPCHAIN_API:-http://localhost:3381}"
 OVERRIDE_MARK="written by phunk-client scripts/node.sh"
 COMPOSE_MIN="2.24.4"   # first Compose release with the !override tag
+# The official entrypoint writes the node's config with this heredoc.
+CONFIG_MARK='cat > config.toml <<EOF'
 STALL_DELAY=$((30 * 86400))   # a shard this far behind is syncing from block 1
 UPGRADE_WAIT="${SNAPCHAIN_UPGRADE_WAIT:-900}"
 ROLLBACK_TAG="phunk/snapchain-rollback:previous"
@@ -215,25 +221,71 @@ override_is_ours() {
     [ ! -f "$f" ] || grep -qF "$OVERRIDE_MARK" "$f"
 }
 
+# True when the official docker-compose.yml writes the node's config from a
+# bash entrypoint, which the image (no shell since 0.16) can't run.
+own_config() {
+    [ -f "$NODE_DIR/docker-compose.yml" ] && grep -qF "$CONFIG_MARK" "$NODE_DIR/docker-compose.yml"
+}
+
+# The script the snapchain-config job runs (busybox sh and awk). It takes the
+# heredoc from the official entrypoint and appends validators.toml, as that
+# entrypoint does; the onchain-config step it runs next is a no-op on read
+# nodes. If it can't, it keeps the last config.toml, so a change upstream
+# doesn't stop a node that was running.
+write_config_job() {
+    local f="$NODE_DIR/phunk/write-config.sh" tmp
+    as_root mkdir -p "$NODE_DIR/phunk"
+    tmp="$(mktemp)"
+    cat >"$tmp" <<'SCRIPT'
+#!/bin/sh
+# Written by phunk-client scripts/node.sh: config.toml for the node, from the
+# official docker-compose.yml's entrypoint plus validators.toml.
+set -eu
+out=/node/phunk/config.toml
+tmp=/node/phunk/config.toml.new
+if awk -v mark='cat > config.toml <<EOF' '
+    index($0, mark) { match($0, /^ */); pad = RLENGTH; on = 1; next }
+    on && /^[ \t]*EOF[ \t]*$/ { done = 1; exit }
+    on { line = substr($0, pad + 1); gsub(/\$\$/, "$", line); print line }
+    END { exit done ? 0 : 3 }
+' /node/docker-compose.yml >"$tmp" && grep -q '^http_address' "$tmp" \
+    && cat /node/validators.toml >>"$tmp"; then
+    mv "$tmp" "$out"
+    echo "wrote config.toml"
+else
+    rm -f "$tmp"
+    [ -f "$out" ] || { echo "could not write config.toml from docker-compose.yml" >&2; exit 1; }
+    echo "could not refresh config.toml; keeping the last one" >&2
+fi
+SCRIPT
+    if ! cmp -s "$tmp" "$f"; then
+        as_root install -m 0755 "$tmp" "$f"
+    fi
+    rm -f "$tmp"
+}
+
 # Keep the dashboard and metrics ports off the internet, and the APIs too
 # when private. snapchain.sh never touches docker-compose.override.yml, and
 # Compose merges it automatically. Rewritten on every run while it is ours.
 write_override() {
-    local f="$NODE_DIR/docker-compose.override.yml" tmp
+    local f="$NODE_DIR/docker-compose.override.yml" tmp new_enough=true own=false
+    own_config && own=true
     if ! override_is_ours; then
         warn "$f is yours, leaving it alone; check that port 3000 is not public"
+        $own && warn "the node can't start from the official docker-compose.yml (no shell since 0.16); copy the snapchain and snapchain-config parts of node.sh's write_override into $f"
         return 0
     fi
     if ! compose_new_enough; then
+        new_enough=false
         warn "Docker Compose is older than $COMPOSE_MIN; Grafana stays on 0.0.0.0:3000. Block it at your provider's firewall."
-        return 0
     fi
+    $own && write_config_job
     tmp="$(mktemp)"
-    cat >"$tmp" <<EOF
-# $OVERRIDE_MARK.
-# Docker-published ports skip ufw, so bind the local-only services to
-# 127.0.0.1. Reach Grafana with: ssh -L 3000:localhost:3000 <user>@<server>
-services:
+    printf '# %s.\nservices:\n' "$OVERRIDE_MARK" >"$tmp"
+    if $new_enough; then
+        cat >>"$tmp" <<EOF
+  # Docker-published ports skip ufw, so bind the local-only services to
+  # 127.0.0.1. Reach Grafana with: ssh -L 3000:localhost:3000 <user>@<server>
   grafana:
     ports: !override
       - "127.0.0.1:3000:3000"
@@ -242,9 +294,26 @@ services:
       - "127.0.0.1:8125:8125/udp"
       - "127.0.0.1:8126:8126"
 EOF
+    fi
+    if $own; then
+        cat >>"$tmp" <<EOF
+  # Since 0.16 the snapchain image has no shell, so the official bash
+  # entrypoint (it writes config.toml, then starts the node) can't run. This
+  # one-off job writes the same config.toml before every start, and the node
+  # runs its binary straight.
+  snapchain-config:
+    image: busybox:1.37
+    restart: "no"
+    network_mode: none
+    entrypoint: ["/bin/sh", "/node/phunk/write-config.sh"]
+    volumes:
+      - .:/node:ro
+      - ./phunk:/node/phunk
+EOF
+    fi
     local pinned
     pinned="$(env_get PHUNK_PINNED_IMAGE)"
-    if api_private || [ -n "$pinned" ]; then
+    if $own || [ -n "$pinned" ] || { $new_enough && api_private; }; then
         echo "  snapchain:" >>"$tmp"
     fi
     if [ -n "$pinned" ]; then
@@ -255,7 +324,18 @@ EOF
     pull_policy: never
 EOF
     fi
-    if api_private; then
+    if $own; then
+        cat >>"$tmp" <<EOF
+    entrypoint: ["/app/snapchain"]
+    command: ["--config-path", "/app/phunk/config.toml"]
+    volumes:
+      - ./phunk:/app/phunk:ro
+    depends_on:
+      snapchain-config:
+        condition: service_completed_successfully
+EOF
+    fi
+    if $new_enough && api_private; then
         cat >>"$tmp" <<EOF
     # ./node.sh private: the APIs answer on this machine only; clients come in
     # through the gateway (gateway.sh). Gossip stays public: the node syncs over it.
@@ -269,6 +349,16 @@ EOF
         as_root install -m 0644 "$tmp" "$f"
     fi
     rm -f "$tmp"
+}
+
+# The official script has just (re)written docker-compose.yml and started the
+# node from it. If that file still starts the node through bash, start it the
+# way write_override sets up instead.
+use_own_config() {
+    own_config && override_is_ours || return 0
+    write_override
+    say "Starting the node from its own config.toml (the image has no shell since 0.16)"
+    compose up -d snapchain || die "docker compose up failed"
 }
 
 prepare() {
@@ -342,6 +432,7 @@ cmd_start() {
         compose up -d --pull missing snapchain statsd grafana || die "docker compose up failed"
     else
         run_official_upgrade
+        use_own_config
     fi
     print_next
 }
@@ -421,6 +512,7 @@ cmd_upgrade() {
         write_override
     fi
     run_official_upgrade
+    use_own_config
     say "Waiting up to $((UPGRADE_WAIT / 60)) min for the new version to answer and catch up"
     if wait_healthy "$UPGRADE_WAIT"; then
         echo "Upgrade done: the node answers and is catching up. ./node.sh status shows how far."

@@ -1191,7 +1191,7 @@ function personCard(p, i = 0) {
 function renderSummary() {
   const s = state.summary;
   const box = $("#summary");
-  if (!s) { box.replaceChildren(); return; }
+  if (!s) { box.replaceChildren(); $("#share-slot").replaceChildren(); return; }
   const you = viewingSelf() ? "You" : whoLabel();
   const parts = [`${you} follow${you === "You" ? "" : "s"} ${s.following} people`];
   if (s.talked_to) parts.push(`talked with ${s.talked_to} in the last ${s.days} days`);
@@ -1207,7 +1207,9 @@ function renderSummary() {
     share.addEventListener("click", () => { cheer(share); sharePeople(); });
   }
   // No share link (local `phunk ui`): leave the button out, not the text "null".
-  box.replaceChildren(...[h("p", {}, line), share].filter(Boolean));
+  // It sits above the cards, across from Refresh.
+  box.replaceChildren(h("p", {}, line));
+  $("#share-slot").replaceChildren(...[share].filter(Boolean));
 }
 
 // ------------------------------------------------------------- share
@@ -1264,9 +1266,12 @@ function renderPeople() {
 async function loadPeople(refresh = false) {
   const box = $("#people");
   const seq = ++state.peopleSeq;
+  // Nobody to show yet: no Share or Refresh above the prompt either.
+  $(".people-actions").hidden = !canBrowse();
   if (!canBrowse()) {
     box.replaceChildren(h("div", { class: "card empty" }, lookupPrompt()));
     $("#summary").replaceChildren();
+    $("#share-slot").replaceChildren();
     return;
   }
   box.replaceChildren(h("div", { class: "card empty" }, h("span", { class: "spinner" }),
