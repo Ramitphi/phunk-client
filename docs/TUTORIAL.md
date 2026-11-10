@@ -584,6 +584,13 @@ things:
 To run it without questions, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` and
 `SNAPCHAIN_OPERATOR_FID=<fid>` first.
 
+Since 0.16 the official image has no shell, but the official
+`docker-compose.yml` still starts the node through `/bin/bash`. A node
+started by `snapchain.sh` alone then restarts over and over, and its log says
+`exec /bin/bash failed`. `node.sh` writes the node's `config.toml` in a small
+step before every start, and runs the node without a shell. If your node hit
+this, download the latest `node.sh` and run `./node.sh start`.
+
 The other commands:
 
 ```sh
