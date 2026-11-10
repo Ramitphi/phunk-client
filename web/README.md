@@ -348,13 +348,15 @@ slow or down.
 - Each function instance keeps its own in-memory caches and talks to the
   node at `PHUNK_RATE` requests a second at most. If the public node starts
   refusing, point `PHUNK_NODE` at your own node (`scripts/node.sh`).
-- To switch nodes, change `PHUNK_NODE` in Vercel and redeploy; there's no
-  code change. While your own node catches up (`./node.sh status`), set it to
-  `https://haatz.quilibrium.com`. Once every shard is in sync, set it back to
-  your gateway.
-- Right now `PUBLIC_NODE_ONLY = True` in `api/index.py` keeps the site on
-  `https://haatz.quilibrium.com` whatever `PHUNK_NODE` says, while our own
-  node is down. Set it to `False` to read `PHUNK_NODE` again.
+- Set `PHUNK_NODE` to your gateway and leave it there. The site reads it
+  while it answers and is less than two minutes behind, and
+  `https://haatz.quilibrium.com` otherwise (`PHUNK_FALLBACK_NODE` changes
+  that; `off` turns it off). It checks every minute, so a crash, a bad
+  upgrade or a resync never shows to visitors, and it comes back to your
+  node by itself. The token never goes to the fallback.
+- `GET /api/health` says which node the site reads right now, without
+  naming it: `{"using": "own" | "fallback" | "public", "why": "..."}`. Point
+  an uptime check at it and alert on `"fallback"`.
 - **Refresh** re-reads the node only for results over a minute old, so a
   script sending `refresh=1` in a loop gets the cached answer. `/api/me`
   doesn't say which node the site reads from.

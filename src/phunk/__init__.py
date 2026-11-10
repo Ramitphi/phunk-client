@@ -4,7 +4,7 @@ Writing (app keys, casts, likes, follows) lives in `phunk.write` and needs
 `pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'`.
 """
 from . import proto
-from .hub import DEFAULT_NODE, Hub, NodeError, NotFound, RateLimiter
+from .hub import DEFAULT_NODE, FallbackHub, Hub, NodeError, NotFound, RateLimiter
 from .keys import KeyRequest, decode_key_request
 from .models import Cast, Follow, Key, Reaction, User
 from .timeutil import FARCASTER_EPOCH, from_datetime, from_unix, to_datetime, to_unix
@@ -15,6 +15,7 @@ __all__ = [
     "DEFAULT_NODE",
     "FARCASTER_EPOCH",
     "Cast",
+    "FallbackHub",
     "Follow",
     "Hub",
     "Key",

@@ -572,17 +572,9 @@ ssh -t snapchain@<ip> ./node.sh start
 [`snapchain.sh`](https://snapchain.farcaster.xyz/guides/managing-a-node),
 the same one the
 [bootstrap one-liner](https://snapchain.farcaster.xyz/guides/running-a-node)
-installs. Everything lives in `~/snapchain`. On the first start it asks two
-things:
-
-- To agree that you get no rewards for running a node. Type `Yes`.
-- Your FID or username. It only picks the weekday for weekly auto-upgrades.
-  Press Enter to skip; auto-upgrade is then off, and you run
-  `./node.sh upgrade` yourself. Do that when a new release comes out: a
-  node too old for a protocol change stops following the chain.
-
-To run it without questions, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` and
-`SNAPCHAIN_OPERATOR_FID=<fid>` first.
+installs. Everything lives in `~/snapchain`. On the first start it asks you
+to agree that you get no rewards for running a node. Type `Yes`. To run it
+without the question, set `SNAPCHAIN_AGREE_NO_REWARDS=yes` first.
 
 Since 0.16 the official image has no shell, but the official
 `docker-compose.yml` still starts the node through `/bin/bash`. A node
@@ -597,8 +589,23 @@ The other commands:
 ./node.sh status    # sync progress, per shard
 ./node.sh logs      # follow the logs; Ctrl-C stops following, not the node
 ./node.sh stop
-./node.sh upgrade   # latest release, then restart
+./node.sh upgrade   # latest release; rolls back if it doesn't come up
+./node.sh rollback  # back to the version from before the last upgrade
 ```
+
+`snapchain.sh` can upgrade itself every week from cron. `node.sh` turns
+that off: the cron job pulls the newest image and deletes the old one, so a
+bad release can't be undone. Run `./node.sh upgrade` yourself instead, every
+week or so, and when `./node.sh status` says a protocol upgrade is due (a
+node too old for one stops following the chain). It keeps the running
+version, upgrades, and waits up to 15 minutes for the node to answer and
+catch up. If it doesn't, it goes back to the old version and exits with 3.
+Going back only helps until the next protocol upgrade is active: an older
+version can't follow the chain after that, so then fix forward instead.
+
+To snapshot the data disk first, set `SNAPCHAIN_SNAPSHOT_CMD` to your
+provider's command for it. Snapshots of a 2 TB disk cost money every month,
+so it is off by default.
 
 ### The snapshot, then sync
 
@@ -758,6 +765,30 @@ waiting on the network. Three things help, in order:
    Each request costs a round trip, so 5 ms beats 90 ms.
 3. **gzip and the cache.** The gateway does both. `Hub` asks for gzip by
    default.
+
+### When your node is down
+
+Your node can stop: an upgrade goes wrong, the disk fills up. Ask it how
+far behind it is:
+
+```sh
+curl -s http://<ip>:3381/v1/info | jq '[.shardInfos[].blockDelay]'   # seconds behind, per shard
+```
+
+`FallbackHub` reads your node while it answers and is less than two
+minutes behind, and the public node otherwise. It checks once before the
+first read, then every minute. The token only goes to your node.
+
+```python
+from phunk import FallbackHub
+
+async with FallbackHub("https://node.example.com", token=os.environ["PHUNK_NODE_TOKEN"],
+                       rate=150, concurrency=48) as hub:
+    print((await hub.user(3)).username)
+    print(hub.status())   # {'using': 'own', 'why': '2s behind', 'checks': 1}
+```
+
+phunk.social reads this way: set `PHUNK_NODE` and it falls back by itself.
 
 ### Read nodes and validators
 

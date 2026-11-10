@@ -8,7 +8,7 @@ licensed, public.
 
 | Path | What |
 |---|---|
-| `src/phunk/hub.py` | `Hub`: HTTP, rate limit, retries, the pager (`pages`), and the typed methods |
+| `src/phunk/hub.py` | `Hub`: HTTP, rate limit, retries, the pager (`pages`), and the typed methods. `FallbackHub`: your node while it answers and is under 2 minutes behind, the public node otherwise (phunk.social reads through it) |
 | `src/phunk/models.py` | Dataclasses (`User`, `Cast`, `Reaction`, `Follow`, `Key`); each keeps `.raw` |
 | `src/phunk/proto.py` | Minimal protobuf encoder for the message types a client sends; matches ts-proto byte for byte |
 | `src/phunk/write.py` | `AppKey`, `Custody`, `add_app_key` (gasless KEY_ADD), `revoke_key` / `revoke_key_with_custody` (KEY_REMOVE), `Writer` (cast, react, follow). Optional extra `[write]` |
@@ -27,8 +27,8 @@ licensed, public.
 | `site/` | The microsite: `build.py` (stdlib only) turns `docs/` and `site/content/` into `site/_site/`; see `site/README.md` |
 | `signer/` | The app's signing service, its own Vercel project at sign.phunk.social (ASGI `app`, entrypoint in `signer/pyproject.toml`): approves app keys so casts show "Sent from <app>". Holds the app's custody key in env vars only, kept out of the phunk.social project |
 | `examples/` | Runnable scripts referenced from the README and tutorial |
-| `scripts/` | `server.sh` (run on your own computer: `hetzner`, `digitalocean` or `aws` rents a server and 2 TB disk with that provider's CLI, `user@host` takes one you have; then runs `provision.sh` on it and mounts the data disk; each provider is a set of `<name>_check/_plan/_create/_ip/_destroy` functions), `hetzner.sh` (old name for `server.sh hetzner`), `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
-| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py` run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only); `tests/js/fc_test.mjs` checks `fc.js` against the vectors (run by `test_web.py` when `node` is there) |
+| `scripts/` | `server.sh` (run on your own computer: `hetzner`, `digitalocean` or `aws` rents a server and 2 TB disk with that provider's CLI, `user@host` takes one you have; then runs `provision.sh` on it and mounts the data disk; each provider is a set of `<name>_check/_plan/_create/_ip/_destroy` functions), `hetzner.sh` (old name for `server.sh hetzner`), `provision.sh` (fresh Ubuntu server), `node.sh` (Snapchain read node, wraps the official `snapchain.sh`; `private` keeps its APIs on 127.0.0.1; turns off its cron auto-upgrade, and `upgrade` keeps the running image and rolls back to it if the new one doesn't answer and catch up) and `gateway.sh` (nginx on 443 in front of it: a token per app, a rate limit per token, gzip, a short cache); keep them `shellcheck`-clean and safe to re-run |
+| `tests/` | `test_hub.py`, `test_keys.py`, `test_write.py`, `test_ui.py`, `test_web.py`, `test_notify.py`, `test_scripts.py` (node.sh upgrade/rollback with stand-in docker and curl) run offline (fake node; `conftest.py` has the fake client and Redis); `test_live.py` hits the real node (writes are validate-only); `tests/js/fc_test.mjs` checks `fc.js` against the vectors (run by `test_web.py` when `node` is there) |
 | `tests/vectors/` | Reference messages from the official TS library (`make_write_vectors.mjs`) |
 
 ## Commands
