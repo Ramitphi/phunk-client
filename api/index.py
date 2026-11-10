@@ -16,15 +16,18 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET  /api/connect?token=  where that approval stands
     POST /api/submit          {"message": "0x..."}: a follow or like signed in the page
     GET /api/cron/digest      the weekly note, from Vercel Cron
+    GET /api/health           which node the site reads: {"using": "own" | "fallback" | "public", "why"}
 
 Settings (environment variables, optional):
     PHUNK_NODE         the node to read from (default: the public node)
     PHUNK_NODE_TOKEN   the token for a node behind scripts/gateway.sh
+    PHUNK_FALLBACK_NODE  where reads go while PHUNK_NODE is down or more than
+                       two minutes behind (default: the public node; "off" to
+                       never fall back). It never gets the token.
     PHUNK_RATE         requests per second to that node, per instance (default 20)
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
                        (pointed at the public node, the token is never sent there
                        and the pace stays at its defaults)
-                       (paused: PUBLIC_NODE_ONLY below keeps the site on the public node)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -56,13 +59,14 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from phunk import connect, notify  # noqa: E402
-from phunk.hub import DEFAULT_NODE, Hub, NodeError  # noqa: E402
+from phunk.hub import DEFAULT_NODE, FallbackHub, Hub, NodeError  # noqa: E402
 from phunk.onchain import base_rpc_from_env  # noqa: E402
 from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
@@ -90,10 +94,24 @@ def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
     return node, token, rate, concurrency
 
 
-# Paused: our own node is down, so the site reads the public node whatever
-# PHUNK_NODE says, with no token and at the public node's default pace.
-# To read PHUNK_NODE again, set this back to False.
-PUBLIC_NODE_ONLY = True
+def hub_from_env(env=os.environ) -> Hub:
+    """The site's node: PHUNK_NODE, falling back to PHUNK_FALLBACK_NODE (the
+    public node by default) while it is down or behind. With no PHUNK_NODE,
+    or PHUNK_FALLBACK_NODE=off, a plain Hub on the one node."""
+    node, token, rate, concurrency = node_from_env(env)
+    fallback = (env.get("PHUNK_FALLBACK_NODE") or DEFAULT_NODE).strip().rstrip("/")
+    if fallback.lower() == "off" or urlsplit(fallback).netloc.lower() == urlsplit(node).netloc.lower():
+        return Hub(node, rate=rate, concurrency=concurrency, token=token)
+    # The fallback is usually the shared public node: its default pace, no token.
+    return FallbackHub(node, fallback=fallback, rate=rate, concurrency=concurrency, token=token)
+
+
+def health(hub: Hub) -> dict:
+    """GET /api/health: where reads go now, without any node address."""
+    if isinstance(hub, FallbackHub):
+        return hub.status()
+    return {"using": "public" if urlsplit(hub.url).hostname == urlsplit(DEFAULT_NODE).hostname else "own",
+            "why": "no fallback set"}
 
 
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
@@ -126,8 +144,7 @@ def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
             threading.Thread(target=loop.run_forever, name="phunk", daemon=True).start()
 
             async def make() -> UI:
-                node, token, rate, concurrency = node_from_env({} if PUBLIC_NODE_ONLY else os.environ)
-                hub = Hub(node, rate=rate, concurrency=concurrency, token=token)
+                hub = hub_from_env(os.environ)
                 await hub.__aenter__()
                 return UI(hub, public=True, tip_fid=tip_fid_from_env(), vote_rpc=base_rpc_from_env(),
                           connect=SIGNER_URL is not None)
@@ -212,6 +229,19 @@ async def _digest(headers: dict) -> tuple[int, dict]:
             return await ui.people(fid)
         out = await notify.send_digests(ui.hub.session, _store, people, target_url=MINIAPP)
         return 200, {k: len(v) for k, v in out.items()}
+
+    future = asyncio.run_coroutine_threadsafe(run(), loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+
+
+async def _health() -> dict:
+    """Check now (if a check is due), then say where reads go."""
+    loop, ui = await asyncio.to_thread(_start)
+
+    async def run():
+        if isinstance(ui.hub, FallbackHub) and time.monotonic() - ui.hub._checked_at >= ui.hub.check_every:
+            await ui.hub.check()
+        return health(ui.hub)
 
     future = asyncio.run_coroutine_threadsafe(run(), loop)
     return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
@@ -305,6 +335,8 @@ async def app(scope, receive, send):
         else:
             status, body = 405, {"error": "GET only"}
         cache = "no-store"
+    elif path == "/api/health" and scope["method"] in ("GET", "HEAD"):
+        status, body, cache = 200, await _health(), "no-store"
     elif path == "/api/path" and scope["method"] in ("GET", "HEAD") and not LIMITS["path"].allow(_client_ip(scope)):
         status, body, cache = 429, {"error": "slow down a little and try again in a few minutes"}, "no-store"
     elif scope["method"] in ("GET", "HEAD"):

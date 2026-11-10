@@ -70,12 +70,12 @@ def fake_node():
 @pytest.fixture
 def site(fake_node, monkeypatch):
     """api/index.py, loaded fresh and pointed at the fake node."""
+    monkeypatch.setenv("PHUNK_FALLBACK_NODE", "off")  # the fake node only; never the real public one
     monkeypatch.setenv("PHUNK_NODE", fake_node)
     monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     yield mod
     if mod._loop is not None:
         asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
@@ -190,12 +190,12 @@ def test_site_errors_never_show_the_node_token_or_url(monkeypatch, caplog):
     runner, port = asyncio.run_coroutine_threadsafe(start(), loop).result()
     url, token = f"http://127.0.0.1:{port}", "tok-very-secret-123"
     monkeypatch.setenv("PHUNK_NODE", url)
+    monkeypatch.setenv("PHUNK_FALLBACK_NODE", "off")  # the fake node only; never the real public one
     monkeypatch.setenv("PHUNK_NODE_TOKEN", token)
     monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site_busy", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     try:
         _, ui = mod._start()
         ui.hub.retries = 2  # retry once, then give up
@@ -252,21 +252,66 @@ def test_site_never_sends_the_gateway_token_to_the_public_node(monkeypatch):
         mod._loop.call_soon_threadsafe(mod._loop.stop)
 
 
-def test_site_can_be_held_on_the_public_node(monkeypatch):
-    """PUBLIC_NODE_ONLY: the public node whatever PHUNK_NODE says, and the token stays home."""
+def test_site_falls_back_while_its_node_is_down(fake_node, monkeypatch):
+    """PHUNK_NODE down: the site answers from the fallback node, which never
+    gets the token, and /api/health says so without naming either node."""
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    seen = []
+
+    async def down(request):
+        seen.append(request.headers.get("Authorization"))
+        return web.Response(status=502)
+
+    async def start():
+        app = web.Application()
+        app.router.add_get("/{tail:.*}", down)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        return runner, site._server.sockets[0].getsockname()[1]
+
+    runner, port = asyncio.run_coroutine_threadsafe(start(), loop).result()
+    token = "tok-very-secret-123"
+    for k, v in {"PHUNK_NODE": f"http://127.0.0.1:{port}", "PHUNK_NODE_TOKEN": token,
+                 "PHUNK_FALLBACK_NODE": fake_node, "PHUNK_RATE": "1000"}.items():
+        monkeypatch.setenv(k, v)
+    spec = importlib.util.spec_from_file_location("phunk_site_fallback", ROOT / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        _, ui = mod._start()
+        ui.hub.backup.limiter.rate = ui.hub.backup.limiter.tokens = 1000.0  # the fake fallback can take it
+        status, body, _ = mod.respond("/api/people?who=me")
+        assert status == 200 and body["fid"] == 9 and body["cards"]
+        assert seen and all(auth == f"Bearer {token}" for auth in seen)  # the token went to our node only
+        status, headers, health = asgi(mod.app, "GET", "/api/health")
+        assert status == 200 and headers["cache-control"] == "no-store"
+        assert health["using"] == "fallback" and "HTTP 502" in health["why"]
+        text = json.dumps(health)
+        assert token not in text and "127.0.0.1" not in text
+    finally:
+        if mod._loop is not None:
+            asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
+            mod._loop.call_soon_threadsafe(mod._loop.stop)
+        asyncio.run_coroutine_threadsafe(runner.cleanup(), loop).result()
+        loop.call_soon_threadsafe(loop.stop)
+
+
+def test_site_without_its_own_node_reads_the_public_one(monkeypatch):
+    """No PHUNK_NODE: a plain Hub on the public node, no fallback, no token."""
     spec = importlib.util.spec_from_file_location("phunk_site_public", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "PUBLIC_NODE_ONLY", True)
-    for k, v in {"PHUNK_NODE": "https://node.example", "PHUNK_NODE_TOKEN": "tok-very-secret-123",
-                 "PHUNK_RATE": "150", "PHUNK_CONCURRENCY": "48"}.items():
-        monkeypatch.setenv(k, v)
-    _, ui = mod._start()
-    try:
-        assert ui.hub.url == "https://haatz.quilibrium.com" and "Authorization" not in ui.hub._headers
-    finally:
-        asyncio.run_coroutine_threadsafe(ui.hub.close(), mod._loop).result()
-        mod._loop.call_soon_threadsafe(mod._loop.stop)
+    hub = mod.hub_from_env({"PHUNK_NODE_TOKEN": "tok-very-secret-123"})
+    assert type(hub).__name__ == "Hub" and hub.url == "https://haatz.quilibrium.com"
+    assert "Authorization" not in hub._headers and mod.health(hub)["using"] == "public"
+    own = mod.hub_from_env({"PHUNK_NODE": "https://node.example", "PHUNK_NODE_TOKEN": "t"})
+    assert type(own).__name__ == "FallbackHub" and own.backup.url == "https://haatz.quilibrium.com"
+    assert own.backup._headers == {} and own.backup.limiter.rate == 20.0
+    off = mod.hub_from_env({"PHUNK_NODE": "https://node.example", "PHUNK_FALLBACK_NODE": "off"})
+    assert type(off).__name__ == "Hub" and mod.health(off)["using"] == "own"
 
 
 def test_vercel_runs_the_weekly_digest():
@@ -475,12 +520,12 @@ def connect_site(fake_node, fake_farcaster, monkeypatch):
     base, got = fake_farcaster
     monkeypatch.setenv("PHUNK_SIGNER_URL", f"{base}/sign")
     monkeypatch.setenv("PHUNK_FARCASTER_API", base)
+    monkeypatch.setenv("PHUNK_FALLBACK_NODE", "off")  # the fake node only; never the real public one
     monkeypatch.setenv("PHUNK_NODE", fake_node)
     monkeypatch.setenv("PHUNK_RATE", "1000")
     spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
     mod.SIGNER_URL = f"{base}/sign"  # the site pauses it; these tests check the flow itself
     yield mod, got
     if mod._loop is not None:

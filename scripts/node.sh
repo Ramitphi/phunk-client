@@ -6,7 +6,8 @@
 #   ./node.sh stop      stop the node
 #   ./node.sh status    sync progress, per shard, in plain words
 #   ./node.sh logs      follow the node's logs (Ctrl-C stops following, not the node)
-#   ./node.sh upgrade   fetch the latest release and restart
+#   ./node.sh upgrade   fetch the latest release; roll back if it doesn't come up
+#   ./node.sh rollback  go back to the version from before the last upgrade
 #   ./node.sh private   keep the HTTP and gRPC APIs on 127.0.0.1 (behind gateway.sh)
 #   ./node.sh public    open them to the internet again
 #
@@ -20,15 +21,25 @@
 #   - keeps Grafana (3000) and statsd (8125/8126) on 127.0.0.1, because
 #     ports that Docker publishes skip the ufw firewall
 #   - returns once the node is up, instead of following the logs forever
+#   - turns off snapchain.sh's weekly auto-upgrade (a cron job that pulls
+#     :latest and prunes the old image, so a bad release can't be undone).
+#     Upgrade with "./node.sh upgrade" instead: it keeps the running image,
+#     waits for the new one to answer and catch up, and goes back to the old
+#     one if it doesn't. "./node.sh status" says when a protocol upgrade is due.
 #   - with "private", keeps the APIs (3381, 3383) on 127.0.0.1 too, so the
 #     only way in is gateway.sh's HTTPS gateway, which wants a token
 #
 # Settings (environment variables):
 #   SNAPCHAIN_AGREE_NO_REWARDS=yes  agree that the node earns no rewards
 #                                   (asked on first start if not set)
-#   SNAPCHAIN_OPERATOR_FID=<fid>    your FID or username; only used to pick the
-#                                   weekday for auto-upgrades. Leave empty to
-#                                   turn auto-upgrade off.
+#   SNAPCHAIN_OPERATOR_FID=<fid>    your FID or username, kept in .env for
+#                                   snapchain.sh (optional; auto-upgrade is off)
+#   SNAPCHAIN_UPGRADE_WAIT=<secs>   how long "upgrade" waits for the new version
+#                                   before rolling back (default 900)
+#   SNAPCHAIN_SNAPSHOT_CMD=<cmd>    a command "upgrade" runs first, for example
+#                                   your provider's CLI taking a snapshot of the
+#                                   data disk. Off by default: disk snapshots
+#                                   cost money. If it fails, nothing is upgraded.
 #   SNAPCHAIN_DIR                   install dir (default: ~/snapchain)
 #   SNAPCHAIN_API                   node to check in "status"
 #                                   (default: http://localhost:3381)
@@ -43,6 +54,9 @@ API="${SNAPCHAIN_API:-http://localhost:3381}"
 OVERRIDE_MARK="written by phunk-client scripts/node.sh"
 COMPOSE_MIN="2.24.4"   # first Compose release with the !override tag
 STALL_DELAY=$((30 * 86400))   # a shard this far behind is syncing from block 1
+UPGRADE_WAIT="${SNAPCHAIN_UPGRADE_WAIT:-900}"
+ROLLBACK_TAG="phunk/snapchain-rollback:previous"
+IN_SYNC_DELAY=120   # seconds behind; under this on every shard counts as in sync
 
 say()  { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -73,6 +87,15 @@ compose() {
     (cd "$NODE_DIR" && "${pre[@]}" docker compose "$@")
 }
 
+# Run docker itself the same way.
+dock() {
+    local pre=()
+    if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
+        pre=(sudo -n)
+    fi
+    "${pre[@]}" docker "$@"
+}
+
 # --- first-run setup -------------------------------------------------------
 
 ensure_jq() {
@@ -95,7 +118,7 @@ fetch_snapchain_sh() {
 }
 
 env_has() { grep -q "^$1=" "$NODE_DIR/.env" 2>/dev/null; }
-env_get() { grep "^$1=" "$NODE_DIR/.env" 2>/dev/null | tail -n 1 | cut -d= -f2-; }
+env_get() { grep "^$1=" "$NODE_DIR/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true; }  # empty if unset
 env_add() { printf '%s=%s\n' "$1" "$2" | as_root tee -a "$NODE_DIR/.env" >/dev/null; }
 
 # Turn a FID or username into a FID. Prints nothing if it can't.
@@ -128,28 +151,44 @@ ensure_env() {
         esac
     fi
 
+    # snapchain.sh only uses the FID to pick a weekday for its auto-upgrade,
+    # which is off below, so it is no longer asked for.
     if ! env_has HUB_OPERATOR_FID; then
         local input="${SNAPCHAIN_OPERATOR_FID:-}" fid
-        if [ -z "$input" ] && have_tty; then
-            echo "Your FID is only used to pick the weekday for weekly auto-upgrades."
-            ask '> Your FID or Farcaster username (Enter to skip): '
-            input="$REPLY"
-        fi
         fid="$(resolve_fid "$input")"
-        if [ -n "$fid" ]; then
-            env_add HUB_OPERATOR_FID "$fid"
-        else
-            [ -z "$input" ] || warn "could not find '$input'"
-            env_add HUB_OPERATOR_FID 0
-        fi
+        [ -z "$input" ] || [ -n "$fid" ] || warn "could not find '$input'"
+        env_add HUB_OPERATOR_FID "${fid:-0}"
     fi
 
-    # snapchain.sh stops before starting the node if it has no FID to pick an
-    # upgrade day from, so turn auto-upgrade off in that case.
-    if [ "$(env_get HUB_OPERATOR_FID)" = "0" ] && ! env_has SKIP_CRONTAB; then
+    # No unattended upgrades: "./node.sh upgrade" checks the new version and
+    # can roll it back; snapchain.sh's cron job can't.
+    if ! env_has SKIP_CRONTAB; then
         env_add SKIP_CRONTAB true
-        echo "Auto-upgrade is off. Run ./node.sh upgrade every week or so."
+        echo "Auto-upgrade is off. Run ./node.sh upgrade every week or so, and when ./node.sh status says one is due."
     fi
+    remove_autoupgrade_cron
+}
+
+# Take snapchain.sh's "autoupgrade" line out of root's crontab and this
+# user's, if an earlier install put it there. Other lines stay.
+remove_autoupgrade_cron() {
+    command -v crontab >/dev/null 2>&1 || return 0
+    local who current
+    for who in root user; do
+        if [ "$who" = root ]; then
+            current="$(as_root crontab -l 2>/dev/null || true)"
+        else
+            [ "$(id -u)" -ne 0 ] || continue
+            current="$(crontab -l 2>/dev/null || true)"
+        fi
+        printf '%s\n' "$current" | grep -q 'snapchain.sh autoupgrade' || continue
+        if [ "$who" = root ]; then
+            printf '%s\n' "$current" | { grep -v 'snapchain.sh autoupgrade' || true; } | as_root crontab -
+        else
+            printf '%s\n' "$current" | { grep -v 'snapchain.sh autoupgrade' || true; } | crontab -
+        fi
+        say "Removed snapchain.sh's weekly auto-upgrade from the $who crontab"
+    done
 }
 
 compose_new_enough() {
@@ -203,11 +242,23 @@ services:
       - "127.0.0.1:8125:8125/udp"
       - "127.0.0.1:8126:8126"
 EOF
+    local pinned
+    pinned="$(env_get PHUNK_PINNED_IMAGE)"
+    if api_private || [ -n "$pinned" ]; then
+        echo "  snapchain:" >>"$tmp"
+    fi
+    if [ -n "$pinned" ]; then
+        cat >>"$tmp" <<EOF
+    # ./node.sh upgrade rolled back: run the version from before it, and
+    # don't pull a new one. The next ./node.sh upgrade removes this.
+    image: $pinned
+    pull_policy: never
+EOF
+    fi
     if api_private; then
         cat >>"$tmp" <<EOF
-  # ./node.sh private: the APIs answer on this machine only; clients come in
-  # through the gateway (gateway.sh). Gossip stays public: the node syncs over it.
-  snapchain:
+    # ./node.sh private: the APIs answer on this machine only; clients come in
+    # through the gateway (gateway.sh). Gossip stays public: the node syncs over it.
     ports: !override
       - "127.0.0.1:3381:3381/tcp"
       - "3382:3382/udp"
@@ -286,17 +337,116 @@ cmd_start() {
     prepare
     if [ -f "$NODE_DIR/docker-compose.yml" ]; then
         say "Starting the node"
-        compose up -d snapchain statsd grafana || die "docker compose up failed"
+        # --pull missing: starting is not upgrading (the compose file says
+        # pull_policy: always, which would pull :latest here).
+        compose up -d --pull missing snapchain statsd grafana || die "docker compose up failed"
     else
         run_official_upgrade
     fi
     print_next
 }
 
+# Wait up to $1 seconds for the node to be healthy: its API answers and it
+# is in sync (every shard under IN_SYNC_DELAY behind) or catching up (its
+# block heights rise between two looks).
+wait_healthy() {
+    local deadline info count sum worst first=""
+    deadline=$(( $(date +%s) + $1 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if info="$(curl -fsS --max-time 10 "$API/v1/info" 2>/dev/null)" \
+            && read -r count sum worst < <(printf '%s' "$info" | jq -r '[
+                (.shardInfos | length),
+                ([.shardInfos[].maxHeight // 0] | add // 0),
+                ([.shardInfos[].blockDelay // 0] | max // 0 | floor)
+            ] | map(tostring) | join(" ")' 2>/dev/null) \
+            && [ "${count:-0}" -gt 0 ]; then
+            [ "$worst" -lt "$IN_SYNC_DELAY" ] && return 0
+            [ -n "$first" ] && [ "$sum" -gt "$first" ] && return 0
+            [ -n "$first" ] || first="$sum"
+        fi
+        sleep 15
+    done
+    return 1
+}
+
+# Keep what is running now, so a bad release can be undone: the image under
+# ROLLBACK_TAG, and the compose file and script that go with it.
+save_rollback() {
+    local cid image
+    cid="$(compose ps -q snapchain 2>/dev/null | head -n 1 || true)"
+    image=""
+    [ -z "$cid" ] || image="$(dock inspect --format '{{.Image}}' "$cid" 2>/dev/null || true)"
+    if [ -z "$image" ]; then
+        warn "no running node to keep; this upgrade has no rollback point"
+        return 1
+    fi
+    dock tag "$image" "$ROLLBACK_TAG" || die "could not keep the current image ($image)"
+    as_root mkdir -p "$NODE_DIR/rollback"
+    as_root cp -p "$NODE_DIR/docker-compose.yml" "$NODE_DIR/snapchain.sh" "$NODE_DIR/rollback/"
+    say "Kept the running version as $ROLLBACK_TAG, to roll back to"
+}
+
+run_snapshot_cmd() {
+    [ -n "${SNAPCHAIN_SNAPSHOT_CMD:-}" ] || return 0
+    say "Taking a disk snapshot first: $SNAPCHAIN_SNAPSHOT_CMD"
+    bash -c "$SNAPCHAIN_SNAPSHOT_CMD" || die "the snapshot command failed; nothing was upgraded"
+}
+
+# Go back to the image kept by the last upgrade, pinned so nothing pulls :latest.
+roll_back() {
+    dock image inspect "$ROLLBACK_TAG" >/dev/null 2>&1 \
+        || die "nothing to roll back to: ./node.sh upgrade keeps the running version before it upgrades"
+    if [ -f "$NODE_DIR/rollback/docker-compose.yml" ]; then
+        as_root cp -p "$NODE_DIR/rollback/docker-compose.yml" "$NODE_DIR/rollback/snapchain.sh" "$NODE_DIR/"
+    fi
+    env_set PHUNK_PINNED_IMAGE "$ROLLBACK_TAG"
+    write_override
+    say "Rolling back to the version from before the upgrade"
+    compose up -d --pull never snapchain || die "docker compose up failed"
+}
+
 cmd_upgrade() {
     prepare
+    case "$UPGRADE_WAIT" in ''|*[!0-9]*) die "SNAPCHAIN_UPGRADE_WAIT must be a number of seconds" ;; esac
+    local was_up=0 kept=0
+    if curl -fsS --max-time 10 "$API/v1/info" >/dev/null 2>&1; then
+        was_up=1
+    else
+        warn "the node isn't answering now, so there is no working version to go back to; upgrading without a rollback"
+    fi
+    run_snapshot_cmd
+    if [ "$was_up" -eq 1 ] && save_rollback; then kept=1; fi
+    if [ -n "$(env_get PHUNK_PINNED_IMAGE)" ]; then
+        env_set PHUNK_PINNED_IMAGE ""   # a past rollback's pin; this upgrade replaces it
+        write_override
+    fi
     run_official_upgrade
-    print_next
+    say "Waiting up to $((UPGRADE_WAIT / 60)) min for the new version to answer and catch up"
+    if wait_healthy "$UPGRADE_WAIT"; then
+        echo "Upgrade done: the node answers and is catching up. ./node.sh status shows how far."
+        return 0
+    fi
+    [ "$kept" -eq 1 ] || die "the new version isn't answering or catching up, and there is no rollback point. See ./node.sh logs"
+    warn "the new version isn't answering or catching up after $((UPGRADE_WAIT / 60)) min"
+    roll_back
+    if wait_healthy 600; then
+        echo "Rolled back: the node runs the version from before the upgrade, pinned so it isn't replaced."
+        echo "Run ./node.sh upgrade again once a fixed release is out (before a protocol upgrade is due)."
+        exit 3
+    fi
+    die "rolled back, but the node still isn't answering. See ./node.sh logs and ./node.sh status"
+}
+
+cmd_rollback() {
+    installed || die "no node installed in $NODE_DIR; run ./node.sh start"
+    as_root true
+    ensure_jq
+    roll_back
+    if wait_healthy 600; then
+        echo "Rolled back. Run ./node.sh upgrade again once a fixed release is out."
+    else
+        die "rolled back, but the node isn't answering yet. See ./node.sh logs"
+    fi
 }
 
 cmd_stop() {
@@ -499,7 +649,9 @@ usage: node.sh <command>
   stop      stop the node
   status    sync progress, per shard (exit 0 in sync, 2 catching up, 1 down)
   logs      follow the node's logs (Ctrl-C stops following, not the node)
-  upgrade   fetch the latest release and restart
+  upgrade   fetch the latest release; roll back if it doesn't answer and catch up
+            in SNAPCHAIN_UPGRADE_WAIT seconds (exit 3 when it rolled back)
+  rollback  go back to the version from before the last upgrade
   private   APIs on 127.0.0.1 only; clients come in through gateway.sh (restarts the node)
   public    APIs open to the internet again (restarts the node)
 EOF
@@ -511,6 +663,7 @@ case "${1:-}" in
     status)  cmd_status ;;
     logs)    cmd_logs ;;
     upgrade) cmd_upgrade ;;
+    rollback) cmd_rollback ;;
     private) set_api true ;;
     public)  set_api false ;;
     help|-h|--help|'') usage ;;
