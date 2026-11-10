@@ -110,8 +110,9 @@ def health(hub: Hub) -> dict:
     """GET /api/health: where reads go now, without any node address."""
     if isinstance(hub, FallbackHub):
         return hub.status()
-    return {"using": "public" if urlsplit(hub.url).hostname == urlsplit(DEFAULT_NODE).hostname else "own",
-            "why": "no fallback set"}
+    if urlsplit(hub.url).hostname == urlsplit(DEFAULT_NODE).hostname:
+        return {"using": "public", "why": "PHUNK_NODE is not set"}
+    return {"using": "own", "why": "PHUNK_FALLBACK_NODE is off"}
 
 
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API

@@ -306,12 +306,13 @@ def test_site_without_its_own_node_reads_the_public_one(monkeypatch):
     spec.loader.exec_module(mod)
     hub = mod.hub_from_env({"PHUNK_NODE_TOKEN": "tok-very-secret-123"})
     assert type(hub).__name__ == "Hub" and hub.url == "https://haatz.quilibrium.com"
-    assert "Authorization" not in hub._headers and mod.health(hub)["using"] == "public"
+    assert "Authorization" not in hub._headers
+    assert mod.health(hub) == {"using": "public", "why": "PHUNK_NODE is not set"}
     own = mod.hub_from_env({"PHUNK_NODE": "https://node.example", "PHUNK_NODE_TOKEN": "t"})
     assert type(own).__name__ == "FallbackHub" and own.backup.url == "https://haatz.quilibrium.com"
     assert own.backup._headers == {} and own.backup.limiter.rate == 20.0
     off = mod.hub_from_env({"PHUNK_NODE": "https://node.example", "PHUNK_FALLBACK_NODE": "off"})
-    assert type(off).__name__ == "Hub" and mod.health(off)["using"] == "own"
+    assert type(off).__name__ == "Hub" and mod.health(off) == {"using": "own", "why": "PHUNK_FALLBACK_NODE is off"}
 
 
 def test_vercel_runs_the_weekly_digest():
