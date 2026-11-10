@@ -60,10 +60,14 @@
   <section id="people-pane" class="pane" data-pane="people">
     <h1 class="pane-title">Your <span class="hl">people</span></h1>
     <div id="summary" class="summary"></div>
+    <!-- Share on the left, Refresh across from it, above the cards. -->
+    <div class="row between people-actions">
+      <span id="share-slot"></span>
+      <button id="people-refresh" type="button" class="ghost small">Refresh</button>
+    </div>
     <div id="people" class="people" aria-live="polite"></div>
     <div class="row between muted small foot">
       <span id="people-status"></span>
-      <button id="people-refresh" type="button" class="ghost small">Refresh</button>
     </div>
     <div id="add-app"></div>
     <div class="tip-nudge-slot"></div>
