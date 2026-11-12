@@ -75,7 +75,7 @@ def site(fake_node, monkeypatch):
     spec = importlib.util.spec_from_file_location("phunk_site", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
+    mod.PUBLIC_NODE_ONLY = False  # whatever the site is set to, these tests read the fake node
     yield mod
     if mod._loop is not None:
         asyncio.run_coroutine_threadsafe(mod._ui.hub.close(), mod._loop).result()
@@ -195,7 +195,7 @@ def test_site_errors_never_show_the_node_token_or_url(monkeypatch, caplog):
     spec = importlib.util.spec_from_file_location("phunk_site_busy", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
+    mod.PUBLIC_NODE_ONLY = False  # whatever the site is set to, these tests read the fake node
     try:
         _, ui = mod._start()
         ui.hub.retries = 2  # retry once, then give up
@@ -480,7 +480,7 @@ def connect_site(fake_node, fake_farcaster, monkeypatch):
     spec = importlib.util.spec_from_file_location("phunk_site_connect", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.PUBLIC_NODE_ONLY = False  # the site is held on the public node for now; tests read the fake one
+    mod.PUBLIC_NODE_ONLY = False  # whatever the site is set to, these tests read the fake node
     mod.SIGNER_URL = f"{base}/sign"  # the site pauses it; these tests check the flow itself
     yield mod, got
     if mod._loop is not None:
