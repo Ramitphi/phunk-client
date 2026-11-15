@@ -24,7 +24,7 @@ Settings (environment variables, optional):
     PHUNK_CONCURRENCY  requests in flight to that node, per instance (default 12)
                        (pointed at the public node, the token is never sent there
                        and the pace stays at its defaults)
-                       (paused: PUBLIC_NODE_ONLY below keeps the site on the public node)
+                       (PUBLIC_NODE_ONLY below can hold the site on the public node)
     PHUNK_TIP_FID      the account the money gun (Tip tab) tips (unset: no button)
 
 Follow and like in the mini app (optional; unset, they open Farcaster):
@@ -90,10 +90,10 @@ def node_from_env(env=os.environ) -> tuple[str, str | None, float, int]:
     return node, token, rate, concurrency
 
 
-# Paused: our own node is down, so the site reads the public node whatever
-# PHUNK_NODE says, with no token and at the public node's default pace.
-# To read PHUNK_NODE again, set this back to False.
-PUBLIC_NODE_ONLY = True
+# True holds the site on the public node whatever PHUNK_NODE says, with no
+# token and at the public node's default pace: for when our own node is down
+# and changing PHUNK_NODE in Vercel isn't quick enough. False reads PHUNK_NODE.
+PUBLIC_NODE_ONLY = False
 
 
 FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
