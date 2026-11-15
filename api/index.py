@@ -229,7 +229,8 @@ async def _digest(headers: dict) -> tuple[int, dict]:
         async def people(fid: int) -> dict:
             return await ui.people(fid)
         out = await notify.send_digests(ui.hub.session, _store, people, target_url=MINIAPP)
-        return 200, {k: len(v) for k, v in out.items()}
+        reasons = out.pop("reasons", {})
+        return 200, {**{k: len(v) for k, v in out.items()}, "reasons": {str(f): r for f, r in reasons.items()}}
 
     future = asyncio.run_coroutine_threadsafe(run(), loop)
     return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)

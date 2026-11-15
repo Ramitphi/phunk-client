@@ -228,6 +228,38 @@ To turn it on:
 4. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
    means it can't see the Redis.
 
+To see how a run went, open **Logs** in the Vercel project and filter on
+`/api/cron/digest`. The reply is JSON like this:
+
+```json
+{"sent": 12, "invalid": 1, "rate_limited": 0, "failed": 2, "skipped": 3,
+ "reasons": {"194": "domain_mismatch", "3": "feed_error"}}
+```
+
+- `sent`: notes the client accepted. `skipped`: nothing to say this week.
+- `invalid`: tokens the client no longer knows. They are dropped.
+- `rate_limited`: tried again next run.
+- `failed`: not sent. `reasons` says why, per fid. The same lines show up
+  in the log at WARNING (`notification to fid 194 failed: domain_mismatch`).
+  The token is never logged.
+
+What each reason means:
+
+| Reason | What to do |
+|---|---|
+| `domain_mismatch` | The manifest's domain is not the one the client knows the app by. Check `/.well-known/farcaster.json` on miniapp.phunk.social |
+| `target_url_mismatch` | `targetUrl` is not on the app's domain. Check `MINIAPP_DOMAIN` |
+| `no_webhook_url` | The client has no `webhookUrl` for the app. Check the manifest |
+| `invalid_token` | The token is gone. It is dropped, like `invalid` |
+| `unknown` | The client didn't say. Try again next week |
+| `http_<status>`, `no_reply` | The client's notification URL answered with an error, or not at all |
+| `not_in_reply` | The client answered, but didn't list the token anywhere |
+| `feed_error` | Building that account's people feed failed (the node). Nothing was sent |
+
+Failed accounts, except `invalid_token`, are kept and tried again next
+week. If every run shows the same fids failing with the same reason, the
+fix is on our side (manifest or domain), not theirs.
+
 Without the Redis the site works exactly as before; the webhook answers
 503 and no one is subscribed. To stop notifications, remove the Redis, or
 drop `crons` from `vercel.json` to keep subscriptions but send nothing.

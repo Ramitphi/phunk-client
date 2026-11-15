@@ -22,6 +22,7 @@ import asyncio
 import base64
 import datetime as dt
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -35,6 +36,9 @@ DISABLED = {"notifications_disabled"}
 BATCH = 100      # tokens per request, the clients' limit
 TITLE_MAX, BODY_MAX = 32, 128
 WEEK = 7 * 24 * 3600
+DROP_REASONS = {"invalid_token"}   # failedTokens reasons that mean the token is gone for good
+
+log = logging.getLogger(__name__)
 
 
 class BadEvent(ValueError):
@@ -193,33 +197,67 @@ async def send(session: aiohttp.ClientSession, store: Store, subs: dict[int, dic
                id: str, title: str, body: str, target_url: str) -> dict:
     """Notify every account in `subs` ({fid: {"url", "token"}}).
 
-    Tokens go in batches of 100 per client URL. Tokens the client calls
-    invalid are dropped from the store. Returns the fids by outcome."""
+    Tokens go in batches of 100 per client URL. Returns the fids by outcome
+    ("sent", "invalid", "rate_limited", "failed") and "reasons", a dict of
+    fid -> why it failed. A failed fid's reason is the client's
+    `failedTokens` reason ("domain_mismatch", "target_url_mismatch",
+    "no_webhook_url", "invalid_token", "unknown"), or "http_<status>",
+    "no_reply" or "not_in_reply" when the client didn't say.
+
+    Tokens in `invalidTokens`, and failed tokens with reason
+    "invalid_token", are dropped from the store. Other failed tokens are
+    kept, so they are tried again next time."""
     title, body, id = title[:TITLE_MAX], body[:BODY_MAX], id[:128]
     by_url: dict[str, dict[str, int]] = {}
     for fid, s in subs.items():
         by_url.setdefault(s["url"], {})[s["token"]] = fid
-    out: dict[str, list[int]] = {"sent": [], "invalid": [], "rate_limited": [], "failed": []}
+    out: dict = {"sent": [], "invalid": [], "rate_limited": [], "failed": [], "reasons": {}}
+    drop: list[int] = []
+
+    def fail(fid: int, reason: str):
+        out["failed"].append(fid)
+        out["reasons"][fid] = reason
+        log.warning("notification to fid %s failed: %s", fid, reason)
+
     for url, tokens in by_url.items():
         items = list(tokens.items())
         for i in range(0, len(items), BATCH):
             batch = dict(items[i:i + BATCH])
             payload = {"notificationId": id, "title": title, "body": body,
                        "targetUrl": target_url, "tokens": list(batch)}
+            result, why = None, "no_reply"
             try:
                 async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as r:
-                    result = None
                     if r.status == 200:
                         result = (await r.json(content_type=None) or {}).get("result") or {}
+                    else:
+                        why = f"http_{r.status}"
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 result = None
-            if result is None:
-                out["failed"] += batch.values()
+            if not isinstance(result, dict):
+                for fid in batch.values():
+                    fail(fid, why)
                 continue
+            seen: set[str] = set()
             for name, field in (("sent", "successfulTokens"), ("invalid", "invalidTokens"),
                                 ("rate_limited", "rateLimitedTokens")):
-                out[name] += [batch[t] for t in result.get(field) or [] if t in batch]
-    for fid in out["invalid"]:
+                for t in result.get(field) or []:
+                    if t in batch and t not in seen:
+                        seen.add(t)
+                        out[name].append(batch[t])
+            for f in result.get("failedTokens") or []:
+                t = f.get("token") if isinstance(f, dict) else None
+                if t not in batch or t in seen:
+                    continue
+                seen.add(t)
+                reason = str(f.get("reason") or "unknown")
+                fail(batch[t], reason)
+                if reason in DROP_REASONS:
+                    drop.append(batch[t])
+            for t, fid in batch.items():   # the client said nothing about these
+                if t not in seen:
+                    fail(fid, "not_in_reply")
+    for fid in out["invalid"] + drop:
         await store.drop(fid)
     return out
 
@@ -266,7 +304,8 @@ async def send_digests(session: aiohttp.ClientSession, store: Store,
     """Send this week's note to everyone subscribed who hasn't had one in 6 days.
 
     `people(fid)` returns that account's people feed. Accounts that didn't get
-    one in time (the budget, in seconds) are first in line next run."""
+    one in time (the budget, in seconds) are first in line next run. Returns
+    the fids by outcome, plus "reasons" (fid -> why it failed; see `send`)."""
     now = time.time() if now is None else now
     start = time.monotonic()
     subs, sent = await store.all(), await store.sent_at()
@@ -274,6 +313,7 @@ async def send_digests(session: aiohttp.ClientSession, store: Store,
     week = dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%G-W%V")
     gate = asyncio.Semaphore(concurrency)
     totals: dict[str, list[int]] = {"sent": [], "invalid": [], "rate_limited": [], "failed": [], "skipped": []}
+    reasons: dict[int, str] = {}
 
     async def one(fid: int):
         async with gate:
@@ -283,6 +323,8 @@ async def send_digests(session: aiohttp.ClientSession, store: Store,
                 note = digest(await people(fid))
             except Exception:  # one account's feed failing shouldn't stop the rest
                 totals["failed"].append(fid)
+                reasons[fid] = "feed_error"
+                log.warning("people feed for fid %s failed", fid, exc_info=True)
                 return
             if note is None:
                 totals["skipped"].append(fid)
@@ -290,10 +332,11 @@ async def send_digests(session: aiohttp.ClientSession, store: Store,
                 return
             res = await send(session, store, {fid: subs[fid]}, id=f"digest-{week}-{fid}",
                              title=note[0], body=note[1], target_url=target_url)
+            reasons.update(res.pop("reasons", {}))
             for k, v in res.items():
                 totals[k] += v
             if res["sent"]:
                 await store.mark_sent(fid, now)
 
     await asyncio.gather(*(one(f) for f in due))
-    return {k: sorted(v) for k, v in totals.items()}
+    return {**{k: sorted(v) for k, v in totals.items()}, "reasons": dict(sorted(reasons.items()))}
