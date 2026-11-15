@@ -95,6 +95,7 @@ pip install 'phunk-client[write] @ git+https://github.com/Ramitphi/phunk-client'
 | `signers(fid, requester_fids=)` | `/v1/signersByFid` | active keys, `currentUserNonce`, and each app's nonce (`requesterFidNonces`) |
 | `submit(msg)`, `validate(msg)` | `POST /v1/submitMessage`, `/v1/validateMessage` | send a signed message, or just check it |
 | `info()` | `/v1/info` | node stats |
+| `FallbackHub(url, fallback=)` | `/v1/info` (`blockDelay`), every minute | a `Hub` that reads your node while it is healthy, the fallback otherwise; `status()` says which |
 | `get(path, params)`, `pages(...)`, `collect(...)` | any | raw JSON, for endpoints not wrapped here |
 
 Everything that lists things is an async iterator, so you can stop early
@@ -263,6 +264,11 @@ closes the node's own ports. Clients pass the token:
 ```python
 Hub("https://node.example.com", token=os.environ["PHUNK_NODE_TOKEN"], rate=150, concurrency=48)
 ```
+
+`FallbackHub("https://node.example.com", token=...)` reads your node while
+it answers and is less than two minutes behind, and the public node
+otherwise (`hub.status()` says which). The token never goes to the public
+node.
 
 The CLI reads `PHUNK_NODE`, `PHUNK_NODE_TOKEN`, `PHUNK_RATE` and
 `PHUNK_CONCURRENCY`. See

@@ -818,3 +818,116 @@ def test_paths_says_when_the_follow_cap_cut_anything():
     assert run(_links_node(exact), test).partial is False
     capped = run(_links_node(over), test)
     assert capped.partial is True and capped.hops == 2
+
+
+# ------------------------------------------------------------- fallback
+
+def info(*delays):
+    return {"shardInfos": [{"shardId": i, "maxHeight": 1000, "blockDelay": d} for i, d in enumerate(delays)]}
+
+
+async def fake_node(state):
+    """A node whose answers `state` controls: {"info", "status", "calls"}."""
+    async def handler(request):
+        state["calls"].append((request.path, request.headers.get("Authorization")))
+        if state.get("status", 200) != 200:
+            return web.json_response({"error": "down"}, status=state["status"])
+        if request.path == "/v1/info":
+            return web.json_response(state["info"])
+        if request.query.get("fid") == "404":
+            return web.json_response({"error": "no such fid"}, status=404)
+        return web.json_response({"from": state["name"], "messages": []})
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    return runner, f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+
+
+def with_two_nodes(test, own_info=None, **kw):
+    from phunk import FallbackHub
+
+    async def main():
+        own = {"name": "own", "info": own_info or info(2, 3), "calls": []}
+        public = {"name": "public", "info": info(1, 1), "calls": []}
+        r1, own_url = await fake_node(own)
+        r2, public_url = await fake_node(public)
+        try:
+            async with FallbackHub(own_url, fallback=public_url, token="tok-very-secret-123",
+                                   rate=1000, fallback_rate=1000, **kw) as hub:
+                return await test(hub, own, public)
+        finally:
+            await r1.cleanup()
+            await r2.cleanup()
+    return asyncio.run(main())
+
+
+def test_fallback_reads_your_node_while_it_is_healthy():
+    async def test(hub, own, public):
+        assert (await hub.get("/v1/castsByFid", {"fid": 3}))["from"] == "own"
+        assert hub.status() == {"using": "own", "why": "3s behind", "checks": 1}
+        assert public["calls"] == []
+        assert all(auth == "Bearer tok-very-secret-123" for _, auth in own["calls"])
+        # Not found is an answer, not a failure: no fallback.
+        try:
+            await hub.get("/v1/castsByFid", {"fid": 404})
+            assert False, "expected NotFound"
+        except NotFound:
+            pass
+        assert public["calls"] == [] and hub.using == "own"
+    with_two_nodes(test)
+
+
+def test_fallback_skips_a_node_that_is_behind_and_never_sends_it_the_token():
+    async def test(hub, own, public):
+        assert (await hub.get("/v1/castsByFid", {"fid": 3}))["from"] == "public"
+        assert hub.status()["using"] == "fallback" and hub.why == "500s behind"
+        assert [p for p, _ in own["calls"]] == ["/v1/info"]  # checked, never read
+        assert public["calls"] and all(auth is None for _, auth in public["calls"])
+    with_two_nodes(test, own_info=info(2, 500))
+
+
+def test_fallback_when_your_node_breaks_then_back_when_it_recovers():
+    async def test(hub, own, public):
+        assert (await hub.get("/v1/a", {}))["from"] == "own"
+        own["status"] = 502  # the node breaks: this read falls back, and so do the next ones
+        assert (await hub.get("/v1/b", {}))["from"] == "public"
+        assert hub.using == "fallback" and "HTTP 502" in hub.why
+        n = len(own["calls"])
+        assert (await hub.get("/v1/c", {}))["from"] == "public"
+        assert len(own["calls"]) == n  # no read waits on a node that's off
+        own["status"] = 200  # it recovers; the next check (due now) turns it back on
+        hub._checked_at = float("-inf")
+        await hub.get("/v1/d", {})  # starts the check in the background
+        await hub._check
+        assert hub.using == "own"
+        assert (await hub.get("/v1/e", {}))["from"] == "own"
+    with_two_nodes(test, check_every=3600)
+
+
+def test_fallback_when_your_node_is_unreachable():
+    from phunk import FallbackHub
+
+    async def main():
+        public = {"name": "public", "info": info(1), "calls": []}
+        runner, public_url = await fake_node(public)
+        try:
+            # Nothing listens on port 9 here; the first read must still get an answer.
+            async with FallbackHub("http://127.0.0.1:9", fallback=public_url, token="tok",
+                                   fallback_rate=1000, timeout=2) as hub:
+                assert (await hub.get("/v1/castsByFid", {"fid": 3}))["from"] == "public"
+                assert hub.using == "fallback" and hub.why.startswith("not answering")
+                assert "tok" not in hub.why and "127.0.0.1" not in hub.why
+        finally:
+            await runner.cleanup()
+    asyncio.run(main())
+
+
+def test_fallback_counts_a_node_with_no_shards_as_behind():
+    async def test(hub, own, public):
+        assert (await hub.get("/v1/a", {}))["from"] == "public"
+        assert hub.why == "no shards yet"
+    with_two_nodes(test, own_info={"shardInfos": []})

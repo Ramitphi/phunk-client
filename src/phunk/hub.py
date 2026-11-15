@@ -5,6 +5,7 @@ import asyncio
 import base64
 import binascii
 import datetime as dt
+import logging
 import random
 import time
 from typing import AsyncIterator, Callable
@@ -22,6 +23,8 @@ MAX_PAGE = 1000
 # costs a bounded number of requests. It may then return fewer than `limit`.
 FILTER_PAGES = 5
 RETRY_STATUS = {429, 500, 502, 503, 504}
+
+log = logging.getLogger("phunk.hub")
 
 
 class NodeError(Exception):
@@ -200,7 +203,7 @@ class Hub:
             async with self.sem:
                 self.requests += 1
                 try:
-                    async with self.session.get(url, params=params, headers=self._headers) as r:
+                    async with self.session.get(url, params=params, headers=self._headers, timeout=self.timeout) as r:
                         if r.status in (401, 403):
                             raise NodeError(_refused(path, r.status, bool(self._headers)))
                         if r.status in (400, 404):
@@ -236,7 +239,7 @@ class Hub:
             async with self.sem:
                 self.requests += 1
                 try:
-                    async with self.session.post(url, data=body, headers=headers) as r:
+                    async with self.session.post(url, data=body, headers=headers, timeout=self.timeout) as r:
                         if r.status in (401, 403):
                             raise NodeError(_refused(path, r.status, bool(self._headers)))
                         if r.status in RETRY_STATUS:
@@ -559,3 +562,132 @@ class Hub:
             except NotFound:
                 return None
         return await _once(self._app_names, app_fid, load)
+
+
+def behind(info: dict) -> float:
+    """Seconds the node that sent this `/v1/info` is behind, on its worst
+    shard (`blockDelay`). A node with no shards counts as infinitely behind."""
+    shards = info.get("shardInfos") or []
+    if not shards:
+        return float("inf")
+    return max(float(s.get("blockDelay") or 0) for s in shards)
+
+
+class FallbackHub(Hub):
+    """Your own node, with a public one to fall back on.
+
+        async with FallbackHub("https://node.example", token="...") as hub:
+            ...  # reads your node while it is healthy, the public node otherwise
+
+    Your node counts as healthy when its `/v1/info` answers and no shard is
+    more than `max_delay` seconds behind (about one block a second, so 120 is
+    roughly 100 blocks). That is checked before the first read and then at
+    most every `check_every` seconds, in the background. A read that fails
+    on your node is tried on the fallback, and your node stays off until a
+    check finds it healthy again. Not-found answers are not failures.
+
+    The token only ever goes to your node. Your node gets few retries and a
+    short timeout, so a dead node costs a read seconds, not minutes.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        fallback: str = DEFAULT_NODE,
+        max_delay: float = 120.0,
+        check_every: float = 60.0,
+        fallback_rate: float = 20.0,
+        fallback_concurrency: int = 12,
+        retries: int = 2,
+        timeout: float = 15.0,
+        **kw,
+    ):
+        super().__init__(url, retries=retries, timeout=timeout, **kw)
+        self.backup = Hub(fallback, rate=fallback_rate, concurrency=fallback_concurrency)
+        self.max_delay = max_delay
+        self.check_every = check_every
+        self.healthy = False
+        self.why = "not checked yet"
+        self.checks = 0
+        self._checked_once = False
+        self._checked_at = float("-inf")
+        self._check: asyncio.Future | None = None
+
+    async def __aenter__(self) -> "FallbackHub":
+        await super().__aenter__()
+        self.backup.session = self.session  # one connection pool; the backup never sends the token
+        return self
+
+    @property
+    def using(self) -> str:
+        """Where reads go right now: "own" or "fallback"."""
+        return "own" if self.healthy else "fallback"
+
+    def status(self) -> dict:
+        """Where reads go and why, without node addresses (safe to show)."""
+        return {"using": self.using, "why": self.why, "checks": self.checks}
+
+    def _set(self, healthy: bool, why: str) -> None:
+        if healthy != self.healthy:
+            if healthy:
+                log.warning("own node is healthy again; reading it")
+            else:
+                log.warning("own node is off (%s); reading the fallback node", why)
+        self.healthy, self.why = healthy, why
+
+    async def check(self) -> bool:
+        """Ask your node for `/v1/info` once and decide whether to read it."""
+        self.checks += 1
+        self._checked_at = time.monotonic()
+        try:
+            info = await Hub.get(self, "/v1/info")
+            lag = behind(info)
+        except NodeError as e:
+            self._set(False, f"not answering: {e}")
+            return False
+        except (ValueError, TypeError, AttributeError) as e:  # an answer that isn't a /v1/info
+            self._set(False, f"odd /v1/info: {type(e).__name__}")
+            return False
+        finally:
+            self._checked_once = True
+        if lag > self.max_delay:
+            self._set(False, f"{lag:.0f}s behind" if lag != float("inf") else "no shards yet")
+            return False
+        self._set(True, f"{lag:.0f}s behind")
+        return True
+
+    async def _maybe_check(self) -> None:
+        if time.monotonic() - self._checked_at < self.check_every:
+            return
+        if self._check is None or self._check.done():
+            self._checked_at = time.monotonic()
+            self._check = asyncio.ensure_future(self.check())
+        if not self._checked_once:
+            await asyncio.shield(self._check)  # the first read waits: never read an unknown node
+
+    async def get(self, path: str, params: dict | None = None) -> dict:
+        await self._maybe_check()
+        if self.healthy:
+            try:
+                return await super().get(path, params)
+            except NotFound:
+                raise
+            except NodeError as e:
+                self._set(False, str(e))
+                self._checked_at = time.monotonic()  # stay off until the next check
+        return await self.backup.get(path, params)
+
+    async def post(self, path: str, body: bytes) -> dict:
+        await self._maybe_check()
+        if self.healthy:
+            try:
+                return await super().post(path, body)
+            except NodeError as e:
+                # Only when the message didn't get through. If your node read
+                # it and said no, another node would say the same.
+                if not isinstance(e.__cause__, (aiohttp.ClientError, asyncio.TimeoutError)):
+                    raise
+                self._set(False, str(e))
+                self._checked_at = time.monotonic()
+        return await self.backup.post(path, body)
