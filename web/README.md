@@ -24,7 +24,7 @@ signer is a separate Vercel project at `sign.phunk.social`
 |---|---|
 | `vercel.json` (repo root) | The two services, their public routes, and the page's headers |
 | `web/build.sh` | Copies `src/phunk/static/` into `web/_site/` with the head tags, images and manifest |
-| `requirements.txt` (repo root) | The `api` service's one dependency, `aiohttp` |
+| `pyproject.toml` (repo root) | What Vercel installs for the `api` service: only `aiohttp`. `requirements.txt` is not used while `pyproject.toml` is there, so the webhook checks signatures in pure Python |
 | `web/head.html` | Link previews and the Farcaster mini app embed, put into the page at build |
 | `web/public/` | Images and `/.well-known/farcaster.json`, the mini app manifest |
 | `web/make_images.py` | Redraws the images (dev only: Playwright and Pillow) |
