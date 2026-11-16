@@ -228,13 +228,16 @@ To turn it on:
 4. Check `POST /api/webhook` answers 400 (not 503) for a bad body: 503
    means it can't see the Redis.
 
-To see how a run went, open **Logs** in the Vercel project and filter on
-`/api/cron/digest`. The reply is JSON like this:
+To see how a run went, open **Logs** (Runtime Logs) in the Vercel project
+and search for `digest`. Each run prints its reply on one line:
 
-```json
-{"sent": 12, "invalid": 1, "rate_limited": 0, "failed": 2, "skipped": 3,
- "reasons": {"194": "domain_mismatch", "3": "feed_error"}}
 ```
+digest 200: {"failed": 2, "invalid": 1, "rate_limited": 0, "reasons": {"194": "domain_mismatch", "3": "feed_error"}, "sent": 12, "skipped": 3}
+```
+
+`digest 401` means `CRON_SECRET` is missing or wrong. `digest 503` means
+the Redis isn't connected. No line at all means the run never reached the
+function: check **Request Logs** for `/api/cron/digest` and its status.
 
 - `sent`: notes the client accepted. `skipped`: nothing to say this week.
 - `invalid`: tokens the client no longer knows. They are dropped.

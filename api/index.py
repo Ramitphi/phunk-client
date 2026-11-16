@@ -216,7 +216,15 @@ async def _webhook(body: bytes) -> tuple[int, dict]:
 
 async def _digest(headers: dict) -> tuple[int, dict]:
     """GET /api/cron/digest: the weekly note. Only Vercel Cron may call it:
-    without CRON_SECRET set on the project, nobody may."""
+    without CRON_SECRET set on the project, nobody may.
+
+    The reply is also printed, one line, so it shows in Vercel's Runtime Logs."""
+    status, body = await _run_digest(headers)
+    print(f"digest {status}: {json.dumps(body, sort_keys=True)}", flush=True)
+    return status, body
+
+
+async def _run_digest(headers: dict) -> tuple[int, dict]:
     secret = os.environ.get("CRON_SECRET") or ""
     given = headers.get("authorization") or ""
     if not secret or not hmac.compare_digest(given.encode(), f"Bearer {secret}".encode()):

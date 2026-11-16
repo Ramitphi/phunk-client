@@ -147,7 +147,7 @@ def test_the_digest_cron_is_only_for_vercel(site, monkeypatch):
     assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
 
 
-def test_the_digest_cron_replies_with_counts_and_reasons(site, monkeypatch):
+def test_the_digest_cron_replies_with_counts_and_reasons(site, monkeypatch, capsys):
     """Vercel's cron log shows this reply: how many went where, and why each failure failed."""
     from phunk import notify
 
@@ -163,6 +163,9 @@ def test_the_digest_cron_replies_with_counts_and_reasons(site, monkeypatch):
     assert status == 200
     assert body == {"sent": 1, "invalid": 0, "rate_limited": 0, "failed": 2, "skipped": 0,
                     "reasons": {"2": "domain_mismatch", "3": "feed_error"}}
+    # and prints it, so it shows in Vercel's Runtime Logs
+    line = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("digest ")][-1]
+    assert line.startswith("digest 200: ") and json.loads(line.split(": ", 1)[1]) == body
 
 
 def test_the_digest_cron_is_closed_without_a_secret(site, monkeypatch):
