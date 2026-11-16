@@ -77,6 +77,38 @@ def test_an_event_is_refused_unless_a_live_key_signed_it():
     assert run_loop(test()) == [{}, {}, {}, {}]
 
 
+def test_the_pure_python_check_agrees_with_pynacl():
+    """The deployed API has only aiohttp, so the webhook must work without pynacl."""
+    import os
+    for _ in range(20):
+        key = nacl.SigningKey.generate()
+        msg = os.urandom(int.from_bytes(os.urandom(1), "big"))
+        sig = key.sign(msg).signature
+        pub = bytes(key.verify_key)
+        assert notify.ed25519_verify(pub, msg, sig)
+        assert not notify.ed25519_verify(pub, msg + b"x", sig)
+        assert not notify.ed25519_verify(pub, msg, sig[:-1] + bytes([sig[-1] ^ 1]))
+        assert not notify.ed25519_verify(bytes(nacl.SigningKey.generate().verify_key), msg, sig)
+    assert not notify.ed25519_verify(b"\x00" * 31, b"", b"\x00" * 64)
+
+
+def test_events_are_checked_without_pynacl(monkeypatch):
+    import sys
+    key, other = nacl.SigningKey.generate(), nacl.SigningKey.generate()
+    hub = FakeHub({9: ["0x" + bytes(key.verify_key).hex()]})
+    for name in ("nacl", "nacl.signing", "nacl.exceptions"):
+        monkeypatch.setitem(sys.modules, name, None)  # import fails, as on Vercel
+    store = notify.MemoryStore()
+
+    async def test():
+        await notify.handle_event(hub, store, event_body(key))
+        with pytest.raises(notify.BadEvent, match="bad signature"):
+            await notify.handle_event(hub, store, event_body(key, sign_with=other, token="t2"))
+        return await store.all()
+
+    assert run_loop(test()) == {9: {"url": "https://client.example/notify", "token": "t1"}}
+
+
 def test_sending_batches_tokens_and_drops_the_invalid_ones(fake_client):
     session, seen, reply = fake_client
     store = notify.MemoryStore()

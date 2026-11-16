@@ -13,14 +13,16 @@ active keys on the node, then keeps or drops the account's token in a
 drops the tokens the client says are no longer valid. `digest` turns a
 people feed into one short note, sent weekly by `send_digests`.
 
-Checking the signature needs `pynacl` (the `[write]` extra, or the API's
-requirements.txt); it is imported only when an event arrives.
+Checking the signature uses `pynacl` when it is installed (the `[write]`
+extra), and a small pure-Python Ed25519 check (RFC 8032) otherwise, so the
+webhook works with `aiohttp` alone. Verifying needs no secret.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import datetime as dt
+import hashlib
 import json
 import logging
 import time
@@ -76,12 +78,90 @@ def parse_event(body: dict) -> tuple[Event, bytes, bytes]:
 
 
 def check_signature(key: str, signed: bytes, signature: bytes) -> None:
-    from nacl.exceptions import BadSignatureError
-    from nacl.signing import VerifyKey
     try:
-        VerifyKey(bytes.fromhex(key[2:])).verify(signed, signature)
-    except (BadSignatureError, ValueError):
+        public = bytes.fromhex(key[2:])
+    except ValueError:
         raise BadEvent("bad signature") from None
+    try:
+        from nacl.exceptions import BadSignatureError
+        from nacl.signing import VerifyKey
+    except ImportError:
+        ok = ed25519_verify(public, signed, signature)
+    else:
+        try:
+            VerifyKey(public).verify(signed, signature)
+            ok = True
+        except (BadSignatureError, ValueError):
+            ok = False
+    if not ok:
+        raise BadEvent("bad signature")
+
+
+# Ed25519 verification, after the reference code in RFC 8032 section 6. Only
+# checks a signature against a public key: no secret is involved, so plain
+# (not constant-time) integer maths is fine.
+
+_P = 2 ** 255 - 19
+_Q = 2 ** 252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _add(a, b):
+    x = (a[1] - a[0]) * (b[1] - b[0]) % _P
+    y = (a[1] + a[0]) * (b[1] + b[0]) % _P
+    c = 2 * a[3] * b[3] * _D % _P
+    z = 2 * a[2] * b[2] % _P
+    e, f, g, h = y - x, z - c, z + c, y + x
+    return e * f % _P, g * h % _P, f * g % _P, e * h % _P
+
+
+def _mul(n: int, pt):
+    out = (0, 1, 1, 0)
+    while n:
+        if n & 1:
+            out = _add(out, pt)
+        pt, n = _add(pt, pt), n >> 1
+    return out
+
+
+def _x(y: int, sign: int):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * pow(_D * y * y + 1, _P - 2, _P) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P:
+        return None
+    return _P - x if (x & 1) != sign else x
+
+
+def _point(b: bytes):
+    y = int.from_bytes(b, "little")
+    sign, y = y >> 255, y & ((1 << 255) - 1)
+    x = _x(y, sign)
+    return None if x is None else (x, y, 1, x * y % _P)
+
+
+_GY = 4 * pow(5, _P - 2, _P) % _P
+_G = (_x(_GY, 0), _GY, 1, _x(_GY, 0) * _GY % _P)
+
+
+def ed25519_verify(public: bytes, message: bytes, signature: bytes) -> bool:
+    """Is `signature` `public`'s Ed25519 signature over `message`?"""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    a, r = _point(public), _point(signature[:32])
+    s = int.from_bytes(signature[32:], "little")
+    if a is None or r is None or s >= _Q:
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _Q
+    left, right = _mul(s, _G), _add(r, _mul(h, a))
+    return (left[0] * right[2] - right[0] * left[2]) % _P == 0 and \
+        (left[1] * right[2] - right[1] * left[2]) % _P == 0
 
 
 async def is_active_key(hub, fid: int, key: str) -> bool:
