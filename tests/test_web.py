@@ -147,6 +147,24 @@ def test_the_digest_cron_is_only_for_vercel(site, monkeypatch):
     assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
 
 
+def test_the_digest_cron_replies_with_counts_and_reasons(site, monkeypatch):
+    """Vercel's cron log shows this reply: how many went where, and why each failure failed."""
+    from phunk import notify
+
+    async def fake_send_digests(session, store, people, *, target_url):
+        return {"sent": [1], "invalid": [], "rate_limited": [], "failed": [2, 3], "skipped": [],
+                "reasons": {2: "domain_mismatch", 3: "feed_error"}}
+
+    monkeypatch.setenv("CRON_SECRET", "s3cret")
+    site._start()
+    monkeypatch.setattr(site, "_store", notify.MemoryStore())
+    monkeypatch.setattr(site.notify, "send_digests", fake_send_digests)
+    status, _, body = asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])
+    assert status == 200
+    assert body == {"sent": 1, "invalid": 0, "rate_limited": 0, "failed": 2, "skipped": 0,
+                    "reasons": {"2": "domain_mismatch", "3": "feed_error"}}
+
+
 def test_the_digest_cron_is_closed_without_a_secret(site, monkeypatch):
     """No CRON_SECRET on the project: nobody may run the digest."""
     monkeypatch.delenv("CRON_SECRET", raising=False)

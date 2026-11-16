@@ -96,6 +96,68 @@ def test_sending_batches_tokens_and_drops_the_invalid_ones(fake_client):
     assert seen[0]["tokens"] == ["t1", "t2", "t3"] and seen[0]["notificationId"] == "n1"
 
 
+def test_failed_tokens_count_as_failed_with_their_reason(fake_client):
+    session, seen, reply = fake_client
+    store = notify.MemoryStore()
+    subs = {i: {"url": "https://client.example/notify", "token": f"t{i}"} for i in range(1, 5)}
+    reply({"result": {"successfulTokens": ["t1"], "invalidTokens": [], "rateLimitedTokens": [],
+                      "failedTokens": [{"token": "t2", "fid": 2, "reason": "domain_mismatch"},
+                                       {"token": "t3", "fid": 3, "reason": "invalid_token"},
+                                       {"token": "t4", "fid": 4, "reason": "no_webhook_url"}]}})
+
+    async def test():
+        for fid, s in subs.items():
+            await store.put(fid, s["url"], s["token"])
+        out = await notify.send(session, store, subs, id="n1", title="Hi", body="There",
+                                target_url="https://miniapp.phunk.social/")
+        return out, await store.all()
+
+    out, left = run_loop(test())
+    assert out["sent"] == [1] and sorted(out["failed"]) == [2, 3, 4]
+    assert out["reasons"] == {2: "domain_mismatch", 3: "invalid_token", 4: "no_webhook_url"}
+    assert sorted(left) == [1, 2, 4]  # invalid_token is forgotten; the others are kept to try again
+
+
+def test_a_token_the_client_says_nothing_about_or_an_error_counts_as_failed(fake_client):
+    session, seen, reply = fake_client
+    store = notify.MemoryStore()
+    subs = {1: {"url": "https://c.example/n", "token": "t1"}}
+
+    async def test():
+        reply({"result": {"successfulTokens": []}})
+        silent = await notify.send(session, store, subs, id="a", title="T", body="B", target_url="https://m.example/")
+        reply({"error": "down"}, status=500)
+        down = await notify.send(session, store, subs, id="b", title="T", body="B", target_url="https://m.example/")
+        return silent, down
+
+    silent, down = run_loop(test())
+    assert silent["failed"] == [1] and silent["reasons"] == {1: "not_in_reply"}
+    assert down["failed"] == [1] and down["reasons"] == {1: "http_500"}
+
+
+def test_the_digest_says_why_sends_failed(fake_client):
+    session, seen, reply = fake_client
+    store = notify.MemoryStore()
+    reply({"result": {"successfulTokens": ["t1"],
+                      "failedTokens": [{"token": "t2", "fid": 2, "reason": "target_url_mismatch"}]}})
+
+    async def people(fid):
+        if fid == 3:
+            raise RuntimeError("the node is having a day")
+        return {"summary": {"moved": 0}, "cards": [{"kind": "reconnect", "username": "v"}]}
+
+    async def test():
+        for fid in (1, 2, 3):
+            await store.put(fid, "https://c.example/n", f"t{fid}")
+        out = await notify.send_digests(session, store, people, target_url="https://m.example/")
+        return out, await store.sent_at()
+
+    out, sent = run_loop(test())
+    assert out["sent"] == [1] and out["failed"] == [2, 3]
+    assert out["reasons"] == {2: "target_url_mismatch", 3: "feed_error"}
+    assert sorted(sent) == [1]  # the failed ones are tried again next week
+
+
 def test_a_long_title_or_body_is_cut_to_what_clients_accept(fake_client):
     session, seen, reply = fake_client
     store = notify.MemoryStore()
