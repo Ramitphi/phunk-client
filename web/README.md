@@ -211,6 +211,7 @@ How it fits together:
 |---|---|
 | `webhookUrl` in the manifest | Where a Farcaster client POSTs its signed add / remove events |
 | `POST /api/webhook` | Checks the signature, checks the key is one of that account's live keys on the node, then keeps or drops their token |
+| `POST /api/notify/resync` | The page sends the token it sees in the mini app context, with a Quick Auth token. Keeps it if it's new (see below) |
 | Upstash Redis | Holds `{fid: {url, token}}` and when each account last got a note |
 | `GET /api/cron/digest` | Tuesdays at 16:00 UTC (`crons` in `vercel.json`). Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` once you add `CRON_SECRET` to the project; nothing else may call it |
 | `src/phunk/notify.py` | All of the above, with `tests/test_notify.py` offline |
@@ -262,6 +263,48 @@ What each reason means:
 Failed accounts, except `invalid_token`, are kept and tried again next
 week. If every run shows the same fids failing with the same reason, the
 fix is on our side (manifest or domain), not theirs.
+
+#### Tokens the webhook missed
+
+A client turns notifications on without waiting for our webhook to answer,
+and it doesn't send the event again. So when the webhook fails (as it did
+until it stopped needing pynacl), the client has a live token we never saw.
+There is no API to fetch it later.
+
+The page can see it, though. When phunk opens as a mini app,
+`context.client.notificationDetails` holds the `url` and `token`. Once per
+session, if `context.client.added` and the details are there, the page
+quietly sends them back:
+
+```
+POST /api/notify/resync
+Authorization: Bearer <JWT from sdk.quickAuth.getToken()>
+{"url": "https://api.farcaster.xyz/v1/frame-notifications", "token": "..."}
+```
+
+The context is untrusted, so the fid comes from the Quick Auth token, not
+the body. The server checks it the way `@farcaster/quick-auth`
+`verifyJwt` does: an RS256 signature by a key in
+`https://auth.farcaster.xyz/.well-known/jwks.json` (kept 10 minutes),
+`iss` is that server, `aud` is `MINIAPP_DOMAIN`, and `exp` hasn't passed.
+The check is plain Python (`notify.QuickAuth`), so it needs only `aiohttp`.
+The url must be https on a public host name.
+
+Then the token is stored if we don't have it or it changed. No welcome note
+is sent. Answers:
+
+| Status | Meaning |
+|---|---|
+| 200 `{"stored": true}` | New or changed; kept |
+| 200 `{"stored": false}` | We already had it |
+| 400 | Bad url or token |
+| 401 | No Quick Auth token, or it didn't check out (the error says why) |
+| 429 | More than 20 tries per IP in 10 minutes |
+| 503 | No Redis |
+
+People who turned notifications on while the webhook was down come back
+into the store the next time they open phunk. To check, count the fields
+in the `phunk:notify` hash (`HLEN phunk:notify` in the Upstash console).
 
 Without the Redis the site works exactly as before; the webhook answers
 503 and no one is subscribed. To stop notifications, remove the Redis, or

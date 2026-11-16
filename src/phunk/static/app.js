@@ -579,6 +579,37 @@ function showTip() {
   window.scrollTo({ top: 0 });
 }
 
+// ----------------------------------------------------------- notification resync
+// The webhook once missed every "notifications on" event, and clients don't
+// send them again. The context still has the token, so hand it to the server
+// once per session, with a Quick Auth token to prove whose it is. Quiet: no
+// UI, no errors shown.
+
+const RESYNC_KEY = "phunk-notify-resync";
+
+async function resyncNotifications() {
+  if (!miniapp || !miniapp.quickAuth) return;
+  try {
+    if (sessionStorage.getItem(RESYNC_KEY)) return;
+    sessionStorage.setItem(RESYNC_KEY, "1");
+  } catch (e) {
+    if (resyncNotifications.done) return;
+  }
+  resyncNotifications.done = true;
+  try {
+    const client = ((await miniapp.context) || {}).client || {};
+    const details = client.notificationDetails;
+    if (!client.added || !details || !details.url || !details.token) return;
+    const { token: jwt } = await miniapp.quickAuth.getToken();
+    if (!jwt) return;
+    await fetch("/api/notify/resync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ url: details.url, token: details.token }),
+    });
+  } catch (e) { /* next session tries again */ }
+}
+
 // ----------------------------------------------------------- add the app
 // Once someone's people are on screen, offer to keep phunk in their apps,
 // which is also what lets it send the weekly note. Asked at most twice.
@@ -1589,6 +1620,7 @@ async function init() {
       state.me.user = { fid: user.fid, username: user.username || null, display_name: user.displayName || null,
         pfp: user.pfpUrl || null, bio: null };
       document.documentElement.classList.add("miniapp");
+      resyncNotifications();
       if (!state.whoFromUrl) state.who = selfName();
       $('label[for="lookup-name"]').textContent = "See anyone's people";
     } else {

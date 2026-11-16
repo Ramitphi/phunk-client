@@ -295,3 +295,118 @@ def test_redis_store_round_trip(fake_redis):
     subs, sent, after = run_loop(test())
     assert subs == {9: {"url": "https://c.example/n", "token": "t9"}}
     assert sent == {9: 1700000000.0} and after == {}
+
+
+# ------------------------------------------------------------------ resync (Quick Auth)
+
+from conftest import jwks_for, make_jwt, rsa_test_key  # noqa: E402
+
+DOMAIN = "miniapp.phunk.social"
+NOW = 1_800_000_000
+
+
+def claims(origin, **over):
+    out = {"sub": 194, "iss": origin, "aud": DOMAIN, "iat": NOW - 60, "exp": NOW + 3600}
+    out.update(over)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def test_rs256_matches_the_reference_library():
+    rsa = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.rsa")
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub = key.public_key().public_numbers()
+    sig = key.sign(b"header.payload", padding.PKCS1v15(), hashes.SHA256())
+    assert notify.rs256_verify(pub.n, pub.e, b"header.payload", sig)
+    assert not notify.rs256_verify(pub.n, pub.e, b"header.payload!", sig)
+    assert not notify.rs256_verify(pub.n, pub.e, b"header.payload", sig[:-1] + bytes([sig[-1] ^ 1]))
+    # And our test signer makes signatures the library accepts.
+    n, e, _ = rsa_test_key()
+    jwt = make_jwt({"x": 1})
+    h, p, s = jwt.split(".")
+    rsa.RSAPublicNumbers(e, n).public_key().verify(notify._b64(s), f"{h}.{p}".encode(),
+                                                   padding.PKCS1v15(), hashes.SHA256())
+
+
+def test_quick_auth_gives_the_fid_of_a_valid_token(fake_auth):
+    session, origin, reads = fake_auth
+    qa = notify.QuickAuth(session, origin)
+
+    async def go():
+        assert await qa.fid(make_jwt(claims(origin)), domain=DOMAIN, now=NOW) == 194
+        assert await qa.fid(make_jwt(claims(origin, aud=["other.example", DOMAIN])), domain=DOMAIN, now=NOW) == 194
+        assert await qa.fid(make_jwt(claims(origin), kid=None), domain=DOMAIN, now=NOW) == 194
+
+    run_loop(go())
+    assert reads[0] == 1   # the keys are kept between checks
+
+
+@pytest.mark.parametrize("why, jwt", [
+    ("bad signature", lambda o: make_jwt(claims(o), seed=2)),
+    ("bad signature", lambda o: make_jwt(claims(o))[:-6] + "AAAAAA"),
+    ("expired", lambda o: make_jwt(claims(o, exp=NOW))),
+    ("expired", lambda o: make_jwt(claims(o, exp=None))),
+    ("for another domain", lambda o: make_jwt(claims(o, aud="evil.example"))),
+    ("for another domain", lambda o: make_jwt(claims(o, aud=None))),
+    ("not issued by the auth server", lambda o: make_jwt(claims("https://evil.example"))),
+    ("not valid yet", lambda o: make_jwt(claims(o, nbf=NOW + 10))),
+    ("not signed with RS256", lambda o: make_jwt(claims(o), alg="none")),
+    ("doesn't list", lambda o: make_jwt(claims(o), kid="rotated-away")),
+    ("no fid", lambda o: make_jwt(claims(o, sub="dwr"))),
+    ("no fid", lambda o: make_jwt(claims(o, sub=None))),
+    ("not a JWT", lambda o: "not-a-jwt"),
+])
+def test_quick_auth_refuses_bad_tokens(fake_auth, why, jwt):
+    session, origin, _ = fake_auth
+    qa = notify.QuickAuth(session, origin)
+    with pytest.raises(notify.BadAuth, match=why):
+        run_loop(qa.fid(jwt(origin), domain=DOMAIN, now=NOW))
+
+
+def test_quick_auth_refuses_small_keys(fake_auth):
+    session, origin, _ = fake_auth
+    qa = notify.QuickAuth(session, origin)
+    qa.MIN_BITS = 4096
+    with pytest.raises(notify.BadAuth, match="bad signature"):
+        run_loop(qa.fid(make_jwt(claims(origin)), domain=DOMAIN, now=NOW))
+
+
+def test_resync_keeps_a_missing_or_changed_token_and_leaves_an_identical_one(fake_redis):
+    session, store = fake_redis
+    writes = []
+    put = store.put
+
+    async def counting_put(fid, url, token):
+        writes.append(fid)
+        await put(fid, url, token)
+
+    store.put = counting_put
+
+    async def go():
+        assert await notify.resync(store, 194, "https://api.farcaster.xyz/v1/frame-notifications", "t1") is True
+        assert await store.get(194) == {"url": "https://api.farcaster.xyz/v1/frame-notifications", "token": "t1"}
+        assert await notify.resync(store, 194, "https://api.farcaster.xyz/v1/frame-notifications", "t1") is False
+        assert await notify.resync(store, 194, "https://api.farcaster.xyz/v1/frame-notifications", "t2") is True
+        assert (await store.all())[194]["token"] == "t2"
+
+    run_loop(go())
+    assert writes == [194, 194]
+
+
+@pytest.mark.parametrize("url, token", [
+    ("http://client.example/notify", "t"),
+    ("https://127.0.0.1/notify", "t"),
+    ("https://[::1]/notify", "t"),
+    ("https://localhost/notify", "t"),
+    ("https://user:pw@client.example/notify", "t"),
+    ("https://client.example/notify", ""),
+    (None, "t"),
+    ("https://client.example/" + "x" * 600, "t"),
+])
+def test_resync_refuses_bad_details(url, token):
+    store = notify.MemoryStore()
+    with pytest.raises(notify.BadEvent):
+        run_loop(notify.resync(store, 194, url, token))
+    assert store.subs == {}

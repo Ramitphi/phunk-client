@@ -12,6 +12,8 @@ with. Follow, reply and like open Farcaster in the page instead.
     GET /api/suggestions?who=dwr
     GET /api/path?from=dwr&to=vitalik.eth   who could introduce them
     POST /api/webhook         the mini app's signed add / remove events
+    POST /api/notify/resync   {"url", "token"} from the mini app context, with
+                              Authorization: Bearer <Quick Auth JWT>
     POST /api/connect         {"key": "0x..."}: start approving a key made in the page
     GET  /api/connect?token=  where that approval stands
     POST /api/submit          {"message": "0x..."}: a follow or like signed in the page
@@ -71,7 +73,9 @@ from phunk.onchain import base_rpc_from_env  # noqa: E402
 from phunk.ui import PUBLIC_HELP, UI, get_json, tip_fid_from_env  # noqa: E402
 
 TIMEOUT = 280  # seconds; under the function's maxDuration in vercel.json
-MINIAPP = f"https://{os.environ.get('MINIAPP_DOMAIN') or 'miniapp.phunk.social'}/"
+MINIAPP_DOMAIN = os.environ.get("MINIAPP_DOMAIN") or "miniapp.phunk.social"
+MINIAPP = f"https://{MINIAPP_DOMAIN}/"
+QUICK_AUTH = os.environ.get("PHUNK_QUICK_AUTH") or notify.QUICK_AUTH
 # Paused: in-app follow and like (approving a phunk key) are off for now, so
 # /api/connect and /api/submit answer 503 even with PHUNK_SIGNER_URL set.
 # To turn them back on, restore this line:
@@ -120,7 +124,8 @@ FARCASTER_API = os.environ.get("PHUNK_FARCASTER_API") or connect.FARCASTER_API
 LIMITS = {"start": connect.RateLimit(10, 600), "status": connect.RateLimit(300, 600),
           "submit": connect.RateLimit(60, 60),
           # A path lookup can read hundreds of follow lists; the CDN answers repeats.
-          "path": connect.RateLimit(20, 600)}
+          "path": connect.RateLimit(20, 600),
+          "resync": connect.RateLimit(20, 600)}
 CACHE = {
     "/api/me": "public, max-age=300, s-maxage=3600",
     "/api/people": "public, max-age=60, s-maxage=600, stale-while-revalidate=3600",
@@ -135,6 +140,7 @@ _lock = threading.Lock()
 _loop: asyncio.AbstractEventLoop | None = None
 _ui: UI | None = None
 _store: notify.Store | None = None
+_quick_auth: notify.QuickAuth | None = None
 
 
 def _start() -> tuple[asyncio.AbstractEventLoop, UI]:
@@ -209,6 +215,42 @@ async def _webhook(body: bytes) -> tuple[int, dict]:
             return 400, {"error": str(e)}
         await notify.welcome(ui.hub.session, _store, event, target_url=MINIAPP)
         return 200, {"ok": True, "event": event.event}
+
+    future = asyncio.run_coroutine_threadsafe(run(), loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
+
+
+async def _resync(headers: dict, body: bytes) -> tuple[int, dict]:
+    """POST /api/notify/resync: a token the webhook missed, sent by the page.
+
+    The fid comes from the Quick Auth JWT, never from the body. No welcome
+    note: these people turned notifications on long ago."""
+    auth = headers.get("authorization") or ""
+    if not auth.lower().startswith("bearer ") or not auth[7:].strip():
+        return 401, {"error": "send a Quick Auth token"}
+    loop, ui = await asyncio.to_thread(_start)
+
+    async def run():
+        global _quick_auth
+        if _store is None:
+            return 503, {"error": "notifications are not set up on this deployment"}
+        try:
+            data = json.loads(body or b"{}")
+        except ValueError:
+            return 400, {"error": "not JSON"}
+        if not isinstance(data, dict):
+            return 400, {"error": "send a JSON object"}
+        if _quick_auth is None:
+            _quick_auth = notify.QuickAuth(ui.hub.session, QUICK_AUTH)
+        try:
+            fid = await _quick_auth.fid(auth[7:].strip(), domain=MINIAPP_DOMAIN)
+        except notify.BadAuth as e:
+            return 401, {"error": str(e)}
+        try:
+            stored = await notify.resync(_store, fid, data.get("url"), data.get("token"))
+        except notify.BadEvent as e:
+            return 400, {"error": str(e)}
+        return 200, {"ok": True, "stored": stored}
 
     future = asyncio.run_coroutine_threadsafe(run(), loop)
     return await asyncio.wait_for(asyncio.wrap_future(future), TIMEOUT)
@@ -337,6 +379,15 @@ async def app(scope, receive, send):
         cache = "no-store"
     elif scope["method"] == "POST" and path == "/api/webhook":
         status, body = await _webhook(await _body(receive))
+        cache = "no-store"
+    elif path == "/api/notify/resync":
+        if scope["method"] != "POST":
+            status, body = 405, {"error": "POST only"}
+        elif not LIMITS["resync"].allow(_client_ip(scope)):
+            status, body = 429, {"error": "slow down a little and try again in a few minutes"}
+        else:
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers") or []}
+            status, body = await _resync(headers, await _body(receive))
         cache = "no-store"
     elif path == "/api/cron/digest":
         if scope["method"] == "GET":

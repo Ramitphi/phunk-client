@@ -12,6 +12,7 @@ import pytest
 from aiohttp import web
 
 from phunk.ui import PUBLIC_HELP
+from conftest import jwks_for, make_jwt
 from test_ui import node, post, run
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,8 +52,12 @@ def fake_node():
         SUBMITTED.append(await request.read())
         return web.json_response({"hash": "0x" + "aa" * 20})
 
+    async def jwks(request):
+        return web.json_response(jwks_for())
+
     async def start():
         app = web.Application()
+        app.router.add_get("/.well-known/jwks.json", jwks)   # stands in for auth.farcaster.xyz too
         app.router.add_get("/{tail:.*}", node)
         app.router.add_post("/v1/submitMessage", submit)
         runner = web.AppRunner(app)
@@ -73,6 +78,7 @@ def site(fake_node, monkeypatch):
     monkeypatch.setenv("PHUNK_FALLBACK_NODE", "off")  # the fake node only; never the real public one
     monkeypatch.setenv("PHUNK_NODE", fake_node)
     monkeypatch.setenv("PHUNK_RATE", "1000")
+    monkeypatch.setenv("PHUNK_QUICK_AUTH", fake_node)
     spec = importlib.util.spec_from_file_location("phunk_site", ROOT / "api" / "index.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -137,6 +143,59 @@ def test_webhook_and_digest_say_so_when_notifications_are_not_set_up(site, monke
     assert asgi(site.app, "GET", "/api/cron/digest", headers=[("authorization", "Bearer s3cret")])[0] == 503
     # Still not a read endpoint: a GET of the webhook path is a 404 from the read API.
     assert asgi(site.app, "GET", "/api/webhook")[0] == 404
+
+
+def resync(site, jwt, details=None, headers=None):
+    body = json.dumps(details or {"url": "https://api.farcaster.xyz/v1/frame-notifications", "token": "tok-194"})
+    auth = [("authorization", f"Bearer {jwt}")] if jwt else []
+    return asgi(site.app, "POST", "/api/notify/resync", body.encode(), headers=headers or auth)
+
+
+def quick_auth(site, **over):
+    now = int(__import__("time").time())
+    claims = {"sub": 194, "iss": site.QUICK_AUTH, "aud": site.MINIAPP_DOMAIN, "iat": now, "exp": now + 3600}
+    claims.update(over)
+    return make_jwt({k: v for k, v in claims.items() if v is not None})
+
+
+def test_resync_stores_a_token_the_webhook_missed(site, monkeypatch):
+    from phunk import notify
+    site._start()
+    store = notify.MemoryStore()
+    monkeypatch.setattr(site, "_store", store)
+    welcomed = []
+    monkeypatch.setattr(site.notify, "welcome", lambda *a, **k: welcomed.append(a))
+
+    status, headers, body = resync(site, quick_auth(site))
+    assert (status, body) == (200, {"ok": True, "stored": True}) and headers["cache-control"] == "no-store"
+    assert store.subs == {194: {"url": "https://api.farcaster.xyz/v1/frame-notifications", "token": "tok-194"}}
+    # The same token again is left alone; no welcome note either way.
+    assert resync(site, quick_auth(site))[2] == {"ok": True, "stored": False}
+    assert welcomed == []
+    # The fid comes from the JWT, never the body.
+    resync(site, quick_auth(site, sub=3), {"url": "https://api.farcaster.xyz/n", "token": "x", "fid": 194})
+    assert store.subs[194]["token"] == "tok-194" and store.subs[3]["token"] == "x"
+
+
+def test_resync_refuses_without_a_valid_quick_auth_token(site, monkeypatch):
+    from phunk import notify
+    site._start()
+    store = notify.MemoryStore()
+    monkeypatch.setattr(site, "_store", store)
+    good = quick_auth(site)
+    for jwt in (None, "", good[:-8] + "AAAAAAAA", quick_auth(site, exp=int(__import__("time").time()) - 1),
+                quick_auth(site, aud="evil.example"), quick_auth(site, iss="https://auth.example")):
+        status, _, body = resync(site, jwt)
+        assert status == 401, (jwt, body)
+    assert resync(site, good, headers=[("authorization", f"Basic {good}")])[0] == 401
+    assert resync(site, good, {"url": "http://api.farcaster.xyz/n", "token": "t"})[0] == 400
+    assert asgi(site.app, "GET", "/api/notify/resync")[0] == 405
+    assert store.subs == {}
+
+
+def test_resync_says_so_when_notifications_are_not_set_up(site):
+    status, _, body = resync(site, quick_auth(site))
+    assert status == 503 and "not set up" in body["error"]
 
 
 def test_the_digest_cron_is_only_for_vercel(site, monkeypatch):

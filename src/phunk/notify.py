@@ -13,6 +13,11 @@ active keys on the node, then keeps or drops the account's token in a
 drops the tokens the client says are no longer valid. `digest` turns a
 people feed into one short note, sent weekly by `send_digests`.
 
+`resync` is the way back for a token the webhook missed: the page sends the
+`notificationDetails` from the mini app context with a Quick Auth token
+(`QuickAuth.verify`, RS256 checked in pure Python), and the token is kept
+for the fid the JWT names.
+
 Checking the signature uses `pynacl` when it is installed (the `[write]`
 extra), and a small pure-Python Ed25519 check (RFC 8032) otherwise, so the
 webhook works with `aiohttp` alone. Verifying needs no secret.
@@ -23,11 +28,14 @@ import asyncio
 import base64
 import datetime as dt
 import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -175,6 +183,7 @@ async def is_active_key(hub, fid: int, key: str) -> bool:
 class Store:
     """Each account's notification URL and token, and when it last got a digest."""
 
+    async def get(self, fid: int) -> dict | None: ...  # {"url", "token"} or None
     async def put(self, fid: int, url: str, token: str) -> None: ...
     async def drop(self, fid: int) -> None: ...
     async def all(self) -> dict[int, dict]: ...      # {fid: {"url", "token"}}
@@ -188,6 +197,10 @@ class MemoryStore(Store):
     def __init__(self):
         self.subs: dict[int, dict] = {}
         self.sent: dict[int, float] = {}
+
+    async def get(self, fid):
+        s = self.subs.get(fid)
+        return dict(s) if s else None
 
     async def put(self, fid, url, token):
         self.subs[fid] = {"url": url, "token": token}
@@ -229,6 +242,10 @@ class RedisStore(Store):
         flat = flat or []
         return {int(flat[i]): flat[i + 1] for i in range(0, len(flat) - 1, 2)}
 
+    async def get(self, fid):
+        raw = await self._cmd("HGET", self.SUBS, fid)
+        return json.loads(raw) if raw else None
+
     async def put(self, fid, url, token):
         await self._cmd("HSET", self.SUBS, fid, json.dumps({"url": url, "token": token}))
 
@@ -269,6 +286,175 @@ async def handle_event(hub, store: Store, body: dict, *, verify: bool = True) ->
     else:
         raise BadEvent(f"unknown event {event.event!r}")
     return event
+
+
+# ------------------------------------------------------------------ resync
+# Until the webhook worked, Farcaster clients turned notifications on without
+# us ever hearing the token, and they don't send it again. The page can see
+# it (`context.client.notificationDetails`), but the context is untrusted,
+# so the page also sends a Quick Auth token: a JWT signed by
+# auth.farcaster.xyz whose `sub` is the viewer's fid. The checks follow
+# `@farcaster/quick-auth` `verifyJwt` (jose `jwtVerify` with `issuer` the
+# auth server and `audience` the app's domain).
+
+QUICK_AUTH = "https://auth.farcaster.xyz"
+URL_MAX, TOKEN_MAX = 512, 256
+# DigestInfo for SHA-256 (RFC 8017 section 9.2, note 1).
+_SHA256_INFO = bytes.fromhex("3031300d060960864801650304020105000420")
+
+
+class BadAuth(ValueError):
+    """The Quick Auth token is missing, malformed, unsigned, expired or for another app."""
+
+
+def rs256_verify(n: int, e: int, signed: bytes, signature: bytes) -> bool:
+    """Is `signature` an RSASSA-PKCS1-v1_5 SHA-256 signature over `signed` by the key (n, e)?
+
+    Only a public-key check, so plain integer maths is fine."""
+    k = (n.bit_length() + 7) // 8
+    if len(signature) != k:
+        return False
+    s = int.from_bytes(signature, "big")
+    if s >= n:
+        return False
+    t = _SHA256_INFO + hashlib.sha256(signed).digest()
+    if k < len(t) + 11:
+        return False
+    expected = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+    return hmac.compare_digest(pow(s, e, n).to_bytes(k, "big"), expected)
+
+
+def _b64int(s: str) -> int:
+    return int.from_bytes(_b64(s), "big")
+
+
+class QuickAuth:
+    """Checks Quick Auth JWTs against the auth server's JWKS, kept for `ttl` seconds."""
+
+    MIN_BITS = 2048   # jose refuses smaller RSA keys for RS256
+
+    def __init__(self, session: aiohttp.ClientSession, origin: str = QUICK_AUTH, *, ttl: float = 600):
+        self.session, self.origin, self.ttl = session, origin.rstrip("/"), ttl
+        self._keys: dict[str, tuple[int, int]] = {}
+        self._fetched = -1e18
+
+    async def keys(self, *, fresh: bool = False) -> dict[str, tuple[int, int]]:
+        """{kid: (n, e)} for the RSA keys in `<origin>/.well-known/jwks.json`."""
+        if not fresh and time.monotonic() - self._fetched < self.ttl:
+            return self._keys
+        url = f"{self.origin}/.well-known/jwks.json"
+        try:
+            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200:
+                    raise BadAuth(f"could not read the auth server's keys (HTTP {r.status})")
+                data = await r.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            raise BadAuth(f"could not read the auth server's keys: {e}") from None
+        keys = {}
+        for k in (data or {}).get("keys") or []:
+            if not isinstance(k, dict) or k.get("kty") != "RSA" or k.get("use", "sig") != "sig":
+                continue
+            if k.get("alg", "RS256") != "RS256":
+                continue
+            try:
+                keys[str(k.get("kid") or "")] = (_b64int(k["n"]), _b64int(k["e"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        self._keys, self._fetched = keys, time.monotonic()
+        return keys
+
+    async def verify(self, jwt: str, *, domain: str, now: float | None = None) -> dict:
+        """The JWT's claims, once its signature, issuer, audience and times check out. Raises BadAuth."""
+        try:
+            h64, p64, s64 = jwt.split(".")
+            header, claims, sig = json.loads(_b64(h64)), json.loads(_b64(p64)), _b64(s64)
+        except (AttributeError, ValueError):
+            raise BadAuth("not a JWT") from None
+        if not isinstance(header, dict) or not isinstance(claims, dict):
+            raise BadAuth("not a JWT")
+        if header.get("alg") != "RS256":
+            raise BadAuth("not signed with RS256")
+        if "crit" in header:
+            raise BadAuth("unsupported JWT header")
+        kid = header.get("kid")
+        keys = await self.keys()
+        if kid is not None and str(kid) not in keys:
+            keys = await self.keys(fresh=time.monotonic() - self._fetched > 60)  # keys may have rotated
+        if kid is not None:
+            candidates = [keys[str(kid)]] if str(kid) in keys else []
+        else:
+            candidates = list(keys.values())
+            if len(candidates) != 1:   # like jose: without a kid, only one key may match
+                candidates = []
+        if not candidates:
+            raise BadAuth("signed with a key the auth server doesn't list")
+        n, e = candidates[0]
+        if n.bit_length() < self.MIN_BITS or not rs256_verify(n, e, f"{h64}.{p64}".encode(), sig):
+            raise BadAuth("bad signature")
+        now = int(time.time() if now is None else now)
+        if claims.get("iss") != self.origin:
+            raise BadAuth("not issued by the auth server")
+        aud = claims.get("aud")
+        if not (aud == domain or (isinstance(aud, list) and domain in aud)):
+            raise BadAuth("for another domain")
+        exp = claims.get("exp")
+        if not isinstance(exp, (int, float)) or isinstance(exp, bool) or exp <= now:
+            raise BadAuth("expired")
+        nbf = claims.get("nbf")
+        if nbf is not None and (not isinstance(nbf, (int, float)) or nbf > now):
+            raise BadAuth("not valid yet")
+        iat = claims.get("iat")
+        if iat is not None and not isinstance(iat, (int, float)):
+            raise BadAuth("bad iat")
+        return claims
+
+    async def fid(self, jwt: str, *, domain: str, now: float | None = None) -> int:
+        """The fid a valid Quick Auth token is for (its `sub`). Raises BadAuth."""
+        sub = (await self.verify(jwt, domain=domain, now=now)).get("sub")
+        try:
+            fid = int(sub)
+        except (TypeError, ValueError):
+            raise BadAuth("no fid in the token") from None
+        if isinstance(sub, bool) or fid <= 0 or str(fid) != str(sub).strip():
+            raise BadAuth("no fid in the token")
+        return fid
+
+
+def check_details(url, token) -> tuple[str, str]:
+    """`notificationDetails` from the page -> (url, token). Raises BadEvent.
+
+    The page is untrusted, so the url must be https on a public host name."""
+    if not (isinstance(url, str) and isinstance(token, str) and url and token):
+        raise BadEvent("send the url and token from notificationDetails")
+    if len(url) > URL_MAX or len(token) > TOKEN_MAX:
+        raise BadEvent("url or token too long")
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        raise BadEvent("bad url") from None
+    if parts.scheme != "https" or not host or parts.username or parts.password or "." not in host:
+        raise BadEvent("the url must be https")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise BadEvent("the url must name a host, not an address")
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        raise BadEvent("the url must be a public host")
+    return url, token
+
+
+async def resync(store: Store, fid: int, url, token) -> bool:
+    """Keep the token for `fid` (already checked with Quick Auth) if we don't have it.
+
+    Returns whether the store changed. Raises BadEvent for bad details."""
+    url, token = check_details(url, token)
+    if await store.get(fid) == {"url": url, "token": token}:
+        return False
+    await store.put(fid, url, token)
+    return True
 
 
 # ------------------------------------------------------------------ sending

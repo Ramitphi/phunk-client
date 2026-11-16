@@ -4,6 +4,11 @@ Both fakes are real aiohttp servers on localhost, so the code under test
 makes real HTTP requests and nothing is monkeypatched.
 """
 import asyncio
+import base64
+import functools
+import hashlib
+import json
+import random
 
 import aiohttp
 import pytest
@@ -102,6 +107,8 @@ def fake_redis():
         if name == "HSET":
             hashes.setdefault(args[0], {})[args[1]] = args[2]
             return web.json_response({"result": 1})
+        if name == "HGET":
+            return web.json_response({"result": hashes.get(args[0], {}).get(args[1])})
         if name == "HDEL":
             hashes.get(args[0], {}).pop(args[1], None)
             return web.json_response({"result": 1})
@@ -127,3 +134,84 @@ class _Rebased:
 
     def __getattr__(self, name):
         return getattr(self._session, name)
+
+
+# ------------------------------------------------------------------ Quick Auth
+
+def _probable_prime(n: int) -> bool:
+    if n < 2:
+        return False
+    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if n % p == 0:
+            return n == p
+    d, r = n - 1, 0
+    while d % 2 == 0:
+        d, r = d // 2, r + 1
+    for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):   # deterministic far past 2**64; fine for a test key
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = pow(x, 2, n)
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _prime(rng: random.Random, bits: int) -> int:
+    while True:
+        n = rng.getrandbits(bits) | (3 << (bits - 2)) | 1
+        if _probable_prime(n):
+            return n
+
+
+@functools.lru_cache(maxsize=None)
+def rsa_test_key(seed: int = 1) -> tuple[int, int, int]:
+    """A fixed 2048-bit RSA key (n, e, d) for tests only, made in pure Python."""
+    rng, e = random.Random(seed), 65537
+    while True:
+        p, q = _prime(rng, 1024), _prime(rng, 1024)
+        phi = (p - 1) * (q - 1)
+        if p != q and phi % e and (p * q).bit_length() == 2048:
+            return p * q, e, pow(e, -1, phi)
+
+
+def _b64u(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _int_b64(n: int) -> str:
+    return _b64u(n.to_bytes((n.bit_length() + 7) // 8, "big"))
+
+
+def jwks_for(seed: int = 1, kid: str = "test-key") -> dict:
+    n, e, _ = rsa_test_key(seed)
+    return {"keys": [{"kty": "RSA", "n": _int_b64(n), "e": _int_b64(e), "kid": kid}]}
+
+
+def make_jwt(claims: dict, *, seed: int = 1, kid: str | None = "test-key", alg: str = "RS256") -> str:
+    """A Quick Auth-shaped JWT signed RS256 with the test key."""
+    n, _, d = rsa_test_key(seed)
+    header = {"alg": alg, "typ": "JWT", **({"kid": kid} if kid is not None else {})}
+    signed = f"{_b64u(json.dumps(header).encode())}.{_b64u(json.dumps(claims).encode())}"
+    k = (n.bit_length() + 7) // 8
+    t = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(signed.encode()).digest()
+    em = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+    return signed + "." + _b64u(pow(int.from_bytes(em, "big"), d, n).to_bytes(k, "big"))
+
+
+
+
+@pytest.fixture
+def fake_auth():
+    """A stand-in auth.farcaster.xyz serving the test JWKS: (session, origin, how many times it was read)."""
+    reads = [0]
+
+    async def jwks(request):
+        reads[0] += 1
+        return web.json_response(jwks_for())
+
+    yield from _with_server([("GET", "/.well-known/jwks.json", jwks)],
+                            lambda session, base: (session, base, reads))
