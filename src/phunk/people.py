@@ -4,13 +4,14 @@ phunk's main screen is a feed of people, not posts. Each card is one person,
 one plain reason, and their latest casts. There are three kinds:
 
 * **reconnect**: people you talked to (replied to, mentioned, liked or
-  recast) who now post from a different app, went quiet, or whom you never
-  followed. Leaving an app shouldn't mean losing them.
+  recast) but don't follow. Leaving an app shouldn't mean losing them.
 * **circle**: friends of friends with many mutual follows. The fastest way
   to feel at home on a new client.
 * **bridge**: people with only a few mutual follows who post from a
   different app or in channels you don't use. They keep the network from
   splitting into islands.
+
+Nobody you already follow gets a card.
 
 Everything comes from the node: your casts and reactions, follow lists,
 and the key that signed each cast (which says which app posted it).
@@ -123,39 +124,35 @@ def build(
     """Rank people into cards. No network.
 
     Reconnect cards come first, then circle and bridge cards alternate, so
-    the feed mixes "settle in" with "reach out"."""
+    the feed mixes "settle in" with "reach out". People you already
+    follow never get a card."""
     now = from_datetime(dt.datetime.now(dt.timezone.utc)) if now is None else now
-    skip = {me} | set(dismissed)
+    skip = {me} | set(dismissed) | set(following)
 
     reconnect = []
     for fid, n in talked.most_common():
         if fid in skip or n < MIN_TALKS:
             continue
         p = profiles.get(fid)
-        follows = fid in following
         quiet = None
         if p and p.last_ts is not None:
             days = (now - p.last_ts) // 86400
             quiet = days if days >= QUIET_DAYS else None
         moved = bool(p and p.moved)
-        if follows and not moved and quiet is None:
-            continue  # nothing to reconnect
         why = [f"You talked {n} times in the last {TALK_DAYS} days."]
         if moved:
             why.append(f"Now posts from {_app(p.app_now, 'their')} (was {_app(p.app_before, 'their')}).")
         if quiet is not None:
             why.append(f"Quiet for {quiet} days.")
-        if not follows:
-            why.append("You don't follow them yet.")
-        reconnect.append(Card(fid, "reconnect", why, n + 5 * moved + 3 * (not follows),
-                              talked=n, following=follows))
+        why.append("You don't follow them yet.")
+        reconnect.append(Card(fid, "reconnect", why, n + 5 * moved, talked=n))
     reconnect.sort(key=lambda c: (-c.score, c.fid))
     reconnect = reconnect[:max_reconnect]
     taken = {c.fid for c in reconnect}
 
     circle, bridge = [], []
     for s in suggestions:
-        if s.fid in skip or s.fid in taken or s.fid in following:
+        if s.fid in skip or s.fid in taken:
             continue
         p = profiles.get(s.fid)
         fb = list(s.followed_by)
@@ -289,7 +286,8 @@ async def people_feed(hub: Hub, fid: int, *, dismissed: set[int] = frozenset(), 
     )
     following = {f.target_fid for f in follows}
     talked = talked_to(fid, my_casts, likes + recasts)
-    talked_fids = [f for f, n in talked.most_common() if n >= MIN_TALKS and f not in dismissed][:check_talked]
+    talked_fids = [f for f, n in talked.most_common()
+                   if n >= MIN_TALKS and f not in dismissed and f not in following][:check_talked]
     # Two pools: many mutuals (circle) and a few (bridge candidates, which
     # need a profile to see whether they post from another app or channel).
     fresh = [s for s in suggestions if s.fid not in following]
@@ -319,7 +317,7 @@ async def people_feed(hub: Hub, fid: int, *, dismissed: set[int] = frozenset(), 
         "following": len(following),
         "talked_to": len(talked_any),
         "moved": sum(1 for p in checked_talked if p.moved),
-        "not_following": sum(1 for f in talked_fids if f not in following),
+        "not_following": len(talked_fids),
         "my_app": my_app,
         "days": TALK_DAYS,
     }

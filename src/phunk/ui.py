@@ -389,8 +389,8 @@ class UI:
             _trim(self._people, MAX_WINDOWS)
         out = await hit[1]
         voted = await self.voters(c["fid"] for c in out["cards"])  # fresh on every load
-        cards = [dict(c, following=c["following"] or c["fid"] in self.followed_here, ns_vote=c["fid"] in voted)
-                 for c in out["cards"]]
+        cards = [dict(c, ns_vote=c["fid"] in voted)  # followed since the feed was read: gone too
+                 for c in out["cards"] if c["fid"] not in self.followed_here]
         return {"summary": out["summary"], "cards": cards}
 
     async def who(self, value: str | None) -> int:

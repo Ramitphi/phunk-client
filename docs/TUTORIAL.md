@@ -1086,12 +1086,14 @@ plain reason, their latest casts, and **Follow** and **Not now**. There
 are three kinds:
 
 * **Reconnect**: people you replied to, mentioned, liked or recast in the
-  last 90 days who now post from a different app, went quiet, or whom you
-  never followed.
+  last 90 days but don't follow. The card says if they now post from a
+  different app or went quiet.
 * **Your circle**: friends of friends with many mutual follows (4 or more).
 * **Bridge**: only 2 or 3 mutual follows, but posting from a different app
   or in a channel you don't use. These keep you connected beyond your own
   island.
+
+People you already follow never get a card.
 
 A line on top sums up your network: how many people you talk to, and how
 many of them moved apps. The search box looks up anyone's people feed, so

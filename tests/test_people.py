@@ -37,21 +37,23 @@ def test_talked_to_counts_replies_mentions_and_reactions_but_not_me():
     assert t == {1: 2, 2: 1}
 
 
-def test_reconnect_only_when_there_is_something_to_do():
-    talked = collections.Counter({1: 5, 2: 4, 3: 3, 4: 1})
+def test_reconnect_skips_everyone_you_already_follow():
+    talked = collections.Counter({1: 5, 2: 4, 3: 3, 4: 1, 5: 6, 6: 3})
     profiles = {
-        1: prof(1),  # followed, same app, active: nothing to do
-        2: prof(2, now="fireflyapp", before="warpcast"),  # moved
-        3: prof(3, last=NOW - 20 * DAY),  # quiet
+        1: prof(1),  # followed, same app, active
+        2: prof(2, now="fireflyapp", before="warpcast"),  # followed, moved
+        3: prof(3, last=NOW - 20 * DAY),  # followed, quiet
         4: prof(4, now="fireflyapp", before="warpcast"),  # moved, but talked only once
+        5: prof(5, now="fireflyapp", before="warpcast"),  # not followed, moved
+        6: prof(6, last=NOW - 20 * DAY),  # not followed, quiet
     }
     cards = go(following={1, 2, 3}, talked=talked, profiles=profiles)
     by = {c.fid: c for c in cards}
-    assert set(by) == {2, 3}
-    assert all(c.kind == "reconnect" for c in cards)
-    assert "Now posts from fireflyapp (was warpcast)." in by[2].why
-    assert "Quiet for 20 days." in by[3].why
-    assert by[2].following and by[2].score > by[3].score  # moved ranks above quiet
+    assert set(by) == {5, 6}
+    assert all(c.kind == "reconnect" and not c.following for c in cards)
+    assert "Now posts from fireflyapp (was warpcast)." in by[5].why
+    assert "Quiet for 20 days." in by[6].why
+    assert by[5].score > by[6].score  # moved ranks above quiet
 
 
 def test_reconnect_includes_people_you_talk_to_but_dont_follow():

@@ -499,7 +499,7 @@ def test_people_endpoint_cards_lookup_and_follow(key):
     assert 9 not in cards and not ({1, 2, 3} & set(cards))  # never me or people I follow
     assert all({"username", "latest", "app_now"} <= set(c) for c in mine["cards"])
     assert bobs["fid"] == 2  # anyone can be looked up
-    assert {c["fid"]: c for c in after["cards"]}[50]["following"] is True
+    assert 50 not in {c["fid"] for c in after["cards"]}  # followed: off the feed
 
 
 def test_people_cards_stamp_who_voted_for_network_school():
