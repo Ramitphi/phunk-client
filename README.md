@@ -200,8 +200,10 @@ phunk ui                           # local web client: people to connect with, t
 screen is a feed of **people**, not posts: who to connect with, one plain
 reason each, their latest casts, and Follow / Not now.
 
-* **Reconnect**: people you talked to who moved to another app, went quiet,
-  or whom you never followed.
+* **Reconnect**: people you talked to but don't follow, and whether they
+  moved to another app or went quiet.
+
+People you already follow never show up.
 * **Your circle**: friends of friends with many mutual follows.
 * **Bridge**: a few mutual follows, but posting from another app or in
   channels you don't use.

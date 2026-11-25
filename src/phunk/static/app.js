@@ -29,6 +29,9 @@ const state = {
   cards: [],
   summary: null,
   dismissed: new Set(store.get("dismissed", [])),
+  // Followed from this page: off your people feed even while a cached copy
+  // still lists them. Only the newest few hundred are kept.
+  followed: new Set(store.get("followed", [])),
   feedSeq: 0,
   peopleSeq: 0,
   pathSeq: 0,
@@ -1110,6 +1113,10 @@ function personCard(p, i = 0) {
     toast(`Following ${handle(p)}.`);
     const ok = await sent(send);
     if (!ok) showFollowing(false);
+    else if (viewingSelf()) {
+      state.followed.add(p.fid);
+      store.set("followed", [...state.followed].slice(-500));
+    }
     return ok;
   };
   follow.addEventListener("click", async () => {
@@ -1226,7 +1233,7 @@ function shareUrl() {
 function shareText() {
   if (!viewingSelf()) return `Peeked at ${whoLabel()}'s people on Farcaster 👀 Who do you talk to but don't follow? Find yours:`;
   const s = state.summary || {};
-  const reconnect = state.cards.filter((c) => c.kind === "reconnect" && !state.dismissed.has(c.fid)).length;
+  const reconnect = peopleLeft().filter((c) => c.kind === "reconnect").length;
   const bits = [];
   if (s.talked_to) bits.push(`talked with ${s.talked_to} people in ${s.days} days`);
   if (reconnect) bits.push(`${reconnect} to reconnect with`);
@@ -1248,9 +1255,15 @@ async function sharePeople() {
   window.open(`${FARCASTER}/~/compose?${q}`, "_blank", "noopener,noreferrer");
 }
 
+// Cards still to show: not dismissed, and not someone you followed here.
+function peopleLeft() {
+  const self = viewingSelf();
+  return state.cards.filter((c) => !state.dismissed.has(c.fid) && !(self && state.followed.has(c.fid)));
+}
+
 function renderPeople() {
   const box = $("#people");
-  const shown = state.cards.filter((c) => !state.dismissed.has(c.fid)).slice(0, 15);
+  const shown = peopleLeft().slice(0, 15);
   const counts = { reconnect: 0, circle: 0, bridge: 0 };
   for (const c of shown) counts[c.kind] = (counts[c.kind] || 0) + 1;
   $("#people-status").textContent = shown.length
